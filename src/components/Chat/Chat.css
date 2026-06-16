@@ -555,4 +555,72 @@
 /* ════════ MOBILE ════════ */
 @media (max-width: 768px) {
   .chat-back-btn { display: flex; }
+
+  /* ── Glassmorphism chat header (OpenBridge brand tint) ── */
+  .chat-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: env(safe-area-inset-top, 0) 6px 0 4px;
+    height: calc(var(--header) + env(safe-area-inset-top, 0));
+    gap: 2px;
+    /* Frosted glass: brand purple/blurple tint over a blurred backdrop */
+    background:
+      linear-gradient(135deg, rgba(124, 58, 237, 0.30), rgba(88, 101, 242, 0.22)),
+      rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    border-bottom: 1px solid var(--glass-edge);
+    box-shadow:
+      0 6px 26px rgba(0, 0, 0, 0.30),
+      inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  }
+
+  /* White icons across the bar */
+  .chat-header .icon-btn { color: #fff; }
+  .chat-header .icon-btn:hover  { background: rgba(255, 255, 255, 0.16); color: #fff; transform: none; }
+  .chat-header .icon-btn:active { background: rgba(255, 255, 255, 0.24); }
+
+  .chat-back-btn { margin-left: 0; width: 40px; height: 40px; }
+
+  /* Peer info — fills the bar, truncates long names like Telegram */
+  .chat-header-info.as-button {
+    flex: 1;
+    min-width: 0;
+    gap: 11px;
+    padding: 6px 4px;
+  }
+  .chat-header-info.as-button:hover  { background: rgba(255, 255, 255, 0.10); }
+  .chat-header-info.as-button:active { background: rgba(255, 255, 255, 0.16); transform: none; }
+
+  /* Bigger avatar in the header, with a ring so the status dot reads on color */
+  .chat-header .user-avatar.sm { width: 40px; height: 40px; }
+  .chat-header .user-avatar.sm .status {
+    border: 2px solid rgba(255, 255, 255, 0.55);
+    width: 11px; height: 11px;
+  }
+
+  .chat-header .chat-peer-name {
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    max-width: 52vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Status line: plain light text (no dot), Telegram-style */
+  .chat-header .chat-peer-status {
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 12.5px;
+  }
+  .chat-header .chat-peer-status::before { display: none; }
+
+  .chat-header-actions { gap: 0; }
+
+  /* In-header search, restyled for the colored bar */
+  .chat-header .search-bar-icon { color: rgba(255, 255, 255, 0.85); }
+  .chat-header .search-bar input { color: #fff; }
+  .chat-header .search-bar input::placeholder { color: rgba(255, 255, 255, 0.7); }
 }
