@@ -13,7 +13,7 @@ REM so the build is guaranteed to use the live Render API.
 set "VITE_API_URL=https://openbridge-api.onrender.com/api"
 
 echo.
-echo === OpenBridge -> Android ===
+echo === Building OpenBridge for Android ===
 echo API: %VITE_API_URL%
 echo.
 
@@ -28,9 +28,12 @@ if errorlevel 1 goto :error
 
 echo.
 echo [3/5] Ensuring Android platform exists...
-if exist "android" (
+if exist "android\app\capacitor.build.gradle" (
   echo     android/ already present - skipping "cap add".
 ) else (
+  REM Clean up any partial folder or stray file left from a failed run
+  if exist "android\" rmdir /s /q "android"
+  if exist "android"  del /f /q "android"
   call npx cap add android
   if errorlevel 1 goto :error
 )
