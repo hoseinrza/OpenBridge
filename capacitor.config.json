@@ -1,0 +1,8 @@
+{
+  "appId": "com.openbridge.app",
+  "appName": "OpenBridge",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  }
+}
