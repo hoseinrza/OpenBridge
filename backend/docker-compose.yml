@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chatapp-postgres
+    environment:
+      POSTGRES_USER: chatapp
+      POSTGRES_PASSWORD: chatapp123
+      POSTGRES_DB: chatapp
+    ports:
+      - "5432:5432"
+    volumes:
+      - chatapp_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: chatapp-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  chatapp_pgdata:

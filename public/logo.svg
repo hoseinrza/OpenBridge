@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" role="img" aria-label="OpenBridge">
+  <defs>
+    <linearGradient id="ob-bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9b5bff"/>
+      <stop offset="0.55" stop-color="#863bff"/>
+      <stop offset="1" stop-color="#6a26e0"/>
+    </linearGradient>
+    <linearGradient id="ob-shine" x1="40" y1="40" x2="216" y2="216" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="0.4" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square brand tile -->
+  <rect x="0" y="0" width="256" height="256" rx="58" fill="url(#ob-bg)"/>
+  <rect x="0" y="0" width="256" height="256" rx="58" fill="url(#ob-shine)"/>
+
+  <!-- Suspension bridge: connecting two sides -->
+  <g stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Main suspension cables -->
+    <path d="M40 168 C 60 120 76 86 90 74 Q 128 132 166 74 C 180 86 196 120 216 168" stroke-width="11"/>
+    <!-- Hanger cables down to the deck -->
+    <g stroke-width="6" opacity="0.92">
+      <path d="M64 138 V 182"/>
+      <path d="M90 74 V 182"/>
+      <path d="M114 118 V 182"/>
+      <path d="M128 128 V 182"/>
+      <path d="M142 118 V 182"/>
+      <path d="M166 74 V 182"/>
+      <path d="M192 138 V 182"/>
+    </g>
+    <!-- Deck / roadway -->
+    <path d="M36 182 H 220" stroke-width="13"/>
+  </g>
+
+  <!-- Connection nodes at each shore -->
+  <circle cx="40" cy="182" r="13" fill="#ffffff"/>
+  <circle cx="216" cy="182" r="13" fill="#ffffff"/>
+  <circle cx="40" cy="182" r="6" fill="#863bff"/>
+  <circle cx="216" cy="182" r="6" fill="#863bff"/>
+</svg>

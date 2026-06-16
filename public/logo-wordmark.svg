@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="160" viewBox="0 0 520 160" fill="none" role="img" aria-label="OpenBridge">
+  <defs>
+    <linearGradient id="ob-bg" x1="16" y1="16" x2="144" y2="144" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9b5bff"/>
+      <stop offset="0.55" stop-color="#863bff"/>
+      <stop offset="1" stop-color="#6a26e0"/>
+    </linearGradient>
+    <linearGradient id="ob-text" x1="180" y1="40" x2="180" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9b5bff"/>
+      <stop offset="1" stop-color="#6a26e0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Icon mark -->
+  <g transform="translate(16,16) scale(0.5)">
+    <rect x="0" y="0" width="256" height="256" rx="58" fill="url(#ob-bg)"/>
+    <g stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="M40 168 C 60 120 76 86 90 74 Q 128 132 166 74 C 180 86 196 120 216 168" stroke-width="11"/>
+      <g stroke-width="6" opacity="0.92">
+        <path d="M64 138 V 182"/>
+        <path d="M90 74 V 182"/>
+        <path d="M114 118 V 182"/>
+        <path d="M128 128 V 182"/>
+        <path d="M142 118 V 182"/>
+        <path d="M166 74 V 182"/>
+        <path d="M192 138 V 182"/>
+      </g>
+      <path d="M36 182 H 220" stroke-width="13"/>
+    </g>
+    <circle cx="40" cy="182" r="13" fill="#ffffff"/>
+    <circle cx="216" cy="182" r="13" fill="#ffffff"/>
+    <circle cx="40" cy="182" r="6" fill="#863bff"/>
+    <circle cx="216" cy="182" r="6" fill="#863bff"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="170" y="92" font-family="Segoe UI, Inter, system-ui, -apple-system, sans-serif" font-size="52" font-weight="700" fill="url(#ob-text)">Open<tspan fill="#1b1130">Bridge</tspan></text>
+  <text x="172" y="120" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="17" font-weight="500" letter-spacing="2" fill="#8b80a6">REAL-TIME CHAT</text>
+</svg>

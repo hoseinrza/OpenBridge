@@ -1,0 +1,111 @@
+.newchat-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(8,10,15,0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  animation: newchatFadeIn 0.15s ease both;
+}
+
+@keyframes newchatFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.newchat-modal {
+  width: 380px; max-width: calc(100vw - 32px);
+  max-height: min(560px, calc(100vh - 64px));
+  background:
+    linear-gradient(160deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02) 60%),
+    var(--glass);
+  border: 1px solid var(--glass-edge);
+  border-radius: 22px;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  animation: newchatScaleIn 0.25s var(--ease-spring) both;
+}
+
+@keyframes newchatScaleIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+
+.newchat-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 18px;
+  font-size: 15px; font-weight: 700; color: var(--t1);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.newchat-close {
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 1px solid var(--glass-edge); background: var(--glass); color: var(--t3);
+  backdrop-filter: var(--glass-blur-sm);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background 0.18s var(--ease-out), color 0.18s var(--ease-out), transform 0.18s var(--ease-spring);
+}
+.newchat-close:hover  { background: var(--s1); color: var(--t1); transform: rotate(90deg); }
+.newchat-close:active { transform: rotate(90deg) scale(0.9); }
+
+.newchat-search {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 18px;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur-sm);
+  border: 1px solid var(--glass-edge);
+  border-radius: 26px;
+  padding: 10px 16px;
+  flex-shrink: 0;
+  transition: border-color 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out), background 0.2s var(--ease-out);
+}
+.newchat-search:hover { background: var(--glass-2); }
+.newchat-search:focus-within {
+  border-color: rgba(88,101,242,0.5);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  background: var(--glass-2);
+}
+.newchat-search i { color: var(--t3); font-size: 14px; }
+.newchat-search input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: var(--t1); font-size: 14px; font-family: inherit;
+  direction: rtl;
+}
+.newchat-search input::placeholder { color: var(--t3); }
+
+.newchat-results {
+  flex: 1; overflow-y: auto;
+  padding: 4px 10px 14px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+
+.newchat-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; color: var(--t3); font-size: 13px; line-height: 1.8;
+  padding: 36px 24px; text-align: center;
+}
+.newchat-state i { font-size: 22px; opacity: 0.5; }
+.newchat-state.error { color: var(--red); }
+
+.newchat-result {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 10px;
+  border: none; background: transparent;
+  border-radius: var(--r-sm);
+  color: var(--t2); cursor: pointer;
+  transition: background 0.18s var(--ease-out), color 0.18s var(--ease-out), transform 0.15s var(--ease-out);
+  text-align: right; width: 100%;
+}
+.newchat-result:hover  { background: rgba(255,255,255,0.05); color: var(--t1); transform: translateX(-2px); }
+.newchat-result:active { transform: scale(0.98); }
+
+.newchat-result-info {
+  flex: 1; display: flex; flex-direction: column; gap: 2px; overflow: hidden;
+}
+.newchat-result-name { font-size: 13.5px; font-weight: 600; color: var(--t1); }
+.newchat-result-bio {
+  font-size: 11.5px; color: var(--t3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.newchat-result-go { font-size: 12px; color: var(--t3); flex-shrink: 0; }

@@ -1,0 +1,54 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String
+  avatar    String?
+  bio       String?
+  status    String   @default("OFFLINE")
+  createdAt DateTime @default(now())
+
+  sent     Message[] @relation("sender")
+  received Message[] @relation("receiver")
+
+  @@map("users")
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  type      String   @default("TEXT")
+  text      String?
+  fileUrl   String?
+  fileName  String?
+  fileSize  Int?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  senderId   String
+  sender     User      @relation("sender",   fields: [senderId],   references: [id])
+  receiverId String
+  receiver   User      @relation("receiver", fields: [receiverId], references: [id])
+
+  reactions Reaction[]
+
+  @@map("messages")
+}
+
+model Reaction {
+  id        String  @id @default(uuid())
+  emoji     String
+  userId    String
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId, emoji])
+  @@map("reactions")
+}
