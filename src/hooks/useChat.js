@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { fetchMessages, uploadFile } from '../services/api.js';
 
-const SOCKET_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api').replace('/api', '');
+const SOCKET_URL = (import.meta.env.VITE_API_URL ?? 'https://openbridge-api.onrender.com/api').replace('/api', '');
 
 const AUTO_REPLIES = [
   'سلام! 👋', 'چطوری؟', 'باشه، فهمیدم.', 'مطمئنی؟',

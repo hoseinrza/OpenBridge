@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { isMockUser } from './useChat.js';
 
-const SOCKET_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api').replace('/api', '');
+const SOCKET_URL = (import.meta.env.VITE_API_URL ?? 'https://openbridge-api.onrender.com/api').replace('/api', '');
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 // Manages a 1-to-1 WebRTC call (video or audio): signaling over the chat

@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
+const BASE = import.meta.env.VITE_API_URL ?? 'https://openbridge-api.onrender.com/api';
 
 const ORIGIN = BASE.replace(/\/api\/?$/, '');
 
