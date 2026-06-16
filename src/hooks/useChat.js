@@ -3,12 +3,6 @@ import { fetchMessages, uploadFile } from '../services/api.js';
 
 const SOCKET_URL = (import.meta.env.VITE_API_URL ?? 'https://openbridge-api.onrender.com/api').replace('/api', '');
 
-const AUTO_REPLIES = [
-  'سلام! 👋', 'چطوری؟', 'باشه، فهمیدم.', 'مطمئنی؟',
-  'آره، موافقم. 👍', 'اوکی 👌', 'جدی میگی؟! 😮',
-  'عالیه! 🔥', 'واو، عکس قشنگیه! 😍', 'فایلت رو دیدم، ممنون.',
-];
-
 function nowFa() {
   return new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
 }
@@ -40,29 +34,9 @@ export function useChat(targetUser, currentUser, onIncoming) {
   const [isTyping,  setIsTyping]  = useState(false);
   const socketRef      = useRef(null);
   const typingTimerRef = useRef(null);
-  const replyTimerRef  = useRef(null);
   const mockModeRef    = useRef(false);
   const onIncomingRef  = useRef(onIncoming);
   onIncomingRef.current = onIncoming;
-
-  // ── Mock reply (used when backend is not available) ──
-  function simulateReply(targetUser) {
-    clearTimeout(replyTimerRef.current);
-    clearTimeout(typingTimerRef.current);
-    typingTimerRef.current = setTimeout(() => {
-      setIsTyping(true);
-      replyTimerRef.current = setTimeout(() => {
-        setIsTyping(false);
-        setMessages(prev => [...prev, {
-          id: Date.now(), type: 'text',
-          text: AUTO_REPLIES[Math.floor(Math.random() * AUTO_REPLIES.length)],
-          side: 'other', sender: targetUser?.name ?? 'User',
-          avatar: targetUser?.avatar ?? '/images/user.png',
-          time: nowFa(), reactions: {},
-        }]);
-      }, 1400 + Math.random() * 900);
-    }, 700);
-  }
 
   // ── Socket connection (real backend) ─────────────────
   useEffect(() => {
@@ -160,7 +134,6 @@ export function useChat(targetUser, currentUser, onIncoming) {
       setTimeout(() => {
         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, read: true } : m));
       }, 1800);
-      simulateReply(targetUser);
       return;
     }
 
