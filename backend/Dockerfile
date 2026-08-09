@@ -2,9 +2,10 @@
 FROM node:20-bookworm-slim AS build
 WORKDIR /app
 
-# build tools for native deps (bcrypt) in case no prebuilt binary matches
+# build tools for native deps (bcrypt) + openssl (Prisma's engine needs
+# libssl to run at all — bookworm-slim doesn't ship it by default)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 make g++ \
+ && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
@@ -18,6 +19,10 @@ RUN npm run build
 FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist         ./dist
