@@ -1,37 +1,37 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap');
 
 /* ════════════════════ TOKENS ════════════════════ */
 :root {
-  --s0:  #080a0f;
-  --s1:  #0e1016;
-  --s2:  #13151d;
-  --s3:  #1a1d27;
+  --s0:  #0F1117;
+  --s1:  #11131B;
+  --s2:  #171923;
+  --s3:  #1D2030;
   --s4:  #23273380;
 
-  --accent:        #5865f2;
-  --accent-soft:   #4752c4;
-  --accent-2:      #7c3aed;
-  --accent-dim:    rgba(88,101,242,0.15);
-  --accent-glow:   rgba(88,101,242,0.30);
-  --accent-grad:   linear-gradient(135deg, #5865f2, #7c3aed);
-  --accent-grad-h: linear-gradient(135deg, #6873f5, #8a4ef0);
+  --accent:        #6D4AFF;
+  --accent-soft:   #5B3FE0;
+  --accent-2:      #8B5CF6;
+  --accent-dim:    rgba(109,74,255,0.15);
+  --accent-glow:   rgba(109,74,255,0.32);
+  --accent-grad:   linear-gradient(135deg, #6D4AFF, #8B5CF6);
+  --accent-grad-h: linear-gradient(135deg, #7C5CFF, #9A6EF7);
 
-  --t1:  #eef0f3;
-  --t2:  #b5bac1;
-  --t3:  #6d7180;
+  --t1:  #F5F5F7;
+  --t2:  #9296A5;
+  --t3:  #696E7D;
 
-  --green:      #23a55a;
-  --green-glow: rgba(35,165,90,0.25);
+  --green:      #35D07F;
+  --green-glow: rgba(53,208,127,0.28);
   --yellow:     #f0b232;
-  --red:        #f23f43;
-  --red-glow:   rgba(242,63,67,0.2);
+  --red:        #EF4444;
+  --red-glow:   rgba(239,68,68,0.2);
 
-  --border:     rgba(255,255,255,0.055);
-  --border-hi:  rgba(255,255,255,0.12);
-  --sidebar:    248px;
+  --border:     rgba(255,255,255,0.08);
+  --border-hi:  rgba(255,255,255,0.14);
+  --sidebar:    300px;
   --header:     60px;
   --r:          10px;
-  --r-sm:       6px;
+  --r-sm:       8px;
   --r-lg:       16px;
 
   --shadow-sm: 0 2px 8px   rgba(0,0,0,0.4);
@@ -41,61 +41,31 @@
   --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
   --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* Glass surfaces */
-  --glass:        rgba(255,255,255,0.045);
-  --glass-2:      rgba(255,255,255,0.085);
-  --glass-edge:   rgba(255,255,255,0.16);
-  --glass-blur:   blur(28px) saturate(180%);
-  --glass-blur-sm: blur(14px) saturate(160%);
-  --glass-shadow: 0 8px 40px rgba(0,0,0,0.38);
+  /* Surfaces — kept mostly flat on purpose (premium, not glassy) */
+  --glass:        rgba(255,255,255,0.025);
+  --glass-2:      rgba(255,255,255,0.05);
+  --glass-edge:   rgba(255,255,255,0.08);
+  --glass-blur:   blur(6px) saturate(140%);
+  --glass-blur-sm: blur(3px) saturate(130%);
+  --glass-shadow: 0 20px 50px -12px rgba(0,0,0,0.55);
 }
 
 /* ════════════════════ RESET ════════════════════ */
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
 body {
-  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Vazirmatn', 'Segoe UI', Tahoma, system-ui, sans-serif;
   background: var(--s0);
   color: var(--t1);
   height: 100vh;
   overflow: hidden;
   position: relative;
+  font-variant-numeric: tabular-nums;
   background-image:
-    radial-gradient(ellipse 60% 50% at 10% 0%,  rgba(88,101,242,0.12) 0%, transparent 100%),
-    radial-gradient(ellipse 50% 40% at 90% 100%, rgba(35,165,90,0.07)  0%, transparent 100%),
-    radial-gradient(ellipse 35% 30% at 50% 100%, rgba(124,58,237,0.06) 0%, transparent 100%);
+    radial-gradient(ellipse 55% 45% at 8% 0%,  rgba(109,74,255,0.07) 0%, transparent 100%),
+    radial-gradient(ellipse 45% 35% at 95% 100%, rgba(53,208,127,0.035)  0%, transparent 100%);
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
-}
-
-/* Floating colour orbs — the blurred glow that gives every glass
-   panel something vivid to refract underneath it */
-body::before,
-body::after {
-  content: '';
-  position: fixed;
-  border-radius: 50%;
-  filter: blur(110px);
-  opacity: 0.55;
-  z-index: 0;
-  pointer-events: none;
-  animation: orbDrift 24s ease-in-out infinite alternate;
-}
-body::before {
-  width: 460px; height: 460px;
-  background: var(--accent-grad);
-  top: -160px; left: -120px;
-}
-body::after {
-  width: 420px; height: 420px;
-  background: linear-gradient(135deg, var(--green), #36d1c4);
-  bottom: -160px; right: -100px;
-  animation-delay: -9s;
-}
-
-@keyframes orbDrift {
-  from { transform: translate(0, 0) scale(1); }
-  to   { transform: translate(70px, 50px) scale(1.2); }
 }
 
 #root {
@@ -126,17 +96,12 @@ body::after {
 /* ════════════════════ SIDEBAR ════════════════════ */
 .sidebar {
   width: var(--sidebar);
-  background:
-    linear-gradient(185deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015) 40%, transparent 70%),
-    var(--glass);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  background: var(--s1);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   height: 100vh;
-  border-right: 1px solid var(--glass-edge);
-  box-shadow: var(--glass-shadow);
+  border-right: 1px solid var(--border);
   position: relative;
   z-index: 2;
 }
@@ -230,14 +195,15 @@ body::after {
   transition: transform 0.25s var(--ease-spring);
 }
 
-.user-item:hover  { background: rgba(255,255,255,0.06); color: var(--t1); transform: translateX(2px); backdrop-filter: blur(6px); }
+.user-item:hover  { background: var(--s3); color: var(--t1); }
 .user-item.active {
-  background: linear-gradient(120deg, rgba(88,101,242,0.22), rgba(124,58,237,0.14));
+  background: linear-gradient(180deg, rgba(109,74,255,0.16), rgba(109,74,255,0.07));
+  border: 1px solid rgba(109,74,255,0.35);
   color: var(--t1);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+  box-shadow: 0 0 0 1px rgba(109,74,255,0.06), 0 6px 20px -10px rgba(109,74,255,0.5);
 }
 .user-item.active::before { transform: translateY(-50%) scaleY(1); }
-.user-item.active:hover { transform: none; }
+.user-item.active:hover { transform: none; background: linear-gradient(180deg, rgba(109,74,255,0.16), rgba(109,74,255,0.07)); }
 
 .user-avatar { position:relative; width:34px; height:34px; flex-shrink:0; }
 .user-avatar.sm { width:28px; height:28px; }
@@ -275,14 +241,14 @@ body::after {
 }
 
 .badge {
-  background: linear-gradient(135deg, #f23f43, #d93438);
+  background: var(--accent-grad);
   color: #fff;
   font-size: 10px; font-weight: 700;
   min-width: 18px; height: 18px;
   border-radius: 9px;
   display: flex; align-items: center; justify-content: center;
   padding: 0 5px;
-  box-shadow: 0 2px 8px var(--red-glow);
+  box-shadow: 0 2px 8px var(--accent-glow);
   animation: badgePop 0.3s var(--ease-spring) both;
 }
 

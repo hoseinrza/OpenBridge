@@ -4,11 +4,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background:
-    linear-gradient(165deg, rgba(255,255,255,0.035), transparent 35%),
-    var(--glass);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  background: var(--s0);
   position: relative;
   z-index: 1;
 }
@@ -20,9 +16,9 @@
   justify-content: space-between;
   padding: 0 20px;
   height: var(--header);
-  border-bottom: 1px solid var(--glass-edge);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  background: linear-gradient(180deg, rgba(255,255,255,0.05), transparent);
+  background: rgba(255,255,255,0.012);
 }
 
 .chat-back-btn {
@@ -77,8 +73,8 @@
   flex-direction: column;
   gap: 4px;
   background-image:
-    radial-gradient(circle at 18% 15%, rgba(88,101,242,0.07) 0%, transparent 45%),
-    radial-gradient(circle at 85% 75%, rgba(35,165,90,0.05) 0%, transparent 50%);
+    radial-gradient(circle at 18% 15%, rgba(109,74,255,0.045) 0%, transparent 45%),
+    radial-gradient(circle at 85% 75%, rgba(53,208,127,0.03) 0%, transparent 50%);
 }
 
 /* Welcome */
@@ -102,7 +98,7 @@
 
 @keyframes avatarPulse {
   0%,100% { box-shadow: 0 0 0 4px var(--accent-dim), var(--shadow-md); }
-  50%     { box-shadow: 0 0 0 8px rgba(88,101,242,0.08), var(--shadow-md); }
+  50%     { box-shadow: 0 0 0 8px rgba(109,74,255,0.1), var(--shadow-md); }
 }
 
 @keyframes cardIn {
@@ -233,16 +229,14 @@
 
 /* Other */
 .msg-wrapper.other .bubble {
-  background: var(--glass-2);
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
+  background: var(--s2);
   color: var(--t1);
   border-bottom-left-radius: 5px;
-  border: 1px solid var(--glass-edge);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
 }
 
-.msg-wrapper.other .bubble:hover { border-color: rgba(255,255,255,0.26); }
+.msg-wrapper.other .bubble:hover { border-color: var(--border-hi); }
 
 .msg-wrapper.other .bubble:last-of-type { border-bottom-left-radius: 18px; }
 
@@ -251,7 +245,7 @@
   position: absolute;
   bottom: 0; left: -6px;
   width: 10px; height: 14px;
-  background: var(--glass-2);
+  background: var(--s2);
   clip-path: polygon(100% 0, 100% 100%, 0 100%);
 }
 
@@ -261,10 +255,10 @@
   color: #fff;
   border-bottom-right-radius: 5px;
   border: 1px solid rgba(255,255,255,0.18);
-  box-shadow: 0 3px 14px rgba(88,101,242,0.22), inset 0 1px 0 rgba(255,255,255,0.22);
+  box-shadow: 0 3px 14px rgba(109,74,255,0.25), inset 0 1px 0 rgba(255,255,255,0.16);
 }
 
-.msg-wrapper.mine .bubble:hover { box-shadow: 0 5px 20px rgba(88,101,242,0.32); }
+.msg-wrapper.mine .bubble:hover { box-shadow: 0 5px 20px rgba(109,74,255,0.35); }
 
 .msg-wrapper.mine .bubble:last-of-type { border-bottom-right-radius: 18px; }
 
@@ -345,30 +339,29 @@
 /* ════════ INPUT ════════ */
 .input-area {
   display: flex; align-items: center; gap: 8px;
-  padding: 12px 16px 14px;
-  border-top: 1px solid var(--glass-edge);
+  padding: 14px 20px 18px;
   flex-shrink: 0;
-  background: linear-gradient(0deg, rgba(255,255,255,0.045), transparent);
+  background: var(--s0);
   position: relative;
 }
 
 .input-wrap {
   flex: 1;
   display: flex; align-items: center;
-  background: var(--glass-2);
-  backdrop-filter: var(--glass-blur-sm);
+  background: var(--s2);
   border-radius: 26px;
   padding: 3px 6px 3px 16px;
-  border: 1px solid var(--glass-edge);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 30px -16px rgba(0,0,0,0.65);
   transition: border-color 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out), background 0.2s var(--ease-out);
 }
 
-.input-wrap:hover { background: rgba(255,255,255,0.1); }
+.input-wrap:hover { background: var(--s3); }
 
 .input-wrap:focus-within {
-  border-color: rgba(88,101,242,0.5);
+  border-color: rgba(109,74,255,0.5);
   box-shadow: 0 0 0 3px var(--accent-dim);
-  background: rgba(255,255,255,0.1);
+  background: var(--s3);
 }
 
 .input-wrap input {
@@ -391,7 +384,7 @@
   transition: box-shadow 0.2s var(--ease-out), transform 0.15s var(--ease-spring), filter 0.15s;
 }
 
-.send-btn:hover  { box-shadow: 0 4px 20px rgba(88,101,242,0.5); filter: brightness(1.1); transform: translateY(-1px) scale(1.04); }
+.send-btn:hover  { box-shadow: 0 4px 20px rgba(109,74,255,0.5); filter: brightness(1.1); transform: translateY(-1px) scale(1.04); }
 .send-btn:active { transform: scale(0.88); }
 
 /* ════════ EMOJI PICKER ════════ */
@@ -460,7 +453,7 @@
   display: flex; align-items: center; gap: 8px;
   padding: 6px 20px;
   font-size: 12px; color: var(--t3);
-  background: rgba(88,101,242,0.06);
+  background: rgba(109,74,255,0.06);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -566,7 +559,7 @@
     gap: 2px;
     /* Frosted glass: brand purple/blurple tint over a blurred backdrop */
     background:
-      linear-gradient(135deg, rgba(124, 58, 237, 0.30), rgba(88, 101, 242, 0.22)),
+      linear-gradient(135deg, rgba(139, 92, 246, 0.30), rgba(109, 74, 255, 0.22)),
       rgba(255, 255, 255, 0.05);
     backdrop-filter: blur(22px) saturate(180%);
     -webkit-backdrop-filter: blur(22px) saturate(180%);

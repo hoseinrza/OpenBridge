@@ -3,12 +3,8 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background:
-    linear-gradient(165deg, rgba(255,255,255,0.035), transparent 35%),
-    var(--glass);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  background-image: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(88,101,242,0.07) 0%, transparent 100%);
+  background: var(--s0);
+  background-image: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(109,74,255,0.05) 0%, transparent 100%);
   position: relative;
   z-index: 1;
 }
@@ -18,8 +14,8 @@
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 24px;
   height: var(--header);
-  background: linear-gradient(180deg, rgba(255,255,255,0.05), transparent);
-  border-bottom: 1px solid var(--glass-edge);
+  background: rgba(255,255,255,0.012);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -66,7 +62,7 @@
 
 .video-tile.self-tile {
   border: 2px solid var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-dim), 0 0 30px rgba(88,101,242,0.15);
+  box-shadow: 0 0 0 1px var(--accent-dim), 0 0 30px rgba(109,74,255,0.18);
 }
 
 .video-tile.speaking {
@@ -75,8 +71,8 @@
 }
 
 @keyframes speakPulse {
-  from { box-shadow: 0 0 0 1px rgba(35,165,90,0.3), 0 0 20px rgba(35,165,90,0.1); }
-  to   { box-shadow: 0 0 0 3px rgba(35,165,90,0.4), 0 0 40px rgba(35,165,90,0.25); }
+  from { box-shadow: 0 0 0 1px rgba(53,208,127,0.3), 0 0 20px rgba(53,208,127,0.1); }
+  to   { box-shadow: 0 0 0 3px rgba(53,208,127,0.4), 0 0 40px rgba(53,208,127,0.25); }
 }
 
 .video-tile video { width:100%; height:100%; object-fit:cover; display:block; }
@@ -147,7 +143,7 @@
 .ctrl-btn:hover { background: rgba(255,255,255,0.08); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
 .ctrl-btn:active { transform: scale(0.95); }
 
-.ctrl-btn.off { background: rgba(242,63,67,0.12); border-color: rgba(242,63,67,0.25); color: var(--red); }
+.ctrl-btn.off { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.25); color: var(--red); }
 .ctrl-btn.off span { color: var(--red); }
 
 .ctrl-btn.end-btn {
@@ -157,7 +153,7 @@
 }
 
 .ctrl-btn.end-btn span { color: rgba(255,255,255,0.85); }
-.ctrl-btn.end-btn:hover { background: #d93438; box-shadow: 0 6px 24px rgba(242,63,67,0.4); }
+.ctrl-btn.end-btn:hover { background: #DC2626; box-shadow: 0 6px 24px rgba(239,68,68,0.4); }
 
 /* ════════ MOBILE ════════ */
 @media (max-width: 768px) {

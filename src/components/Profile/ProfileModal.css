@@ -12,16 +12,12 @@
 .profile-modal {
   position: relative;
   width: 340px; max-width: calc(100vw - 32px);
-  background:
-    linear-gradient(160deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02) 60%),
-    var(--glass);
-  border: 1px solid var(--glass-edge);
+  background: var(--s1);
+  border: 1px solid var(--border);
   border-radius: 22px;
   padding: 36px 28px 28px;
   display: flex; flex-direction: column; align-items: center;
   box-shadow: var(--glass-shadow);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   animation: profileScaleIn 0.25s var(--ease-spring) both;
 }
 
@@ -87,7 +83,7 @@
 }
 
 .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.status-dot.online  { background: var(--green, #23a55a); }
+.status-dot.online  { background: var(--green, #35D07F); }
 .status-dot.idle    { background: var(--yellow, #f0b132); }
 .status-dot.offline { background: var(--t3); }
 
@@ -134,9 +130,9 @@
 .profile-input:hover { background: var(--glass-2); }
 
 .profile-input:focus {
-  border-color: rgba(88,101,242,0.55);
+  border-color: rgba(109,74,255,0.55);
   box-shadow: 0 0 0 3px var(--accent-dim);
-  background: var(--glass-2);
+  background: var(--s2);
 }
 
 .profile-textarea {

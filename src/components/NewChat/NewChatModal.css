@@ -12,16 +12,12 @@
 .newchat-modal {
   width: 380px; max-width: calc(100vw - 32px);
   max-height: min(560px, calc(100vh - 64px));
-  background:
-    linear-gradient(160deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02) 60%),
-    var(--glass);
-  border: 1px solid var(--glass-edge);
+  background: var(--s1);
+  border: 1px solid var(--border);
   border-radius: 22px;
   display: flex; flex-direction: column;
   overflow: hidden;
   box-shadow: var(--glass-shadow);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   animation: newchatScaleIn 0.25s var(--ease-spring) both;
 }
 
@@ -62,7 +58,7 @@
 }
 .newchat-search:hover { background: var(--glass-2); }
 .newchat-search:focus-within {
-  border-color: rgba(88,101,242,0.5);
+  border-color: rgba(109,74,255,0.5);
   box-shadow: 0 0 0 3px var(--accent-dim);
   background: var(--glass-2);
 }
