@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { io } from 'socket.io-client';
 import { fetchMessages, uploadFile } from '../services/api.js';
 
 // Empty/relative → same-origin (nginx reverse-proxies /socket.io to the API).
@@ -45,62 +46,59 @@ export function useChat(targetUser, currentUser, onIncoming) {
       return;
     }
 
-    let socket;
-    import('socket.io-client').then(({ io }) => {
-      socket = io(SOCKET_URL, {
-        auth:       { token },
-        transports: ['websocket'],
-        timeout:    4000,
-      });
-      socketRef.current  = socket;
-      mockModeRef.current = false;
+    const socket = io(SOCKET_URL, {
+      auth:       { token },
+      transports: ['websocket'],
+      timeout:    4000,
+    });
+    socketRef.current  = socket;
+    mockModeRef.current = false;
 
-      // Mark the currently-open conversation as read (covers messages that
-      // arrived before this connection, e.g. while the app was closed)
-      if (targetUser) socket.emit('messages:read', { fromId: targetUser.id });
+    // Mark the currently-open conversation as read (covers messages that
+    // arrived before this connection, e.g. while the app was closed)
+    if (targetUser) socket.emit('messages:read', { fromId: targetUser.id });
 
-      socket.on('connect_error', () => { mockModeRef.current = true; });
+    socket.on('connect_error', () => { mockModeRef.current = true; });
 
-      socket.on('message:new', (msg) => {
-        if (
-          (msg.senderId === currentUser.id && msg.receiverId === targetUser?.id) ||
-          (msg.senderId === targetUser?.id && msg.receiverId === currentUser.id)
-        ) {
-          setMessages(prev => [...prev, normalize(msg, currentUser.id)]);
-        }
-        if (msg.senderId === targetUser?.id) {
-          socket.emit('messages:read', { fromId: targetUser.id });
-        }
-        // Let the parent know about every incoming message (even ones outside
-        // the active conversation) so it can refresh the conversation list
-        if (msg.senderId === currentUser.id || msg.receiverId === currentUser.id) {
-          onIncomingRef.current?.(msg);
-        }
-      });
+    socket.on('message:new', (msg) => {
+      if (
+        (msg.senderId === currentUser.id && msg.receiverId === targetUser?.id) ||
+        (msg.senderId === targetUser?.id && msg.receiverId === currentUser.id)
+      ) {
+        setMessages(prev => [...prev, normalize(msg, currentUser.id)]);
+      }
+      if (msg.senderId === targetUser?.id) {
+        socket.emit('messages:read', { fromId: targetUser.id });
+      }
+      // Let the parent know about every incoming message (even ones outside
+      // the active conversation) so it can refresh the conversation list
+      if (msg.senderId === currentUser.id || msg.receiverId === currentUser.id) {
+        onIncomingRef.current?.(msg);
+      }
+    });
 
-      socket.on('message:read', () => {
-        setMessages(prev => prev.map(m => m.side === 'mine' ? { ...m, read: true } : m));
-      });
+    socket.on('message:read', () => {
+      setMessages(prev => prev.map(m => m.side === 'mine' ? { ...m, read: true } : m));
+    });
 
-      socket.on('typing:start', ({ fromId }) => {
-        if (fromId === targetUser?.id) setIsTyping(true);
-      });
+    socket.on('typing:start', ({ fromId }) => {
+      if (fromId === targetUser?.id) setIsTyping(true);
+    });
 
-      socket.on('typing:stop', ({ fromId }) => {
-        if (fromId === targetUser?.id) setIsTyping(false);
-      });
+    socket.on('typing:stop', ({ fromId }) => {
+      if (fromId === targetUser?.id) setIsTyping(false);
+    });
 
-      socket.on('reaction:added', ({ messageId, emoji }) => {
-        setMessages(prev => prev.map(m => {
-          if (m.id !== messageId) return m;
-          const r = { ...m.reactions };
-          r[emoji] = (r[emoji] ?? 0) + 1;
-          return { ...m, reactions: r };
-        }));
-      });
-    }).catch(() => { mockModeRef.current = true; });
+    socket.on('reaction:added', ({ messageId, emoji }) => {
+      setMessages(prev => prev.map(m => {
+        if (m.id !== messageId) return m;
+        const r = { ...m.reactions };
+        r[emoji] = (r[emoji] ?? 0) + 1;
+        return { ...m, reactions: r };
+      }));
+    });
 
-    return () => { socket?.disconnect(); socketRef.current = null; };
+    return () => { socket.disconnect(); socketRef.current = null; };
   }, [currentUser?.id, targetUser?.id]);
 
   // ── Load history (real backend) ──────────────────────
