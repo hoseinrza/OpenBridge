@@ -78,6 +78,9 @@ else
 fi
 
 # ── 5. Build + start ───────────────────────────────────────
+log "Stopping any previous containers for a clean start"
+$SUDO $DC down --remove-orphans 2>/dev/null || true
+
 log "Building and starting containers (this can take a few minutes on 1 vCPU)"
 $SUDO $DC up -d --build
 
