@@ -29,10 +29,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleConnection(socket: Socket) {
     const payload = this.parseUser(socket);
-    if (!payload) { socket.disconnect(); return; }
+    if (!payload) {
+      console.log(`[socket] rejected (bad/missing token) socket=${socket.id}`);
+      socket.disconnect();
+      return;
+    }
 
     socket.data.userId = payload.sub;
     socket.join(payload.sub);
+    console.log(`[socket] connected user=${payload.sub} socket=${socket.id}`);
 
     // Join a room per group conversation so group broadcasts reach this socket.
     const conversationIds = await this.messages.getUserConversationIds(payload.sub);
@@ -44,6 +49,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleDisconnect(socket: Socket) {
     const { userId } = socket.data;
+    console.log(`[socket] disconnected user=${userId ?? '(none)'} socket=${socket.id}`);
     if (!userId) return;
     await this.redis.setUserOffline(userId);
     this.server.emit('user:offline', { userId });
@@ -69,6 +75,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Deliver to both parties (sender is already in their room). Keep
     // `receiverId` on the wire for the existing 1-to-1 frontend, which
     // filters incoming messages by senderId/receiverId.
+    const recipientSockets = await this.server.in(body.toId).fetchSockets();
+    console.log(`[socket] message:send from=${socket.data.userId} to=${body.toId} recipientSocketsOnline=${recipientSockets.length}`);
     this.server.to(socket.data.userId).to(body.toId).emit('message:new', { ...msg, receiverId: body.toId });
 
     // Auto read-receipt if receiver is online
