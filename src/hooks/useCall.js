@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-const SOCKET_URL = (import.meta.env.VITE_API_URL ?? 'https://openbridge-api.onrender.com/api').replace('/api', '');
+// Empty/relative → same-origin (nginx reverse-proxies /socket.io to the API).
+const SOCKET_URL = (import.meta.env.VITE_API_URL ?? '/api').replace('/api', '') || undefined;
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 // Manages a 1-to-1 WebRTC call (video or audio): signaling over the chat

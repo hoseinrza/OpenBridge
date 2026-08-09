@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { fetchMessages, uploadFile } from '../services/api.js';
 
-const SOCKET_URL = (import.meta.env.VITE_API_URL ?? 'https://openbridge-api.onrender.com/api').replace('/api', '');
+// Empty/relative → same-origin (nginx reverse-proxies /socket.io to the API).
+const SOCKET_URL = (import.meta.env.VITE_API_URL ?? '/api').replace('/api', '') || undefined;
 
 function nowFa() {
   return new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
@@ -12,7 +13,7 @@ function normalize(msg, myId) {
     id:        msg.id,
     type:      (msg.type ?? 'TEXT').toLowerCase(),
     text:      msg.text ?? '',
-    src:       msg.fileUrl ? `${SOCKET_URL}${msg.fileUrl}` : undefined,
+    src:       msg.fileUrl ? `${SOCKET_URL ?? ''}${msg.fileUrl}` : undefined,
     name:      msg.fileName,
     size:      msg.fileSize,
     side:      msg.senderId === myId ? 'mine' : 'other',
