@@ -7,48 +7,121 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum UserStatus {
+  ONLINE
+  OFFLINE
+  AWAY
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  AUDIO
+  VIDEO
+}
+
+enum ParticipantRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
 model User {
-  id        String   @id @default(uuid())
-  username  String   @unique
+  id        String     @id @default(uuid())
+  username  String     @unique
   password  String
   avatar    String?
   bio       String?
-  status    String   @default("OFFLINE")
-  createdAt DateTime @default(now())
+  status    UserStatus @default(OFFLINE)
+  createdAt DateTime   @default(now())
 
-  sent     Message[] @relation("sender")
-  received Message[] @relation("receiver")
+  messages       Message[]
+  reactions      Reaction[]
+  participations ConversationParticipant[]
+  reads          MessageRead[]
 
   @@map("users")
 }
 
-model Message {
+// A conversation is either a 1-to-1 direct chat (isGroup = false, always
+// exactly 2 participants) or a group chat (isGroup = true, name/avatar set).
+model Conversation {
   id        String   @id @default(uuid())
-  type      String   @default("TEXT")
+  isGroup   Boolean  @default(false)
+  name      String?
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  id             String          @id @default(uuid())
+  conversationId String
+  conversation   Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           ParticipantRole @default(MEMBER)
+  joinedAt       DateTime        @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id        String      @id @default(uuid())
+  type      MessageType @default(TEXT)
   text      String?
   fileUrl   String?
   fileName  String?
   fileSize  Int?
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now())
+  editedAt  DateTime?
+  deletedAt DateTime?
+  createdAt DateTime    @default(now())
 
-  senderId   String
-  sender     User      @relation("sender",   fields: [senderId],   references: [id])
-  receiverId String
-  receiver   User      @relation("receiver", fields: [receiverId], references: [id])
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
   reactions Reaction[]
+  reads     MessageRead[]
 
+  @@index([conversationId, createdAt])
+  @@index([senderId])
   @@map("messages")
+}
+
+// Per-user read receipts — required once a conversation can have more than
+// two participants (a single `read` boolean on Message can't represent that).
+model MessageRead {
+  id        String   @id @default(uuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt    DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@index([userId])
+  @@map("message_reads")
 }
 
 model Reaction {
   id        String  @id @default(uuid())
   emoji     String
   userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   messageId String
   message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@unique([userId, messageId, emoji])
+  @@index([messageId])
   @@map("reactions")
 }

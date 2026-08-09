@@ -27,8 +27,6 @@ function normalize(msg, myId) {
   };
 }
 
-export const isMockUser = (user) => user?.id?.startsWith('local-');
-
 export function useChat(targetUser, currentUser, onIncoming) {
   const [messages,  setMessages]  = useState([]);
   const [isTyping,  setIsTyping]  = useState(false);
@@ -41,8 +39,7 @@ export function useChat(targetUser, currentUser, onIncoming) {
   // ── Socket connection (real backend) ─────────────────
   useEffect(() => {
     const token = localStorage.getItem('chatapp_token');
-    // No token or mock user → stay in mock mode
-    if (!token || !currentUser || isMockUser(currentUser)) {
+    if (!token || !currentUser) {
       mockModeRef.current = true;
       return;
     }
@@ -109,7 +106,6 @@ export function useChat(targetUser, currentUser, onIncoming) {
   useEffect(() => {
     if (!targetUser || !currentUser) return;
     setMessages([]);
-    if (isMockUser(currentUser)) return; // mock mode, no history
 
     fetchMessages(targetUser.id)
       .then(msgs => setMessages(msgs.map(m => normalize(m, currentUser.id))))

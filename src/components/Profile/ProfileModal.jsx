@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react';
 import { updateProfile, uploadFile, resolveUrl } from '../../services/api.js';
-import { isMockUser } from '../../hooks/useChat.js';
 import './ProfileModal.css';
 
 function joinedAt(dateStr) {
@@ -17,13 +16,10 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
   const [error,   setError]     = useState('');
   const fileInputRef = useRef(null);
 
-  const mock = isMockUser(user) || isMockUser(JSON.parse(localStorage.getItem('chatapp_user') || 'null'));
-
   async function handleAvatarPick(e) {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (mock) { setAvatar(URL.createObjectURL(file)); return; }
 
     setError('');
     try {
@@ -40,9 +36,7 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
     setSaving(true);
     try {
       const patch = { name: name.trim(), bio: bio.trim(), avatar };
-      if (!mock) {
-        await updateProfile({ username: name.trim(), bio: bio.trim(), avatar });
-      }
+      await updateProfile({ username: name.trim(), bio: bio.trim(), avatar });
       onSaved?.(patch);
       setEditing(false);
     } catch (err) {

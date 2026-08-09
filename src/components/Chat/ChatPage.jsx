@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { USERS } from '../../data/users.js';
-import { useChat, isMockUser } from '../../hooks/useChat.js';
+import { useChat } from '../../hooks/useChat.js';
 import { fetchConversations, normalizeUser } from '../../services/api.js';
 import Sidebar from '../Sidebar/Sidebar.jsx';
 import ChatHeader from './ChatHeader.jsx';
@@ -12,10 +11,8 @@ import NewChatModal from '../NewChat/NewChatModal.jsx';
 import './Chat.css';
 
 export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
-  const mock = isMockUser(currentUser);
-
-  const [users, setUsers]                 = useState(mock ? USERS : []);
-  const [activeUser, setActiveUser]       = useState(mock ? USERS[0] : null);
+  const [users, setUsers]                 = useState([]);
+  const [activeUser, setActiveUser]       = useState(null);
   const [searchQuery, setSearchQuery]     = useState('');
   const [profileTarget, setProfileTarget] = useState(null); // { user, isOwn } | null
   const [newChatOpen, setNewChatOpen]     = useState(false);
@@ -24,7 +21,6 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   // here once a message has actually been exchanged with them. Conversations
   // are started on demand by searching for a username (see NewChatModal).
   const loadConversations = useCallback(() => {
-    if (mock) return;
     fetchConversations()
       .then(list => {
         const fromServer = list.map(c => ({ ...normalizeUser(c.user), unread: c.unread }));
@@ -36,7 +32,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
         });
       })
       .catch(() => {});
-  }, [mock]);
+  }, []);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
@@ -121,7 +117,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
         ) : (
           <div className="empty-chat">
             <i className="fas fa-comments" />
-            {mock || users.length > 0 ? (
+            {users.length > 0 ? (
               <p>یک گفتگو را از فهرست انتخاب کن یا با دکمهٔ «گفتگوی جدید» یک گفتگوی تازه بساز.</p>
             ) : (
               <>

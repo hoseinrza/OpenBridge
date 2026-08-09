@@ -14,23 +14,12 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(loadUser);
 
   async function handleLogin(username, password, mode) {
-    try {
-      const user = mode === 'register'
-        ? await register(username, password)
-        : await login(username, password);
-      const normalized = { id: user.id, name: user.username, avatar: user.avatar ?? '/images/user.png', bio: user.bio ?? '', status: 'online' };
-      localStorage.setItem('chatapp_user', JSON.stringify(normalized));
-      setCurrentUser(normalized);
-    } catch (err) {
-      // Backend not running → fallback to mock mode
-      if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
-        const mock = { id: `local-${Date.now()}`, name: username, avatar: '/images/user.png', status: 'online' };
-        localStorage.setItem('chatapp_user', JSON.stringify(mock));
-        setCurrentUser(mock);
-      } else {
-        throw err;
-      }
-    }
+    const user = mode === 'register'
+      ? await register(username, password)
+      : await login(username, password);
+    const normalized = { id: user.id, name: user.username, avatar: user.avatar ?? '/images/user.png', bio: user.bio ?? '', status: 'online' };
+    localStorage.setItem('chatapp_user', JSON.stringify(normalized));
+    setCurrentUser(normalized);
   }
 
   function handleLogout() {

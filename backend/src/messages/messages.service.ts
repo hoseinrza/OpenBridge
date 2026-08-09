@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 const WITH_RELATIONS = {
@@ -12,72 +12,81 @@ const PARTNER_SELECT = { id: true, username: true, avatar: true, bio: true, stat
 export class MessagesService {
   constructor(private prisma: PrismaService) {}
 
-  getConversation(myId: string, otherId: string, take = 50, skip = 0) {
-    return this.prisma.message.findMany({
+  // Finds the 1-to-1 conversation between two users, creating it on first contact.
+  private async getOrCreateDirectConversation(userAId: string, userBId: string) {
+    const existing = await this.prisma.conversation.findFirst({
       where: {
-        OR: [
-          { senderId: myId,    receiverId: otherId },
-          { senderId: otherId, receiverId: myId    },
+        isGroup: false,
+        AND: [
+          { participants: { some: { userId: userAId } } },
+          { participants: { some: { userId: userBId } } },
         ],
       },
-      include:  WITH_RELATIONS,
-      orderBy:  { createdAt: 'asc' },
+    });
+    if (existing) return existing;
+
+    return this.prisma.conversation.create({
+      data: {
+        isGroup:      false,
+        participants: { create: [{ userId: userAId }, { userId: userBId }] },
+      },
+    });
+  }
+
+  private async assertMember(conversationId: string, userId: string) {
+    const membership = await this.prisma.conversationParticipant.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+    if (!membership) throw new ForbiddenException('شما عضو این گفتگو نیستید');
+    return membership;
+  }
+
+  private toWireMessage(message: any) {
+    const { reads, ...rest } = message;
+    return { ...rest, read: reads.some(r => r.userId !== message.senderId) };
+  }
+
+  async getConversation(myId: string, otherId: string, take = 50, skip = 0) {
+    const conversation = await this.getOrCreateDirectConversation(myId, otherId);
+    const messages = await this.prisma.message.findMany({
+      where:   { conversationId: conversation.id, deletedAt: null },
+      include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
+      orderBy: { createdAt: 'asc' },
       take,
       skip,
     });
+    return messages.map(m => this.toWireMessage(m));
   }
 
-  // Builds the user's "conversation list": every person they've exchanged
-  // messages with, ordered by most recent activity, with an unread count.
+  // Builds the user's direct-message list: every 1-to-1 conversation they're
+  // part of, ordered by most recent activity, with an unread count.
   async listConversations(myId: string) {
-    const messages = await this.prisma.message.findMany({
-      where:   { OR: [{ senderId: myId }, { receiverId: myId }] },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        senderId: true, receiverId: true, read: true,
-        sender:   { select: PARTNER_SELECT },
-        receiver: { select: PARTNER_SELECT },
+    const conversations = await this.prisma.conversation.findMany({
+      where:   { isGroup: false, participants: { some: { userId: myId } } },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        participants: { where: { userId: { not: myId } }, include: { user: { select: PARTNER_SELECT } } },
       },
     });
 
-    const order = [];
-    const byPartner = new Map();
-
-    for (const m of messages) {
-      const mine    = m.senderId === myId;
-      const partner = mine ? m.receiver : m.sender;
-      if (!byPartner.has(partner.id)) {
-        byPartner.set(partner.id, { user: partner, unread: 0 });
-        order.push(partner.id);
-      }
-      if (!mine && !m.read) byPartner.get(partner.id).unread += 1;
-    }
-
-    return order.map(id => byPartner.get(id));
+    return Promise.all(conversations.map(async (c) => {
+      const unread = await this.prisma.message.count({
+        where: { conversationId: c.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
+      });
+      return { user: c.participants[0]?.user, unread };
+    }));
   }
 
-  create(senderId: string, receiverId: string, data: {
+  async create(senderId: string, receiverId: string, data: {
     type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number;
   }) {
-    return this.prisma.message.create({
-      data: {
-        senderId,
-        receiverId,
-        type:     (data.type as any) ?? 'TEXT',
-        text:     data.text,
-        fileUrl:  data.fileUrl,
-        fileName: data.fileName,
-        fileSize: data.fileSize,
-      },
-      include: WITH_RELATIONS,
-    });
+    const conversation = await this.getOrCreateDirectConversation(senderId, receiverId);
+    return this.sendToConversation(conversation.id, senderId, data);
   }
 
-  markRead(senderId: string, receiverId: string) {
-    return this.prisma.message.updateMany({
-      where: { senderId, receiverId, read: false },
-      data:  { read: true },
-    });
+  async markRead(senderId: string, receiverId: string) {
+    const conversation = await this.getOrCreateDirectConversation(senderId, receiverId);
+    return this.markConversationRead(conversation.id, receiverId);
   }
 
   async addReaction(messageId: string, userId: string, emoji: string) {
@@ -86,5 +95,112 @@ export class MessagesService {
       create: { messageId, userId, emoji },
       update: {},
     });
+  }
+
+  // ── Group chat ───────────────────────────────────────────────────────
+
+  async createGroup(creatorId: string, name: string, memberIds: string[]) {
+    const uniqueMembers = [...new Set([creatorId, ...memberIds])];
+    return this.prisma.conversation.create({
+      data: {
+        isGroup: true,
+        name,
+        participants: {
+          create: uniqueMembers.map(userId => ({
+            userId,
+            role: userId === creatorId ? 'OWNER' : 'MEMBER',
+          })),
+        },
+      },
+      include: { participants: { include: { user: { select: PARTNER_SELECT } } } },
+    });
+  }
+
+  async listGroups(myId: string) {
+    return this.prisma.conversation.findMany({
+      where:   { isGroup: true, participants: { some: { userId: myId } } },
+      orderBy: { updatedAt: 'desc' },
+      include: { participants: { include: { user: { select: PARTNER_SELECT } } } },
+    });
+  }
+
+  async addParticipant(conversationId: string, requesterId: string, userId: string) {
+    const requester = await this.assertMember(conversationId, requesterId);
+    if (requester.role === 'MEMBER') throw new ForbiddenException('فقط مالک یا ادمین می‌تواند عضو اضافه کند');
+    return this.prisma.conversationParticipant.upsert({
+      where:  { conversationId_userId: { conversationId, userId } },
+      create: { conversationId, userId, role: 'MEMBER' },
+      update: {},
+    });
+  }
+
+  async removeParticipant(conversationId: string, requesterId: string, userId: string) {
+    const requester = await this.assertMember(conversationId, requesterId);
+    if (requester.role === 'MEMBER' && requesterId !== userId) {
+      throw new ForbiddenException('فقط مالک یا ادمین می‌تواند عضو حذف کند');
+    }
+    return this.prisma.conversationParticipant.delete({
+      where: { conversationId_userId: { conversationId, userId } },
+    });
+  }
+
+  async getConversationMessages(conversationId: string, userId: string, take = 50, skip = 0) {
+    await this.assertMember(conversationId, userId);
+    const messages = await this.prisma.message.findMany({
+      where:   { conversationId, deletedAt: null },
+      include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
+      orderBy: { createdAt: 'asc' },
+      take,
+      skip,
+    });
+    return messages.map(m => this.toWireMessage(m));
+  }
+
+  async sendToConversation(conversationId: string, senderId: string, data: {
+    type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number;
+  }) {
+    await this.assertMember(conversationId, senderId);
+    const message = await this.prisma.message.create({
+      data: {
+        conversationId,
+        senderId,
+        type:     (data.type as any) ?? 'TEXT',
+        text:     data.text,
+        fileUrl:  data.fileUrl,
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+      },
+      include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
+    });
+    await this.prisma.conversation.update({ where: { id: conversationId }, data: {} });
+    return this.toWireMessage(message);
+  }
+
+  async markConversationRead(conversationId: string, userId: string) {
+    await this.assertMember(conversationId, userId);
+    const unread = await this.prisma.message.findMany({
+      where:  { conversationId, senderId: { not: userId }, reads: { none: { userId } } },
+      select: { id: true },
+    });
+    if (!unread.length) return { count: 0 };
+    await this.prisma.messageRead.createMany({
+      data:           unread.map(m => ({ messageId: m.id, userId })),
+      skipDuplicates: true,
+    });
+    return { count: unread.length };
+  }
+
+  getConversationParticipantIds(conversationId: string) {
+    return this.prisma.conversationParticipant.findMany({
+      where:  { conversationId },
+      select: { userId: true },
+    }).then(rows => rows.map(r => r.userId));
+  }
+
+  getUserConversationIds(userId: string) {
+    return this.prisma.conversationParticipant.findMany({
+      where:  { userId },
+      select: { conversationId: true },
+    }).then(rows => rows.map(r => r.conversationId));
   }
 }

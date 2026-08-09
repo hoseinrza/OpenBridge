@@ -33,6 +33,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     socket.data.userId = payload.sub;
     socket.join(payload.sub);
+
+    // Join a room per group conversation so group broadcasts reach this socket.
+    const conversationIds = await this.messages.getUserConversationIds(payload.sub);
+    conversationIds.forEach(id => socket.join(`conv:${id}`));
+
     await this.redis.setUserOnline(payload.sub, socket.id);
     this.server.emit('user:online', { userId: payload.sub });
   }
@@ -44,19 +49,27 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.emit('user:offline', { userId });
   }
 
-  // ── Send message ────────────────────────────────────
+  // ── Send message (1-to-1 via toId, group via conversationId) ─────────
   @SubscribeMessage('message:send')
   async onSend(
     @ConnectedSocket() socket: Socket,
     @MessageBody() body: {
-      toId: string; type?: string; text?: string;
+      toId?: string; conversationId?: string; type?: string; text?: string;
       fileUrl?: string; fileName?: string; fileSize?: number;
     },
   ) {
+    if (body.conversationId) {
+      const msg = await this.messages.sendToConversation(body.conversationId, socket.data.userId, body);
+      this.server.to(`conv:${body.conversationId}`).emit('message:new', msg);
+      return;
+    }
+
     const msg = await this.messages.create(socket.data.userId, body.toId, body);
 
-    // Deliver to both parties (sender is already in their room)
-    this.server.to(socket.data.userId).to(body.toId).emit('message:new', msg);
+    // Deliver to both parties (sender is already in their room). Keep
+    // `receiverId` on the wire for the existing 1-to-1 frontend, which
+    // filters incoming messages by senderId/receiverId.
+    this.server.to(socket.data.userId).to(body.toId).emit('message:new', { ...msg, receiverId: body.toId });
 
     // Auto read-receipt if receiver is online
     if (await this.redis.isUserOnline(body.toId)) {
@@ -65,6 +78,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.server.to(socket.data.userId).emit('message:read', { by: body.toId });
       }, 1500);
     }
+  }
+
+  // Lets a socket join a group room right after creation/membership change,
+  // without waiting for the next reconnect.
+  @SubscribeMessage('conversation:join')
+  onConversationJoin(@ConnectedSocket() s: Socket, @MessageBody() body: { conversationId: string }) {
+    s.join(`conv:${body.conversationId}`);
   }
 
   // ── Typing indicators ───────────────────────────────

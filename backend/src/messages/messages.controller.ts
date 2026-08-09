@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards, Request } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UsersService } from '../users/users.service';
 import { MessagesService } from './messages.service';
@@ -17,6 +17,50 @@ export class MessagesController {
     return list.map((c, i) => ({ user: users[i], unread: c.unread }));
   }
 
+  // ── Group chats ──────────────────────────────────────
+  @Get('groups')
+  listGroups(@Request() req) {
+    return this.messages.listGroups(req.user.id);
+  }
+
+  @Post('groups')
+  createGroup(@Request() req, @Body() body: { name: string; memberIds: string[] }) {
+    return this.messages.createGroup(req.user.id, body.name, body.memberIds ?? []);
+  }
+
+  @Get('groups/:conversationId')
+  getGroupMessages(
+    @Request()               req,
+    @Param('conversationId') conversationId: string,
+    @Query('take')           take?: string,
+    @Query('skip')           skip?: string,
+  ) {
+    return this.messages.getConversationMessages(
+      conversationId, req.user.id,
+      take ? +take : 50,
+      skip ? +skip : 0,
+    );
+  }
+
+  @Post('groups/:conversationId/participants')
+  addParticipant(
+    @Request()               req,
+    @Param('conversationId') conversationId: string,
+    @Body()                  body: { userId: string },
+  ) {
+    return this.messages.addParticipant(conversationId, req.user.id, body.userId);
+  }
+
+  @Delete('groups/:conversationId/participants/:userId')
+  removeParticipant(
+    @Request()               req,
+    @Param('conversationId') conversationId: string,
+    @Param('userId')         userId: string,
+  ) {
+    return this.messages.removeParticipant(conversationId, req.user.id, userId);
+  }
+
+  // ── Direct (1-to-1) chat ─────────────────────────────
   @Get(':userId')
   getConversation(
     @Request()         req,

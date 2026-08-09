@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { isMockUser } from './useChat.js';
 
 const SOCKET_URL = (import.meta.env.VITE_API_URL ?? 'https://openbridge-api.onrender.com/api').replace('/api', '');
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
@@ -41,7 +40,7 @@ export function useCall(currentUser) {
   // ── socket connection + WebRTC session lifecycle ─────
   useEffect(() => {
     const token = localStorage.getItem('chatapp_token');
-    if (!token || !currentUser || isMockUser(currentUser)) { apiRef.current = {}; return; }
+    if (!token || !currentUser) { apiRef.current = {}; return; }
 
     let socket;
     let cancelled = false;
