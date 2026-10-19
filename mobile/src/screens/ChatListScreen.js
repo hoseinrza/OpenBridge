@@ -1,29 +1,47 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { FontAwesome6 } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
 import { fetchConversations, normalizeUser } from '../services/api';
 import { colors, fonts, radius } from '../theme';
 
 export default function ChatListScreen({ navigation }) {
   const { currentUser, logout } = useAuth();
+  const { socket } = useSocket();
   const [users, setUsers]     = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
-    setLoading(true);
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     fetchConversations()
-      .then(list => setUsers(list.map(c => ({ ...normalizeUser(c.user), unread: c.unread }))))
+      .then(list => setUsers(
+        list
+          .filter(c => c.user)
+          .map(c => ({ ...normalizeUser(c.user), unread: c.unread }))
+          .filter(u => u.id),
+      ))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
   // Refresh every time the list screen regains focus (e.g. coming back from
   // a chat where new messages may have changed unread counts/ordering).
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Keep the list live while messages arrive — even when the user isn't
+  // inside a chat screen (the socket now lives in SocketProvider).
   useEffect(() => {
-    const unsub = navigation.addListener('focus', load);
-    return unsub;
-  }, [navigation, load]);
+    if (!socket) return undefined;
+    const refresh = () => load(true);
+    socket.on('message:new', refresh);
+    socket.on('connect', refresh);
+    return () => {
+      socket.off('message:new', refresh);
+      socket.off('connect', refresh);
+    };
+  }, [socket, load]);
 
   return (
     <View style={styles.container}>
@@ -31,7 +49,7 @@ export default function ChatListScreen({ navigation }) {
         data={users}
         keyExtractor={(u) => u.id}
         refreshing={loading}
-        onRefresh={load}
+        onRefresh={() => load()}
         contentContainerStyle={users.length === 0 ? styles.emptyList : undefined}
         ListEmptyComponent={
           !loading && (

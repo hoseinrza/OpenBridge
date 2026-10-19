@@ -8,6 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { colors, fontAssets, fonts } from './src/theme';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { SocketProvider } from './src/context/SocketContext';
 import LoginScreen from './src/screens/LoginScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatScreen from './src/screens/ChatScreen';
@@ -83,10 +84,12 @@ export default function App() {
 
   return (
     <AuthProvider>
-      <NavigationContainer theme={navTheme}>
-        <StatusBar style="light" />
-        <RootNavigator />
-      </NavigationContainer>
+      <SocketProvider>
+        <NavigationContainer theme={navTheme}>
+          <StatusBar style="light" />
+          <RootNavigator />
+        </NavigationContainer>
+      </SocketProvider>
     </AuthProvider>
   );
 }

@@ -20,7 +20,7 @@ export default function NewChatModal({ onClose, onSelect }) {
     setLoading(true);
     debounceRef.current = setTimeout(() => {
       searchUsers(q)
-        .then(list => { setResults(list.map(normalizeUser)); setError(''); })
+        .then(list => { setResults(list.map(normalizeUser).filter(Boolean)); setError(''); })
         .catch(() => setError('جستجو ناموفق بود'))
         .finally(() => setLoading(false));
     }, 350);

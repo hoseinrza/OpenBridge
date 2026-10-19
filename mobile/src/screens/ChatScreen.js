@@ -9,11 +9,16 @@ export default function ChatScreen({ route }) {
   const peer = route.params?.peer;
   const { currentUser } = useAuth();
   const { messages, isTyping, connected, sendMessage, notifyTyping } = useChat(peer, currentUser);
-  const [text, setText] = useState('');
+  const [text, setText]   = useState('');
+  const [error, setError] = useState('');
 
   const onSend = useCallback(() => {
     if (!text.trim()) return;
-    sendMessage(text);
+    if (!sendMessage(text)) {
+      setError('اتصال به سرور برقرار نیست — دوباره تلاش کن');
+      return;
+    }
+    setError('');
     setText('');
   }, [text, sendMessage]);
 
@@ -57,11 +62,13 @@ export default function ChatScreen({ route }) {
         <Text style={styles.typing}>{peer?.name} در حال نوشتن است...</Text>
       )}
 
+      {!!error && <Text style={styles.sendError}>{error}</Text>}
+
       <View style={styles.composer}>
         <TextInput
           style={styles.input}
           value={text}
-          onChangeText={(v) => { setText(v); notifyTyping(); }}
+          onChangeText={(v) => { setText(v); setError(''); notifyTyping(); }}
           placeholder="پیامی بنویسید..."
           placeholderTextColor={colors.t3}
           multiline
@@ -97,6 +104,7 @@ const styles = StyleSheet.create({
   timeMine: { color: 'rgba(255,255,255,0.75)' },
 
   typing: { color: colors.t3, fontFamily: fonts.regular, fontSize: 12, paddingHorizontal: 16, paddingBottom: 4 },
+  sendError: { color: colors.red, fontFamily: fonts.regular, fontSize: 11, paddingHorizontal: 16, paddingBottom: 4, textAlign: 'right' },
 
   composer: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 8,

@@ -10,6 +10,7 @@ export function resolveUrl(path) {
 
 // Converts a backend user record ({ username, online, ... }) to the frontend's user shape
 export function normalizeUser(u) {
+  if (!u) return null;
   return {
     id:        u.id,
     name:      u.username,
@@ -27,12 +28,20 @@ function auth() {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` };
 }
 
+function handleUnauthorized(path) {
+  if (path.startsWith('/auth/')) return;
+  localStorage.removeItem('chatapp_token');
+  localStorage.removeItem('chatapp_user');
+  window.location.reload();
+}
+
 async function request(method, path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: auth(),
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401) handleUnauthorized(path);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`);
   return data;
@@ -93,6 +102,7 @@ export async function uploadFile(file) {
     headers: { Authorization: `Bearer ${token()}` },
     body: form,
   });
+  if (res.status === 401) handleUnauthorized('/uploads');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message ?? 'آپلود ناموفق');
   return data; // { url, name, size, type }

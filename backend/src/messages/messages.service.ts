@@ -51,11 +51,13 @@ export class MessagesService {
     const messages = await this.prisma.message.findMany({
       where:   { conversationId: conversation.id, deletedAt: null },
       include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
-      orderBy: { createdAt: 'asc' },
+      // Newest first so take/skip pagination starts from recent messages,
+      // then flip back to chronological order for the UI.
+      orderBy: { createdAt: 'desc' },
       take,
       skip,
     });
-    return messages.map(m => this.toWireMessage(m));
+    return messages.reverse().map(m => this.toWireMessage(m));
   }
 
   // Builds the user's direct-message list: every 1-to-1 conversation they're
@@ -69,11 +71,16 @@ export class MessagesService {
       },
     });
 
-    return Promise.all(conversations.map(async (c) => {
+    // A direct conversation can survive without its other participant (e.g.
+    // after that account is deleted), so skip conversations with no partner
+    // instead of returning an entry without a user.
+    const withPartner = conversations.filter(c => c.participants[0]?.user);
+
+    return Promise.all(withPartner.map(async (c) => {
       const unread = await this.prisma.message.count({
         where: { conversationId: c.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
       });
-      return { user: c.participants[0]?.user, unread };
+      return { user: c.participants[0].user, unread };
     }));
   }
 
@@ -149,11 +156,11 @@ export class MessagesService {
     const messages = await this.prisma.message.findMany({
       where:   { conversationId, deletedAt: null },
       include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
       take,
       skip,
     });
-    return messages.map(m => this.toWireMessage(m));
+    return messages.reverse().map(m => this.toWireMessage(m));
   }
 
   async sendToConversation(conversationId: string, senderId: string, data: {
@@ -172,7 +179,10 @@ export class MessagesService {
       },
       include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
     });
-    await this.prisma.conversation.update({ where: { id: conversationId }, data: {} });
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data:  { updatedAt: new Date() },
+    });
     return this.toWireMessage(message);
   }
 

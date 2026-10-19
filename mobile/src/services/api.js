@@ -6,6 +6,18 @@ const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/api';
 
 const ORIGIN = BASE.replace(/\/api\/?$/, '');
 
+// Socket.IO runs on the API origin (not under /api) — nginx proxies
+// /socket.io to the backend container.
+export const SOCKET_URL = ORIGIN;
+
+let unauthorizedHandler = null;
+
+// AuthContext registers this so an expired/invalid token sends the user
+// back to the login screen instead of leaving a silently dead session.
+export function setUnauthorizedHandler(fn) {
+  unauthorizedHandler = fn;
+}
+
 // Resolves a relative backend path (e.g. "/uploads/x.png") to an absolute
 // URL — unlike the web app, RN has no same-origin relative-URL resolution.
 export function resolveUrl(path) {
@@ -15,6 +27,7 @@ export function resolveUrl(path) {
 
 // Converts a backend user record ({ username, online, ... }) to the app's user shape
 export function normalizeUser(u) {
+  if (!u) return null;
   return {
     id:        u.id,
     name:      u.username,
@@ -37,6 +50,11 @@ async function request(method, path, body) {
     headers: await authHeaders(),
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    await storage.removeToken();
+    await storage.removeUser();
+    unauthorizedHandler?.();
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`);
   return data;
@@ -99,6 +117,11 @@ export async function uploadFile(file) {
     headers: { Authorization: `Bearer ${token}` },
     body: form,
   });
+  if (res.status === 401) {
+    await storage.removeToken();
+    await storage.removeUser();
+    unauthorizedHandler?.();
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message ?? 'آپلود ناموفق');
   return data;

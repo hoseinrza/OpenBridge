@@ -7,9 +7,10 @@ export default function InputArea({ onSend, onTyping }) {
   const inputRef = useRef(null);
   const fileRef  = useRef(null);
 
-  function handleSend() {
+  async function handleSend() {
     if (!text.trim()) return;
-    onSend({ type: 'text', text: text.trim() });
+    const sent = await onSend({ type: 'text', text: text.trim() });
+    if (sent === false) return;
     setText('');
     setShowEmoji(false);
     inputRef.current?.focus();
@@ -24,12 +25,12 @@ export default function InputArea({ onSend, onTyping }) {
     inputRef.current?.focus();
   }
 
-  function handleFile(e) {
+  async function handleFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
     const type = file.type.startsWith('image/') ? 'image' : 'file';
-    onSend({ type, src: URL.createObjectURL(file), name: file.name, size: file.size, text: '', _file: file });
+    await onSend({ type, src: URL.createObjectURL(file), name: file.name, size: file.size, text: '', _file: file });
   }
 
   return (

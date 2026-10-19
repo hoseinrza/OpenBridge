@@ -23,7 +23,10 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const loadConversations = useCallback(() => {
     fetchConversations()
       .then(list => {
-        const fromServer = list.map(c => ({ ...normalizeUser(c.user), unread: c.unread }));
+        const fromServer = list
+          .filter(c => c.user)
+          .map(c => ({ ...normalizeUser(c.user), unread: c.unread }))
+          .filter(u => u.id);
         setUsers(prev => {
           // Keep conversations the user just started locally (no messages sent
           // yet) so they don't vanish from the list before the first message.
@@ -40,8 +43,13 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   // conversations and keeps unread counters / ordering in sync)
   const handleIncoming = useCallback(() => { loadConversations(); }, [loadConversations]);
 
-  const { messages, isTyping, sendMessage, notifyTyping, addReaction, clearMessages } =
+  const { messages, isTyping, connected, sendMessage, notifyTyping, addReaction, clearMessages } =
     useChat(activeUser, currentUser, handleIncoming);
+
+  // Catch up on conversations that changed while the socket was disconnected.
+  useEffect(() => {
+    if (connected) loadConversations();
+  }, [connected, loadConversations]);
 
   function handleSelectUser(user) {
     if (user.id === activeUser?.id) return;
@@ -95,6 +103,13 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               onOpenProfile={openPeerProfile}
               onBack={handleBackToList}
             />
+
+            {!connected && (
+              <div className="conn-banner">
+                <i className="fas fa-wifi" />
+                اتصال به سرور برقرار نیست — در حال تلاش برای اتصال مجدد...
+              </div>
+            )}
 
             {searchQuery && (
               <div className="search-results-bar">

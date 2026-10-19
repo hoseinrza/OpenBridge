@@ -460,6 +460,17 @@
 
 .search-results-bar i { color: var(--accent); font-size: 11px; }
 
+.conn-banner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 20px;
+  font-size: 12px; color: var(--yellow);
+  background: rgba(240,178,50,0.08);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.conn-banner i { font-size: 11px; }
+
 .search-highlight {
   background: rgba(240,178,50,0.30);
   color: var(--yellow);

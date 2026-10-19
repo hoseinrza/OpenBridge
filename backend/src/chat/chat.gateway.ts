@@ -64,27 +64,36 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       fileUrl?: string; fileName?: string; fileSize?: number;
     },
   ) {
-    if (body.conversationId) {
-      const msg = await this.messages.sendToConversation(body.conversationId, socket.data.userId, body);
-      this.server.to(`conv:${body.conversationId}`).emit('message:new', msg);
-      return;
-    }
+    try {
+      if (body.conversationId) {
+        const msg = await this.messages.sendToConversation(body.conversationId, socket.data.userId, body);
+        this.server.to(`conv:${body.conversationId}`).emit('message:new', msg);
+        return { ok: true, id: msg.id };
+      }
 
-    const msg = await this.messages.create(socket.data.userId, body.toId, body);
+      if (!body.toId) return { ok: false, error: 'گیرنده مشخص نیست' };
 
-    // Deliver to both parties (sender is already in their room). Keep
-    // `receiverId` on the wire for the existing 1-to-1 frontend, which
-    // filters incoming messages by senderId/receiverId.
-    const recipientSockets = await this.server.in(body.toId).fetchSockets();
-    console.log(`[socket] message:send from=${socket.data.userId} to=${body.toId} recipientSocketsOnline=${recipientSockets.length}`);
-    this.server.to(socket.data.userId).to(body.toId).emit('message:new', { ...msg, receiverId: body.toId });
+      const msg = await this.messages.create(socket.data.userId, body.toId, body);
 
-    // Auto read-receipt if receiver is online
-    if (await this.redis.isUserOnline(body.toId)) {
-      setTimeout(async () => {
-        await this.messages.markRead(socket.data.userId, body.toId);
-        this.server.to(socket.data.userId).emit('message:read', { by: body.toId });
-      }, 1500);
+      // Deliver to both parties (sender is already in their room). Keep
+      // `receiverId` on the wire for the existing 1-to-1 frontend, which
+      // filters incoming messages by senderId/receiverId.
+      const recipientSockets = await this.server.in(body.toId).fetchSockets();
+      console.log(`[socket] message:send from=${socket.data.userId} to=${body.toId} recipientSocketsOnline=${recipientSockets.length}`);
+      this.server.to(socket.data.userId).to(body.toId).emit('message:new', { ...msg, receiverId: body.toId });
+
+      // Auto read-receipt if receiver is online
+      if (await this.redis.isUserOnline(body.toId)) {
+        setTimeout(async () => {
+          await this.messages.markRead(socket.data.userId, body.toId);
+          this.server.to(socket.data.userId).emit('message:read', { by: body.toId });
+        }, 1500);
+      }
+
+      return { ok: true, id: msg.id };
+    } catch (err) {
+      console.error('[socket] message:send failed', err);
+      return { ok: false, error: err instanceof Error ? err.message : 'ارسال پیام ناموفق بود' };
     }
   }
 

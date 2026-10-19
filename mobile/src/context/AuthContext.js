@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { storage } from '../services/storage';
-import { login as apiLogin, register as apiRegister, logout as apiLogout, resolveUrl } from '../services/api';
+import { login as apiLogin, register as apiRegister, logout as apiLogout, resolveUrl, setUnauthorizedHandler } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -10,6 +10,11 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     storage.getUser().then(u => { setCurrentUser(u); setLoading(false); });
+  }, []);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => setCurrentUser(null));
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   const persistUser = useCallback(async (user) => {
