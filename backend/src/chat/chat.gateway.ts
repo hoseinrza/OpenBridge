@@ -7,9 +7,14 @@ import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { MessagesService } from '../messages/messages.service';
 import { RedisService } from '../redis/redis.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { JWT_SECRET, isOriginAllowed } from '../config/env';
 
 @WebSocketGateway({
-  cors: { origin: true, credentials: true },
+  cors: {
+    origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
+    credentials: true,
+  },
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
@@ -18,12 +23,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private jwt: JwtService,
     private messages: MessagesService,
     private redis: RedisService,
+    private prisma: PrismaService,
   ) {}
 
   private parseUser(socket: Socket): { sub: string } | null {
     try {
       const token = socket.handshake.auth?.token;
-      return this.jwt.verify(token, { secret: process.env.JWT_SECRET ?? 'secret' }) as any;
+      if (typeof token !== 'string' || !token) return null;
+      const payload = this.jwt.verify(token, { secret: JWT_SECRET, algorithms: ['HS256'] }) as { sub?: unknown };
+      if (typeof payload?.sub !== 'string' || !payload.sub) return null;
+      return { sub: payload.sub };
     } catch { return null; }
   }
 
@@ -31,6 +40,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const payload = this.parseUser(socket);
     if (!payload) {
       console.log(`[socket] rejected (bad/missing token) socket=${socket.id}`);
+      socket.disconnect();
+      return;
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where:  { id: payload.sub },
+      select: { id: true },
+    });
+    if (!user) {
+      console.log(`[socket] rejected (unknown user) socket=${socket.id}`);
       socket.disconnect();
       return;
     }
