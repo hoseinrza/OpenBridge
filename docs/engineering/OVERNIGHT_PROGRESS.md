@@ -22,7 +22,7 @@ Session date: 2026-10-19
 | `4c98526` | Socket authorization: removed unauthenticated room join, membership-checked reactions (derived from the message), validated message payloads, per-socket rate limits, 256 KB packet cap, multi-socket presence |
 | `4aa9a6d` | HTTP DTOs for groups/membership, UUID route params, bounded `take`/`skip`, self-chat and unknown-recipient rejection, avatar path validation |
 | `d98a3b0` | Private uploads: static serving removed, signed expiring URLs issued at API boundaries, HMAC download verification, type allowlist, image magic-byte checks, upload rate limit, signed URL resolution in web/mobile |
-| this commit | Automated security regression suite, CI workflow, security model documentation, progress log |
+| `9efe0e4` | Automated security regression suite, CI workflow, security model documentation, progress log |
 
 ## Validation actually run
 
