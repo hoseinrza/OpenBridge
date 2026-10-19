@@ -26,5 +26,7 @@ export class UpdateProfileDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(255)
+  @Matches(/^\/uploads\/[A-Za-z0-9._-]+$/, { message: 'آدرس تصویر نامعتبر است' })
   avatar?: string;
 }

@@ -51,6 +51,9 @@ export class MessagesService {
   }
 
   async getConversation(myId: string, otherId: string, take = 50, skip = 0) {
+    if (myId === otherId) throw new BadRequestException('نمی‌توانید با خودتان گفتگو کنید');
+    const other = await this.prisma.user.findUnique({ where: { id: otherId }, select: { id: true } });
+    if (!other) throw new NotFoundException('کاربر پیدا نشد');
     const conversation = await this.getOrCreateDirectConversation(myId, otherId);
     const messages = await this.prisma.message.findMany({
       where:   { conversationId: conversation.id, deletedAt: null },
@@ -196,6 +199,8 @@ export class MessagesService {
   async addParticipant(conversationId: string, requesterId: string, userId: string) {
     const requester = await this.assertMember(conversationId, requesterId);
     if (requester.role === 'MEMBER') throw new ForbiddenException('فقط مالک یا ادمین می‌تواند عضو اضافه کند');
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) throw new NotFoundException('کاربر پیدا نشد');
     return this.prisma.conversationParticipant.upsert({
       where:  { conversationId_userId: { conversationId, userId } },
       create: { conversationId, userId, role: 'MEMBER' },

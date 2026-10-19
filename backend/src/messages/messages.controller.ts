@@ -1,7 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards, Request } from '@nestjs/common';
+import {
+  Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, UseGuards, Request,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UsersService } from '../users/users.service';
 import { MessagesService } from './messages.service';
+import { CreateGroupDto } from './dto/create-group.dto';
+import { AddParticipantDto } from './dto/add-participant.dto';
+import { PaginationQueryDto } from './dto/pagination-query.dto';
 
 @Controller('messages')
 @UseGuards(JwtAuthGuard)
@@ -24,38 +29,37 @@ export class MessagesController {
   }
 
   @Post('groups')
-  createGroup(@Request() req, @Body() body: { name: string; memberIds: string[] }) {
-    return this.messages.createGroup(req.user.id, body.name, body.memberIds ?? []);
+  createGroup(@Request() req, @Body() dto: CreateGroupDto) {
+    return this.messages.createGroup(req.user.id, dto.name, dto.memberIds);
   }
 
   @Get('groups/:conversationId')
   getGroupMessages(
-    @Request()               req,
-    @Param('conversationId') conversationId: string,
-    @Query('take')           take?: string,
-    @Query('skip')           skip?: string,
+    @Request()                       req,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Query()                         query: PaginationQueryDto,
   ) {
     return this.messages.getConversationMessages(
       conversationId, req.user.id,
-      take ? +take : 50,
-      skip ? +skip : 0,
+      query.take ?? 50,
+      query.skip ?? 0,
     );
   }
 
   @Post('groups/:conversationId/participants')
   addParticipant(
-    @Request()               req,
-    @Param('conversationId') conversationId: string,
-    @Body()                  body: { userId: string },
+    @Request()                       req,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Body()                          dto: AddParticipantDto,
   ) {
-    return this.messages.addParticipant(conversationId, req.user.id, body.userId);
+    return this.messages.addParticipant(conversationId, req.user.id, dto.userId);
   }
 
   @Delete('groups/:conversationId/participants/:userId')
   removeParticipant(
-    @Request()               req,
-    @Param('conversationId') conversationId: string,
-    @Param('userId')         userId: string,
+    @Request()                       req,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Param('userId', ParseUUIDPipe)  userId: string,
   ) {
     return this.messages.removeParticipant(conversationId, req.user.id, userId);
   }
@@ -63,15 +67,14 @@ export class MessagesController {
   // ── Direct (1-to-1) chat ─────────────────────────────
   @Get(':userId')
   getConversation(
-    @Request()         req,
-    @Param('userId')   userId: string,
-    @Query('take')     take?: string,
-    @Query('skip')     skip?: string,
+    @Request()                      req,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Query()                        query: PaginationQueryDto,
   ) {
     return this.messages.getConversation(
       req.user.id, userId,
-      take ? +take : 50,
-      skip ? +skip : 0,
+      query.take ?? 50,
+      query.skip ?? 0,
     );
   }
 }
