@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useChat } from '../../hooks/useChat.js';
-import { fetchConversations, normalizeUser } from '../../services/api.js';
+import { fetchConversations, fetchGroups, normalizeUser, normalizeGroup } from '../../services/api.js';
 import Sidebar from '../Sidebar/Sidebar.jsx';
 import ChatHeader from './ChatHeader.jsx';
 import MessageList from './MessageList.jsx';
@@ -20,36 +20,42 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   // New accounts start with an empty conversation list — people only show up
   // here once a message has actually been exchanged with them. Conversations
   // are started on demand by searching for a username (see NewChatModal).
-  const loadConversations = useCallback(() => {
-    fetchConversations()
-      .then(list => {
-        const fromServer = list
+  const loadChats = useCallback(() => {
+    Promise.all([fetchConversations(), fetchGroups()])
+      .then(([directList, groupList]) => {
+        const directs = directList
           .filter(c => c.user)
-          .map(c => ({ ...normalizeUser(c.user), unread: c.unread }))
+          .map(c => ({ ...normalizeUser(c.user), unread: c.unread ?? 0, updatedAt: c.updatedAt }))
           .filter(u => u.id);
+        const groups = groupList.map(normalizeGroup).filter(Boolean);
+
         setUsers(prev => {
           // Keep conversations the user just started locally (no messages sent
           // yet) so they don't vanish from the list before the first message.
-          const stillPending = prev.filter(u => u.pending && !fromServer.some(s => s.id === u.id));
-          return [...stillPending, ...fromServer];
+          const stillPending = prev.filter(u => u.pending && !directs.some(d => d.id === u.id));
+          const chats = [...groups, ...directs]
+            .sort((a, b) => new Date(b.updatedAt ?? 0) - new Date(a.updatedAt ?? 0));
+          return [...stillPending, ...chats];
         });
       })
       .catch(() => {});
   }, []);
 
-  useEffect(() => { loadConversations(); }, [loadConversations]);
+  useEffect(() => { loadChats(); }, [loadChats]);
 
   // Refresh the list whenever any message arrives (covers new incoming
-  // conversations and keeps unread counters / ordering in sync)
-  const handleIncoming = useCallback(() => { loadConversations(); }, [loadConversations]);
+  // conversations/groups and keeps unread counters / ordering in sync)
+  const handleIncoming = useCallback(() => { loadChats(); }, [loadChats]);
 
-  const { messages, isTyping, connected, sendMessage, notifyTyping, addReaction, clearMessages } =
-    useChat(activeUser, currentUser, handleIncoming);
+  const {
+    messages, isTyping, typingPeer, connected,
+    sendMessage, notifyTyping, addReaction, clearMessages,
+  } = useChat(activeUser, currentUser, handleIncoming);
 
-  // Catch up on conversations that changed while the socket was disconnected.
+  // Catch up on chats that changed while the socket was disconnected.
   useEffect(() => {
-    if (connected) loadConversations();
-  }, [connected, loadConversations]);
+    if (connected) loadChats();
+  }, [connected, loadChats]);
 
   function handleSelectUser(user) {
     if (user.id === activeUser?.id) return;
@@ -65,6 +71,16 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
       ? prev
       : [{ ...user, unread: 0, pending: true }, ...prev]);
     setActiveUser(user);
+    clearMessages();
+    setSearchQuery('');
+  }
+
+  function handleGroupCreated(conversation) {
+    const group = normalizeGroup(conversation);
+    if (!group) return;
+    setNewChatOpen(false);
+    setUsers(prev => [group, ...prev.filter(c => c.id !== group.id)]);
+    setActiveUser(group);
     clearMessages();
     setSearchQuery('');
   }
@@ -125,7 +141,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               searchQuery={searchQuery}
             />
 
-            <TypingIndicator isTyping={isTyping} user={activeUser} />
+            <TypingIndicator isTyping={isTyping} user={typingPeer ?? activeUser} />
 
             <InputArea onSend={sendMessage} onTyping={notifyTyping} />
           </>
@@ -133,10 +149,10 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           <div className="empty-chat">
             <i className="fas fa-comments" />
             {users.length > 0 ? (
-              <p>یک گفتگو را از فهرست انتخاب کن یا با دکمهٔ «گفتگوی جدید» یک گفتگوی تازه بساز.</p>
+              <p>یک گفتگو یا گروه را از فهرست انتخاب کن یا با دکمهٔ «گفتگوی جدید» یک گفتگو یا گروه تازه بساز.</p>
             ) : (
               <>
-                <p>هنوز گفتگویی نداری. با جستجوی نام نمایشی یا نام کاربری یک نفر را پیدا کن و گفتگو را شروع کن.</p>
+                <p>هنوز گفتگویی نداری. با جستجوی نام نمایشی یا نام کاربری یک نفر را پیدا کن یا یک گروه بساز.</p>
                 <button className="empty-chat-btn" onClick={() => setNewChatOpen(true)}>
                   <i className="fas fa-magnifying-glass" /> شروع گفتگوی جدید
                 </button>
@@ -159,6 +175,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
         <NewChatModal
           onClose={() => setNewChatOpen(false)}
           onSelect={handleStartConversation}
+          onGroupCreated={handleGroupCreated}
         />
       )}
     </div>

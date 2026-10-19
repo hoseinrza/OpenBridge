@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 
 export default function ChatHeader({ user, searchQuery, onSearchChange, onOpenProfile, onBack }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const inputRef = useRef(null);
+  const isGroup = user.kind === 'group';
 
   useEffect(() => {
     if (searchOpen) {
@@ -37,23 +37,32 @@ export default function ChatHeader({ user, searchQuery, onSearchChange, onOpenPr
             </button>
           )}
 
-          <button className="chat-header-info as-button" onClick={() => onOpenProfile?.(user)} title="مشاهده پروفایل">
-            <div className="user-avatar sm">
-              <img src={user.avatar} alt={user.name} />
-              <span className={`status ${user.status}`} />
-            </div>
-            <div>
-              <div className="chat-peer-name">{user.name}</div>
-              <div className="chat-peer-status">
-                {user.status === 'online' ? 'آنلاین' : user.status === 'idle' ? 'غیرفعال' : 'آفلاین'}
+          {isGroup ? (
+            <div className="chat-header-info">
+              <div className="user-avatar sm group-avatar">
+                <i className="fas fa-users" />
+              </div>
+              <div>
+                <div className="chat-peer-name">{user.name}</div>
+                <div className="chat-peer-status group-status">{user.memberCount} عضو</div>
               </div>
             </div>
-          </button>
+          ) : (
+            <button className="chat-header-info as-button" onClick={() => onOpenProfile?.(user)} title="مشاهده پروفایل">
+              <div className="user-avatar sm">
+                <img src={user.avatar} alt={user.name} />
+                <span className={`status ${user.status}`} />
+              </div>
+              <div>
+                <div className="chat-peer-name">{user.name}</div>
+                <div className="chat-peer-status">
+                  {user.status === 'online' ? 'آنلاین' : user.status === 'idle' ? 'غیرفعال' : 'آفلاین'}
+                </div>
+              </div>
+            </button>
+          )}
 
           <div className="chat-header-actions">
-            <Link to="/video" className="icon-btn" title="تماس ویدیویی">
-              <i className="fas fa-video" />
-            </Link>
             <button className="icon-btn" title="جستجو" onClick={() => setSearchOpen(true)}>
               <i className="fas fa-magnifying-glass" />
             </button>

@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 const WITH_RELATIONS = {
@@ -80,7 +80,7 @@ export class MessagesService {
       const unread = await this.prisma.message.count({
         where: { conversationId: c.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
       });
-      return { user: c.participants[0].user, unread };
+      return { user: c.participants[0].user, unread, updatedAt: c.updatedAt };
     }));
   }
 
@@ -93,7 +93,8 @@ export class MessagesService {
 
   async markRead(senderId: string, receiverId: string) {
     const conversation = await this.getOrCreateDirectConversation(senderId, receiverId);
-    return this.markConversationRead(conversation.id, receiverId);
+    const result = await this.markConversationRead(conversation.id, receiverId);
+    return { ...result, conversationId: conversation.id };
   }
 
   async addReaction(messageId: string, userId: string, emoji: string) {
@@ -107,11 +108,31 @@ export class MessagesService {
   // ── Group chat ───────────────────────────────────────────────────────
 
   async createGroup(creatorId: string, name: string, memberIds: string[]) {
+    const trimmedName = name?.trim();
+    if (!trimmedName || trimmedName.length < 2) {
+      throw new BadRequestException('نام گروه باید حداقل ۲ کاراکتر باشد');
+    }
+    if (trimmedName.length > 60) {
+      throw new BadRequestException('نام گروه نباید بیشتر از ۶۰ کاراکتر باشد');
+    }
+
     const uniqueMembers = [...new Set([creatorId, ...memberIds])];
+    if (uniqueMembers.length < 2) {
+      throw new BadRequestException('حداقل یک عضو دیگر انتخاب کنید');
+    }
+
+    const existing = await this.prisma.user.findMany({
+      where:  { id: { in: uniqueMembers } },
+      select: { id: true },
+    });
+    if (existing.length !== uniqueMembers.length) {
+      throw new BadRequestException('یکی از اعضای انتخاب‌شده معتبر نیست');
+    }
+
     return this.prisma.conversation.create({
       data: {
         isGroup: true,
-        name,
+        name: trimmedName,
         participants: {
           create: uniqueMembers.map(userId => ({
             userId,
@@ -124,11 +145,26 @@ export class MessagesService {
   }
 
   async listGroups(myId: string) {
-    return this.prisma.conversation.findMany({
+    const groups = await this.prisma.conversation.findMany({
       where:   { isGroup: true, participants: { some: { userId: myId } } },
       orderBy: { updatedAt: 'desc' },
       include: { participants: { include: { user: { select: PARTNER_SELECT } } } },
     });
+
+    return Promise.all(groups.map(async (group) => {
+      const unread = await this.prisma.message.count({
+        where: { conversationId: group.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
+      });
+      return {
+        id:           group.id,
+        name:         group.name,
+        avatar:       group.avatar,
+        createdAt:    group.createdAt,
+        updatedAt:    group.updatedAt,
+        participants: group.participants.map(p => ({ ...p.user, role: p.role })),
+        unread,
+      };
+    }));
   }
 
   async addParticipant(conversationId: string, requesterId: string, userId: string) {

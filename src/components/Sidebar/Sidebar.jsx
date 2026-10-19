@@ -13,7 +13,7 @@ export default function Sidebar({ users, activeUserId, onSelectUser, currentUser
         <span>OpenBridge</span>
 
         {page === 'chat' && (
-          <button className="icon-btn new-chat-btn" title="گفتگوی جدید" onClick={onNewChat}>
+          <button className="icon-btn new-chat-btn" title="گفتگو یا گروه جدید" onClick={onNewChat}>
             <i className="fas fa-pen-to-square" />
           </button>
         )}
@@ -30,10 +30,16 @@ export default function Sidebar({ users, activeUserId, onSelectUser, currentUser
             className={`user-item ${activeUserId === user.id ? 'active' : ''}`}
             onClick={() => onSelectUser?.(user)}
           >
-            <div className="user-avatar">
-              <img src={user.avatar} alt={user.name} />
-              <span className={`status ${user.status}`} />
-            </div>
+            {user.kind === 'group' ? (
+              <div className="user-avatar group-avatar">
+                <i className="fas fa-users" />
+              </div>
+            ) : (
+              <div className="user-avatar">
+                <img src={user.avatar} alt={user.name} />
+                <span className={`status ${user.status}`} />
+              </div>
+            )}
             <span className="user-name">{user.name}</span>
 
             {page === 'video' && (
@@ -48,9 +54,9 @@ export default function Sidebar({ users, activeUserId, onSelectUser, currentUser
         {page === 'chat' && users.length === 0 && (
           <div className="empty-conversations">
             <i className="fas fa-comment-dots" />
-            <p>هنوز گفتگویی نداری</p>
+            <p>هنوز گفتگو یا گروهی نداری</p>
             <button className="empty-conversations-btn" onClick={onNewChat}>
-              <i className="fas fa-magnifying-glass" /> جستجوی نام نمایشی یا نام کاربری برای شروع چت
+              <i className="fas fa-magnifying-glass" /> جستجوی کاربر یا ساخت گروه جدید
             </button>
           </div>
         )}

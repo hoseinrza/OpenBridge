@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { fetchMessages, uploadFile, resolveUrl } from '../services/api.js';
+import { fetchMessages, fetchGroupMessages, uploadFile, resolveUrl } from '../services/api.js';
 
 // Empty/relative → same-origin (nginx reverse-proxies /socket.io to the API).
 const SOCKET_URL = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/api\/?$/, '') || undefined;
@@ -32,9 +32,25 @@ function mergeMessages(prev, incoming) {
   return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
 }
 
+function isGroup(target) {
+  return target?.kind === 'group';
+}
+
+function fetchTargetMessages(target) {
+  return isGroup(target) ? fetchGroupMessages(target.id) : fetchMessages(target.id);
+}
+
+function readPayload(target) {
+  return isGroup(target) ? { conversationId: target.id } : { fromId: target.id };
+}
+
+function targetPayload(target) {
+  return isGroup(target) ? { conversationId: target.id } : { toId: target.id };
+}
+
 export function useChat(targetUser, currentUser, onIncoming) {
   const [messages,  setMessages]  = useState([]);
-  const [isTyping,  setIsTyping]  = useState(false);
+  const [typingPeer, setTypingPeer] = useState(null);
   const [connected, setConnected] = useState(false);
   const socketRef      = useRef(null);
   const typingTimerRef = useRef(null);
@@ -52,7 +68,7 @@ export function useChat(targetUser, currentUser, onIncoming) {
     const target = targetRef.current;
     const me     = currentUserRef.current;
     if (!target || !me) return;
-    fetchMessages(target.id)
+    fetchTargetMessages(target)
       .then(msgs => {
         setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, me.id))));
       })
@@ -75,7 +91,7 @@ export function useChat(targetUser, currentUser, onIncoming) {
     socket.on('connect', () => {
       setConnected(true);
       const target = targetRef.current;
-      if (target) socket.emit('messages:read', { fromId: target.id });
+      if (target) socket.emit('messages:read', readPayload(target));
       refreshHistoryRef.current();
     });
     socket.on('disconnect',    () => setConnected(false));
@@ -86,34 +102,54 @@ export function useChat(targetUser, currentUser, onIncoming) {
       const me     = currentUserRef.current;
       if (!me) return;
 
-      if (
-        target && (
-          (msg.senderId === me.id && msg.receiverId === target.id) ||
-          (msg.senderId === target.id && msg.receiverId === me.id)
-        )
-      ) {
+      const belongsToActiveGroup = isGroup(target) && msg.conversationId === target.id;
+      const belongsToActiveDirect = !isGroup(target) && target && (
+        (msg.senderId === me.id && msg.receiverId === target.id) ||
+        (msg.senderId === target.id && msg.receiverId === me.id)
+      );
+
+      if (belongsToActiveGroup || belongsToActiveDirect) {
         setMessages(prev => mergeMessages(prev, [normalize(msg, me.id)]));
       }
-      if (target && msg.senderId === target.id) {
+      if (isGroup(target) && msg.conversationId === target.id && msg.senderId !== me.id) {
+        socket.emit('messages:read', { conversationId: target.id });
+      } else if (!isGroup(target) && target && msg.senderId === target.id) {
         socket.emit('messages:read', { fromId: target.id });
       }
       // Let the parent know about every incoming message (even ones outside
-      // the active conversation) so it can refresh the conversation list.
-      if (msg.senderId === me.id || msg.receiverId === me.id) {
+      // the active conversation) so it can refresh the chat list. Group
+      // messages carry no receiverId; direct ones always do.
+      if (!msg.receiverId || msg.senderId === me.id || msg.receiverId === me.id) {
         onIncomingRef.current?.(msg);
       }
     });
 
-    socket.on('message:read', () => {
+    socket.on('message:read', ({ conversationId }) => {
+      const target = targetRef.current;
+      if (conversationId && target?.id !== conversationId) return;
       setMessages(prev => prev.map(m => m.side === 'mine' ? { ...m, read: true } : m));
     });
 
-    socket.on('typing:start', ({ fromId }) => {
-      if (fromId === targetRef.current?.id) setIsTyping(true);
+    socket.on('typing:start', ({ fromId, conversationId }) => {
+      const target = targetRef.current;
+      if (!target) return;
+      if (isGroup(target)) {
+        if (conversationId !== target.id || fromId === currentUserRef.current?.id) return;
+        const participant = target.participants?.find(p => p.id === fromId);
+        setTypingPeer(participant ?? { name: 'یکی از اعضا', avatar: '/images/user.png' });
+      } else if (fromId === target.id) {
+        setTypingPeer(target);
+      }
     });
 
-    socket.on('typing:stop', ({ fromId }) => {
-      if (fromId === targetRef.current?.id) setIsTyping(false);
+    socket.on('typing:stop', ({ fromId, conversationId }) => {
+      const target = targetRef.current;
+      if (!target) return;
+      if (isGroup(target)) {
+        if (conversationId === target.id) setTypingPeer(null);
+      } else if (fromId === target.id) {
+        setTypingPeer(null);
+      }
     });
 
     socket.on('reaction:added', ({ messageId, emoji }) => {
@@ -132,20 +168,20 @@ export function useChat(targetUser, currentUser, onIncoming) {
     };
   }, [currentUser?.id]);
 
-  // Mark the conversation as read whenever the active peer changes.
+  // Mark the conversation as read whenever the active chat changes.
   useEffect(() => {
     if (!targetUser || !socketRef.current) return;
-    socketRef.current.emit('messages:read', { fromId: targetUser.id });
+    socketRef.current.emit('messages:read', readPayload(targetUser));
   }, [targetUser?.id]);
 
   // ── Load history ──────────────────────────────────────
   useEffect(() => {
     if (!targetUser || !currentUser) return undefined;
     setMessages([]);
-    setIsTyping(false);
+    setTypingPeer(null);
 
     let cancelled = false;
-    fetchMessages(targetUser.id)
+    fetchTargetMessages(targetUser)
       .then(msgs => {
         if (cancelled) return;
         setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, currentUser.id))));
@@ -167,7 +203,7 @@ export function useChat(targetUser, currentUser, onIncoming) {
       try {
         const uploaded = await uploadFile(msg._file);
         socket.emit('message:send', {
-          toId:     targetUser.id,
+          ...targetPayload(targetUser),
           type:     uploaded.type,
           fileUrl:  uploaded.url,
           fileName: uploaded.name,
@@ -177,29 +213,36 @@ export function useChat(targetUser, currentUser, onIncoming) {
       return true;
     }
 
-    socket.emit('message:send', { toId: targetUser.id, type: 'TEXT', text: msg.text });
+    socket.emit('message:send', { ...targetPayload(targetUser), type: 'TEXT', text: msg.text });
     clearTimeout(typingTimerRef.current);
-    socket.emit('typing:stop', { toId: targetUser.id });
+    socket.emit('typing:stop', targetPayload(targetUser));
     return true;
   }, [targetUser]);
 
   // ── Typing notification ──────────────────────────────
   const notifyTyping = useCallback(() => {
     if (!socketRef.current || !targetUser) return;
-    socketRef.current.emit('typing:start', { toId: targetUser.id });
+    socketRef.current.emit('typing:start', targetPayload(targetUser));
     clearTimeout(typingTimerRef.current);
     typingTimerRef.current = setTimeout(() => {
-      socketRef.current?.emit('typing:stop', { toId: targetUser.id });
+      socketRef.current?.emit('typing:stop', targetPayload(targetUser));
     }, 2000);
   }, [targetUser]);
 
   // ── Reaction ─────────────────────────────────────────
   const addReaction = useCallback((msgId, emoji) => {
     if (!socketRef.current) return;
-    socketRef.current.emit('reaction:add', { messageId: msgId, emoji, toId: targetUser?.id });
+    socketRef.current.emit('reaction:add', {
+      messageId: msgId,
+      emoji,
+      ...targetPayload(targetUser),
+    });
   }, [targetUser]);
 
   const clearMessages = useCallback(() => setMessages([]), []);
 
-  return { messages, isTyping, connected, sendMessage, notifyTyping, addReaction, clearMessages };
+  return {
+    messages, isTyping: !!typingPeer, typingPeer,
+    connected, sendMessage, notifyTyping, addReaction, clearMessages,
+  };
 }

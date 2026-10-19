@@ -12,6 +12,7 @@ export function resolveUrl(path) {
 export function normalizeUser(u) {
   if (!u) return null;
   return {
+    kind:      'user',
     id:        u.id,
     name:      u.displayName || u.username,
     username:  u.username,
@@ -20,6 +21,30 @@ export function normalizeUser(u) {
     status:    u.online ? 'online' : 'offline',
     createdAt: u.createdAt,
     unread:    0,
+  };
+}
+
+export function normalizeGroup(group) {
+  if (!group) return null;
+  // Group creation responses nest each participant as `{ user }`; the list
+  // endpoint returns the user fields directly.
+  const participants = (group.participants ?? []).map(p => {
+    const user = p.user ?? p;
+    return {
+      id:     user.id,
+      name:   user.displayName || user.username,
+      avatar: user.avatar || '/images/user.png',
+    };
+  });
+  return {
+    kind:         'group',
+    id:           group.id,
+    name:         group.name || 'گروه بدون نام',
+    avatar:       group.avatar || null,
+    participants,
+    memberCount:  participants.length,
+    unread:       group.unread ?? 0,
+    updatedAt:    group.updatedAt,
   };
 }
 
@@ -92,6 +117,19 @@ export function fetchMessages(targetUserId, skip = 0) {
 // empty list; conversations are started on demand via username search.
 export function fetchConversations() {
   return request('GET', '/messages/conversations');
+}
+
+// ── Groups ────────────────────────────────────────────
+export function fetchGroups() {
+  return request('GET', '/messages/groups');
+}
+
+export function createGroup(name, memberIds) {
+  return request('POST', '/messages/groups', { name, memberIds });
+}
+
+export function fetchGroupMessages(conversationId, skip = 0) {
+  return request('GET', `/messages/groups/${conversationId}?take=50&skip=${skip}`);
 }
 
 // ── Upload ────────────────────────────────────────────

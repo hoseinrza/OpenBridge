@@ -14,7 +14,7 @@ export class MessagesController {
   async listConversations(@Request() req) {
     const list  = await this.messages.listConversations(req.user.id);
     const users = await this.users.withOnlineStatus(list.map(c => c.user));
-    return list.map((c, i) => ({ user: users[i], unread: c.unread }));
+    return list.map((c, i) => ({ user: users[i], unread: c.unread, updatedAt: c.updatedAt }));
   }
 
   // ── Group chats ──────────────────────────────────────

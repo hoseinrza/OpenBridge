@@ -67,7 +67,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       if (body.conversationId) {
         const msg = await this.messages.sendToConversation(body.conversationId, socket.data.userId, body);
-        this.server.to(`conv:${body.conversationId}`).emit('message:new', msg);
+        // Group broadcasts go to each participant's personal room. That way
+        // members added after they connected still receive messages without
+        // needing to rejoin a Socket.IO room.
+        const participantIds = await this.messages.getConversationParticipantIds(body.conversationId);
+        this.server.to(participantIds).emit('message:new', msg);
         return { ok: true, id: msg.id };
       }
 
@@ -88,8 +92,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (await this.redis.isUserOnline(body.toId)) {
         setTimeout(async () => {
           try {
-            await this.messages.markRead(socket.data.userId, body.toId);
-            this.server.to(socket.data.userId).emit('message:read', { by: body.toId });
+            const result = await this.messages.markRead(socket.data.userId, body.toId);
+            this.server.to(socket.data.userId).emit('message:read', {
+              by: body.toId,
+              conversationId: result.conversationId,
+            });
           } catch (err) {
             console.error('[socket] auto read receipt failed', err);
           }
@@ -112,21 +119,63 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // ── Typing indicators ───────────────────────────────
   @SubscribeMessage('typing:start')
-  onTypingStart(@ConnectedSocket() s: Socket, @MessageBody() body: { toId: string }) {
-    this.server.to(body.toId).emit('typing:start', { fromId: s.data.userId });
+  async onTypingStart(
+    @ConnectedSocket() s: Socket,
+    @MessageBody() body: { toId?: string; conversationId?: string },
+  ) {
+    if (body.conversationId) {
+      const participantIds = await this.messages.getConversationParticipantIds(body.conversationId);
+      if (!participantIds.includes(s.data.userId)) return;
+      this.server.to(participantIds.filter(id => id !== s.data.userId)).emit('typing:start', {
+        fromId: s.data.userId,
+        conversationId: body.conversationId,
+      });
+      return;
+    }
+    if (body.toId) this.server.to(body.toId).emit('typing:start', { fromId: s.data.userId });
   }
 
   @SubscribeMessage('typing:stop')
-  onTypingStop(@ConnectedSocket() s: Socket, @MessageBody() body: { toId: string }) {
-    this.server.to(body.toId).emit('typing:stop', { fromId: s.data.userId });
+  async onTypingStop(
+    @ConnectedSocket() s: Socket,
+    @MessageBody() body: { toId?: string; conversationId?: string },
+  ) {
+    if (body.conversationId) {
+      const participantIds = await this.messages.getConversationParticipantIds(body.conversationId);
+      if (!participantIds.includes(s.data.userId)) return;
+      this.server.to(participantIds.filter(id => id !== s.data.userId)).emit('typing:stop', {
+        fromId: s.data.userId,
+        conversationId: body.conversationId,
+      });
+      return;
+    }
+    if (body.toId) this.server.to(body.toId).emit('typing:stop', { fromId: s.data.userId });
   }
 
   // ── Read receipt ────────────────────────────────────
   @SubscribeMessage('messages:read')
-  async onRead(@ConnectedSocket() s: Socket, @MessageBody() body: { fromId: string }) {
+  async onRead(
+    @ConnectedSocket() s: Socket,
+    @MessageBody() body: { fromId?: string; conversationId?: string },
+  ) {
     try {
-      await this.messages.markRead(body.fromId, s.data.userId);
-      this.server.to(body.fromId).emit('message:read', { by: s.data.userId });
+      if (body.conversationId) {
+        const participantIds = await this.messages.getConversationParticipantIds(body.conversationId);
+        if (!participantIds.includes(s.data.userId)) return;
+        await this.messages.markConversationRead(body.conversationId, s.data.userId);
+        this.server.to(participantIds).emit('message:read', {
+          by: s.data.userId,
+          conversationId: body.conversationId,
+        });
+        return;
+      }
+
+      if (!body.fromId) return;
+      const result = await this.messages.markRead(body.fromId, s.data.userId);
+      this.server.to(body.fromId).emit('message:read', {
+        by: s.data.userId,
+        conversationId: result.conversationId,
+      });
     } catch (err) {
       console.error('[socket] messages:read failed', err);
     }
@@ -136,14 +185,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('reaction:add')
   async onReaction(
     @ConnectedSocket() s: Socket,
-    @MessageBody() body: { messageId: string; emoji: string; toId: string },
+    @MessageBody() body: { messageId: string; emoji: string; toId?: string; conversationId?: string },
   ) {
     try {
       const reaction = await this.messages.addReaction(body.messageId, s.data.userId, body.emoji);
-      this.server.to(s.data.userId).to(body.toId).emit('reaction:added', {
-        messageId: body.messageId,
-        ...reaction,
-      });
+
+      if (body.conversationId) {
+        const participantIds = await this.messages.getConversationParticipantIds(body.conversationId);
+        if (!participantIds.includes(s.data.userId)) return;
+        this.server.to(participantIds).emit('reaction:added', {
+          messageId: body.messageId,
+          conversationId: body.conversationId,
+          ...reaction,
+        });
+        return;
+      }
+
+      if (body.toId) {
+        this.server.to(s.data.userId).to(body.toId).emit('reaction:added', {
+          messageId: body.messageId,
+          ...reaction,
+        });
+      }
     } catch (err) {
       console.error('[socket] reaction:add failed', err);
     }

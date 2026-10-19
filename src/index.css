@@ -221,6 +221,23 @@ body {
   box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent);
 }
 
+.group-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--s3), #FFE9A8);
+  border: 1px solid rgba(197,22,29,0.18);
+  color: var(--accent);
+  transition: transform 0.2s var(--ease-spring), box-shadow 0.2s var(--ease-out);
+}
+.group-avatar i { font-size: 15px; }
+.user-avatar.sm.group-avatar i { font-size: 12px; }
+.user-item:hover .group-avatar { transform: scale(1.06); }
+.user-item.active .group-avatar {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent);
+}
+
 .status {
   position: absolute;
   bottom: -1px; right: -1px;
