@@ -1,23 +1,34 @@
 import { Injectable } from '@nestjs/common';
 
 /**
- * In-memory replacement for Redis — sufficient for a single dev/demo instance.
- * Swap back to ioredis-backed implementation when scaling beyond one process.
+ * In-memory presence tracking — sufficient for a single dev/demo instance.
+ * Tracks every socket per user so a second device disconnecting does not mark
+ * the user offline while another session is still connected.
  */
 @Injectable()
 export class RedisService {
-  private onlineUsers = new Map<string, string>();
+  private onlineUsers = new Map<string, Set<string>>();
 
-  async setUserOnline(userId: string, socketId: string) {
-    this.onlineUsers.set(userId, socketId);
+  async addSocket(userId: string, socketId: string) {
+    const sockets = this.onlineUsers.get(userId) ?? new Set<string>();
+    sockets.add(socketId);
+    this.onlineUsers.set(userId, sockets);
   }
 
-  async setUserOffline(userId: string) {
-    this.onlineUsers.delete(userId);
+  // Returns true when the user still has at least one connected socket.
+  async removeSocket(userId: string, socketId: string): Promise<boolean> {
+    const sockets = this.onlineUsers.get(userId);
+    if (!sockets) return false;
+    sockets.delete(socketId);
+    if (sockets.size === 0) {
+      this.onlineUsers.delete(userId);
+      return false;
+    }
+    return true;
   }
 
   async getOnlineUsers(): Promise<Record<string, string>> {
-    return Object.fromEntries(this.onlineUsers);
+    return Object.fromEntries([...this.onlineUsers].map(([userId, sockets]) => [userId, [...sockets][0]]));
   }
 
   async isUserOnline(userId: string): Promise<boolean> {

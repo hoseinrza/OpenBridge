@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 const WITH_RELATIONS = {
@@ -12,9 +12,8 @@ const PARTNER_SELECT = { id: true, username: true, displayName: true, avatar: tr
 export class MessagesService {
   constructor(private prisma: PrismaService) {}
 
-  // Finds the 1-to-1 conversation between two users, creating it on first contact.
-  private async getOrCreateDirectConversation(userAId: string, userBId: string) {
-    const existing = await this.prisma.conversation.findFirst({
+  private findDirectConversation(userAId: string, userBId: string) {
+    return this.prisma.conversation.findFirst({
       where: {
         isGroup: false,
         AND: [
@@ -23,6 +22,11 @@ export class MessagesService {
         ],
       },
     });
+  }
+
+  // Finds the 1-to-1 conversation between two users, creating it on first contact.
+  private async getOrCreateDirectConversation(userAId: string, userBId: string) {
+    const existing = await this.findDirectConversation(userAId, userBId);
     if (existing) return existing;
 
     return this.prisma.conversation.create({
@@ -91,18 +95,40 @@ export class MessagesService {
     return this.sendToConversation(conversation.id, senderId, data);
   }
 
+  // Read receipts must never create conversations: only mark messages in an
+  // existing direct chat as read.
   async markRead(senderId: string, receiverId: string) {
-    const conversation = await this.getOrCreateDirectConversation(senderId, receiverId);
+    const conversation = await this.findDirectConversation(senderId, receiverId);
+    if (!conversation) return { count: 0, conversationId: null };
     const result = await this.markConversationRead(conversation.id, receiverId);
     return { ...result, conversationId: conversation.id };
   }
 
   async addReaction(messageId: string, userId: string, emoji: string) {
-    return this.prisma.reaction.upsert({
-      where:  { userId_messageId_emoji: { userId, messageId, emoji } },
-      create: { messageId, userId, emoji },
+    const trimmedEmoji = typeof emoji === 'string' ? emoji.trim() : '';
+    if (!messageId || typeof messageId !== 'string') {
+      throw new BadRequestException('پیام نامعتبر است');
+    }
+    if (!trimmedEmoji || trimmedEmoji.length > 32) {
+      throw new BadRequestException('ری‌اکشن نامعتبر است');
+    }
+
+    const message = await this.prisma.message.findUnique({
+      where:  { id: messageId },
+      select: { conversationId: true, deletedAt: true },
+    });
+    if (!message || message.deletedAt) throw new NotFoundException('پیام پیدا نشد');
+
+    // Authorization is based on the message's real conversation, never on an
+    // ID supplied by the client.
+    await this.assertMember(message.conversationId, userId);
+
+    const reaction = await this.prisma.reaction.upsert({
+      where:  { userId_messageId_emoji: { userId, messageId, emoji: trimmedEmoji } },
+      create: { messageId, userId, emoji: trimmedEmoji },
       update: {},
     });
+    return { reaction, conversationId: message.conversationId };
   }
 
   // ── Group chat ───────────────────────────────────────────────────────
@@ -199,19 +225,44 @@ export class MessagesService {
     return messages.reverse().map(m => this.toWireMessage(m));
   }
 
+  private normalizeOutgoingMessage(data: {
+    type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number;
+  }) {
+    const type = (typeof data.type === 'string' ? data.type : 'TEXT').toUpperCase();
+    const allowedTypes = ['TEXT', 'IMAGE', 'FILE', 'AUDIO', 'VIDEO'];
+    if (!allowedTypes.includes(type)) throw new BadRequestException('نوع پیام نامعتبر است');
+
+    const text = typeof data.text === 'string' ? data.text.trim() : '';
+    if (text.length > 4000) throw new BadRequestException('متن پیام بیش از حد طولانی است');
+
+    if (type === 'TEXT') {
+      if (!text) throw new BadRequestException('متن پیام نمی‌تواند خالی باشد');
+      return { type: type as any, text, fileUrl: null, fileName: null, fileSize: null };
+    }
+
+    const fileUrl = typeof data.fileUrl === 'string' ? data.fileUrl.trim() : '';
+    if (!/^\/uploads\/[A-Za-z0-9._-]+$/.test(fileUrl)) {
+      throw new BadRequestException('فایل پیوست نامعتبر است');
+    }
+
+    const fileName = typeof data.fileName === 'string' ? data.fileName.trim().slice(0, 255) : null;
+    if (data.fileSize !== undefined && (!Number.isInteger(data.fileSize) || data.fileSize < 0 || data.fileSize > 10 * 1024 * 1024)) {
+      throw new BadRequestException('حجم فایل نامعتبر است');
+    }
+
+    return { type: type as any, text: text || null, fileUrl, fileName, fileSize: data.fileSize ?? null };
+  }
+
   async sendToConversation(conversationId: string, senderId: string, data: {
     type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number;
   }) {
     await this.assertMember(conversationId, senderId);
+    const normalized = this.normalizeOutgoingMessage(data);
     const message = await this.prisma.message.create({
       data: {
         conversationId,
         senderId,
-        type:     (data.type as any) ?? 'TEXT',
-        text:     data.text,
-        fileUrl:  data.fileUrl,
-        fileName: data.fileName,
-        fileSize: data.fileSize,
+        ...normalized,
       },
       include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
     });
