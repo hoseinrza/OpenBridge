@@ -10,6 +10,7 @@ import { MessagesService } from '../messages/messages.service';
 import { RedisService } from '../redis/redis.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { JWT_SECRET, isOriginAllowed } from '../config/env';
+import { signedFileUrl } from '../uploads/file-urls';
 
 const MAX_PACKET_BYTES = 256 * 1024;
 
@@ -306,7 +307,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         caller: {
           id:     caller.id,
           name:   caller.displayName || caller.username,
-          avatar: caller.avatar ?? '',
+          avatar: signedFileUrl(caller.avatar) ?? '',
         },
       });
     } catch (err) {

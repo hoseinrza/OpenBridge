@@ -2,8 +2,6 @@ import 'reflect-metadata';
 import './config/env';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
-import { join } from 'path';
-import * as express from 'express';
 import { AppModule } from './app.module';
 import { isOriginAllowed } from './config/env';
 
@@ -16,9 +14,6 @@ async function bootstrap() {
     origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
     credentials: true,
   });
-
-  // Serve uploaded files statically
-  app.use('/uploads', express.static(join(process.cwd(), 'uploads')));
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);

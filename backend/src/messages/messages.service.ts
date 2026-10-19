@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { signedFileUrl } from '../uploads/file-urls';
 
 const WITH_RELATIONS = {
   sender:    { select: { id: true, username: true, displayName: true, avatar: true } },
@@ -47,7 +48,30 @@ export class MessagesService {
 
   private toWireMessage(message: any) {
     const { reads, ...rest } = message;
-    return { ...rest, read: reads.some(r => r.userId !== message.senderId) };
+    return {
+      ...rest,
+      fileUrl: signedFileUrl(rest.fileUrl),
+      sender: rest.sender
+        ? { ...rest.sender, avatar: signedFileUrl(rest.sender.avatar) }
+        : rest.sender,
+      read: reads.some(r => r.userId !== message.senderId),
+    };
+  }
+
+  private toWireGroup(group: any, unread = 0) {
+    return {
+      id:           group.id,
+      name:         group.name,
+      avatar:       signedFileUrl(group.avatar),
+      createdAt:    group.createdAt,
+      updatedAt:    group.updatedAt,
+      participants: group.participants.map(p => ({
+        ...p.user,
+        avatar: signedFileUrl(p.user.avatar),
+        role:   p.role,
+      })),
+      unread,
+    };
   }
 
   async getConversation(myId: string, otherId: string, take = 50, skip = 0) {
@@ -158,7 +182,7 @@ export class MessagesService {
       throw new BadRequestException('یکی از اعضای انتخاب‌شده معتبر نیست');
     }
 
-    return this.prisma.conversation.create({
+    const group = await this.prisma.conversation.create({
       data: {
         isGroup: true,
         name: trimmedName,
@@ -171,6 +195,7 @@ export class MessagesService {
       },
       include: { participants: { include: { user: { select: PARTNER_SELECT } } } },
     });
+    return this.toWireGroup(group);
   }
 
   async listGroups(myId: string) {
@@ -184,15 +209,7 @@ export class MessagesService {
       const unread = await this.prisma.message.count({
         where: { conversationId: group.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
       });
-      return {
-        id:           group.id,
-        name:         group.name,
-        avatar:       group.avatar,
-        createdAt:    group.createdAt,
-        updatedAt:    group.updatedAt,
-        participants: group.participants.map(p => ({ ...p.user, role: p.role })),
-        unread,
-      };
+      return this.toWireGroup(group, unread);
     }));
   }
 

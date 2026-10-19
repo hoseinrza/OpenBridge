@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { JWT_SECRET } from '../../config/env';
+import { signedFileUrl } from '../../uploads/file-urls';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -21,6 +22,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       select: { id: true, username: true, displayName: true, avatar: true, bio: true, status: true, createdAt: true },
     });
     if (!user) throw new UnauthorizedException();
-    return user;
+    return { ...user, avatar: signedFileUrl(user.avatar) };
   }
 }

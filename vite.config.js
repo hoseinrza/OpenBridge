@@ -10,7 +10,6 @@ export default defineConfig({
     // to the Nest backend (production nginx does the same thing).
     proxy: {
       '/api':      { target: 'http://localhost:3000', changeOrigin: true },
-      '/uploads':  { target: 'http://localhost:3000', changeOrigin: true },
       '/socket.io': { target: 'http://localhost:3000', ws: true, changeOrigin: true },
     },
   },

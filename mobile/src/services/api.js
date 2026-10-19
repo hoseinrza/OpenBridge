@@ -2,7 +2,7 @@ import { storage } from './storage';
 
 // EXPO_PUBLIC_-prefixed vars are inlined at build time (same idea as Vite's
 // VITE_ prefix on the web app). Set this in mobile/.env — see .env.example.
-const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/api';
+const BASE = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/api').replace(/\/$/, '');
 
 const ORIGIN = BASE.replace(/\/api\/?$/, '');
 
@@ -22,7 +22,10 @@ export function setUnauthorizedHandler(fn) {
 // URL — unlike the web app, RN has no same-origin relative-URL resolution.
 export function resolveUrl(path) {
   if (!path) return null;
-  return path.startsWith('http') ? path : `${ORIGIN}${path}`;
+  if (path.startsWith('http')) return path;
+  // Private uploads are served under the API prefix with a signed URL.
+  if (path.startsWith('/uploads/')) return `${BASE}${path.slice('/uploads'.length)}`;
+  return `${ORIGIN}${path}`;
 }
 
 // Converts a backend user record ({ username, displayName, online, ... }) to the app's user shape

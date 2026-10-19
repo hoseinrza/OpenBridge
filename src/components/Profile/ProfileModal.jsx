@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { updateProfile, uploadFile, resolveUrl } from '../../services/api.js';
+import { updateProfile, uploadFile, resolveUrl, uploadPath } from '../../services/api.js';
 import './ProfileModal.css';
 
 function joinedAt(dateStr) {
@@ -42,7 +42,11 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
     setError('');
     setSaving(true);
     try {
-      const body = { displayName: trimmedName, bio: bio.trim(), avatar };
+      const body = { displayName: trimmedName, bio: bio.trim() };
+      // Only persist real uploads; resolveUrl()/fallback images are display
+      // URLs and would be rejected by the server's avatar validation.
+      const avatarUpload = uploadPath(avatar);
+      if (avatarUpload?.startsWith('/uploads/')) body.avatar = avatarUpload;
       // Legacy accounts may still have a non-English username; only send it
       // when the user actually changes it so the new rule doesn't block them.
       if (trimmedUsername !== user.username) body.username = trimmedUsername;

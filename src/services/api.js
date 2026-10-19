@@ -1,11 +1,23 @@
-const BASE = import.meta.env.VITE_API_URL ?? '/api';
+const BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '');
 
 const ORIGIN = BASE.replace(/\/api\/?$/, '');
 
-// Resolves a relative backend path (e.g. "/uploads/x.png") to an absolute URL
+// Resolves a relative backend path to an absolute URL. Uploads live behind
+// the authenticated API prefix, so they resolve against BASE rather than the
+// bare origin.
 export function resolveUrl(path) {
   if (!path) return path;
-  return path.startsWith('http') ? path : `${ORIGIN}${path}`;
+  if (path.startsWith('http')) return path;
+  if (path.startsWith('/uploads/')) return `${BASE}${path.slice('/uploads'.length)}`;
+  return `${ORIGIN}${path}`;
+}
+
+// Strips the API origin/query from a (signed) upload URL so it can be stored
+// in the database as a plain "/uploads/<file>" path.
+export function uploadPath(url) {
+  if (!url) return url;
+  const match = url.split('?')[0].match(/\/uploads\/[A-Za-z0-9._-]+$/);
+  return match ? match[0] : url;
 }
 
 // Converts a backend user record ({ username, displayName, online, ... }) to the frontend's user shape

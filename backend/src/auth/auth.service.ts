@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { signedFileUrl } from '../uploads/file-urls';
 
 const SAFE = { id: true, username: true, displayName: true, avatar: true, status: true, createdAt: true };
 
@@ -23,7 +24,7 @@ export class AuthService {
       },
       select: SAFE,
     });
-    return { user, token: this.sign(user.id) };
+    return { user: this.withSignedAvatar(user), token: this.sign(user.id) };
   }
 
   async login(dto: LoginDto) {
@@ -32,7 +33,11 @@ export class AuthService {
       throw new UnauthorizedException('نام کاربری یا رمز اشتباه است');
 
     const { password, ...safe } = user;
-    return { user: safe, token: this.sign(user.id) };
+    return { user: this.withSignedAvatar(safe), token: this.sign(user.id) };
+  }
+
+  private withSignedAvatar(user: any) {
+    return { ...user, avatar: signedFileUrl(user.avatar) };
   }
 
   private sign(userId: string) {

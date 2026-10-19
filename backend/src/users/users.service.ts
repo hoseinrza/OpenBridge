@@ -2,6 +2,7 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { signedFileUrl } from '../uploads/file-urls';
 
 const SAFE = { id: true, username: true, displayName: true, avatar: true, bio: true, status: true, createdAt: true };
 
@@ -33,11 +34,12 @@ export class UsersService {
   }
 
   async updateAvatar(id: string, avatarUrl: string) {
-    return this.prisma.user.update({
+    const user = await this.prisma.user.update({
       where: { id },
       data:  { avatar: avatarUrl },
       select: SAFE,
     });
+    return { ...user, avatar: signedFileUrl(user.avatar) };
   }
 
   async updateProfile(id: string, dto: UpdateProfileDto) {
@@ -45,15 +47,20 @@ export class UsersService {
       const existing = await this.prisma.user.findUnique({ where: { username: dto.username } });
       if (existing && existing.id !== id) throw new ConflictException('این نام کاربری قبلاً ثبت شده');
     }
-    return this.prisma.user.update({
+    const user = await this.prisma.user.update({
       where: { id },
       data:  dto,
       select: SAFE,
     });
+    return { ...user, avatar: signedFileUrl(user.avatar) };
   }
 
   async withOnlineStatus(users: any[]) {
     const online = await this.redis.getOnlineUsers();
-    return users.map(u => ({ ...u, online: !!online[u.id] }));
+    return users.map(u => ({
+      ...u,
+      avatar: signedFileUrl(u.avatar),
+      online: !!online[u.id],
+    }));
   }
 }
