@@ -13,11 +13,11 @@ function loadUser() {
 export default function App() {
   const [currentUser, setCurrentUser] = useState(loadUser);
 
-  async function handleLogin(username, password, mode) {
+  async function handleLogin(username, password, mode, displayName) {
     const user = mode === 'register'
-      ? await register(username, password)
+      ? await register(username, displayName, password)
       : await login(username, password);
-    const normalized = { id: user.id, name: user.username, avatar: user.avatar ?? '/images/user.png', bio: user.bio ?? '', status: 'online' };
+    const normalized = { id: user.id, name: user.displayName || user.username, username: user.username, avatar: user.avatar ?? '/images/user.png', bio: user.bio ?? '', status: 'online' };
     localStorage.setItem('chatapp_user', JSON.stringify(normalized));
     setCurrentUser(normalized);
   }

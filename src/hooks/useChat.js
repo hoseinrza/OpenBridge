@@ -14,7 +14,7 @@ function normalize(msg, myId) {
     name:      msg.fileName,
     size:      msg.fileSize,
     side:      msg.senderId === myId ? 'mine' : 'other',
-    sender:    msg.sender?.username,
+    sender:    msg.sender?.displayName ?? msg.sender?.username,
     avatar:    msg.sender?.avatar ? resolveUrl(msg.sender.avatar) : '/images/user.png',
     time:      new Date(msg.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
     createdAt: new Date(msg.createdAt).getTime(),

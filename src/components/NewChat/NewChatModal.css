@@ -100,6 +100,10 @@
   flex: 1; display: flex; flex-direction: column; gap: 2px; overflow: hidden;
 }
 .newchat-result-name { font-size: 13.5px; font-weight: 600; color: var(--t1); }
+.newchat-result-username {
+  font-size: 11.5px; color: var(--t3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .newchat-result-bio {
   font-size: 11.5px; color: var(--t3);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

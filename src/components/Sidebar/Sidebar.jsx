@@ -50,7 +50,7 @@ export default function Sidebar({ users, activeUserId, onSelectUser, currentUser
             <i className="fas fa-comment-dots" />
             <p>هنوز گفتگویی نداری</p>
             <button className="empty-conversations-btn" onClick={onNewChat}>
-              <i className="fas fa-magnifying-glass" /> جستجوی یوزرنیم برای شروع چت
+              <i className="fas fa-magnifying-glass" /> جستجوی نام نمایشی یا نام کاربری برای شروع چت
             </button>
           </div>
         )}

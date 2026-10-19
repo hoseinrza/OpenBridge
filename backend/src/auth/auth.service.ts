@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
-const SAFE = { id: true, username: true, avatar: true, status: true, createdAt: true };
+const SAFE = { id: true, username: true, displayName: true, avatar: true, status: true, createdAt: true };
 
 @Injectable()
 export class AuthService {
@@ -16,7 +16,11 @@ export class AuthService {
     if (exists) throw new ConflictException('این نام کاربری قبلاً ثبت شده');
 
     const user = await this.prisma.user.create({
-      data: { username: dto.username, password: await bcrypt.hash(dto.password, 10) },
+      data: {
+        username:    dto.username,
+        displayName: dto.displayName,
+        password:    await bcrypt.hash(dto.password, 10),
+      },
       select: SAFE,
     });
     return { user, token: this.sign(user.id) };

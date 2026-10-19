@@ -2,11 +2,11 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 const WITH_RELATIONS = {
-  sender:    { select: { id: true, username: true, avatar: true } },
+  sender:    { select: { id: true, username: true, displayName: true, avatar: true } },
   reactions: true,
 };
 
-const PARTNER_SELECT = { id: true, username: true, avatar: true, bio: true, status: true };
+const PARTNER_SELECT = { id: true, username: true, displayName: true, avatar: true, bio: true, status: true };
 
 @Injectable()
 export class MessagesService {

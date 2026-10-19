@@ -5,23 +5,31 @@ import { colors, fonts, radius } from '../theme';
 
 export default function LoginScreen() {
   const { login } = useAuth();
-  const [mode, setMode]         = useState('login'); // 'login' | 'register'
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [mode, setMode]               = useState('login'); // 'login' | 'register'
+  const [username, setUsername]       = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [password, setPassword]       = useState('');
+  const [error, setError]             = useState('');
+  const [loading, setLoading]         = useState(false);
 
   async function submit() {
-    const u = username.trim();
+    const u  = username.trim();
+    const dn = displayName.trim();
     if (!u)           { setError('نام کاربری را وارد کنید');    return; }
     if (u.length < 2) { setError('حداقل ۲ کاراکتر وارد کنید'); return; }
+    if (mode === 'register' && !/^[a-zA-Z0-9_]+$/.test(u)) {
+      setError('نام کاربری باید فقط شامل حروف انگلیسی، عدد و _ باشد'); return;
+    }
+    if (mode === 'register' && dn.length < 2) {
+      setError('نام نمایشی باید حداقل ۲ کاراکتر باشد'); return;
+    }
     if (!password)    { setError('رمز عبور را وارد کنید');      return; }
-    if (mode === 'register' && password.length < 6) { setError('رمز عبور حداقل ۶ کاراکتر'); return; }
+    if (mode === 'register' && password.length < 8) { setError('رمز عبور حداقل ۸ کاراکتر'); return; }
 
     setLoading(true);
     setError('');
     try {
-      await login(u, password, mode);
+      await login(u, password, mode, dn);
     } catch (err) {
       setError(err.message ?? 'خطا در اتصال به سرور');
     } finally {
@@ -56,16 +64,27 @@ export default function LoginScreen() {
         </View>
 
         <TextInput
-          style={styles.input}
+          style={[styles.input, styles.inputLtr]}
           value={username}
           onChangeText={(v) => { setUsername(v); setError(''); }}
-          placeholder="نام کاربری..."
+          placeholder="نام کاربری (انگلیسی)..."
           placeholderTextColor={colors.t3}
           autoCapitalize="none"
           autoCorrect={false}
           maxLength={30}
           editable={!loading}
         />
+        {mode === 'register' && (
+          <TextInput
+            style={styles.input}
+            value={displayName}
+            onChangeText={(v) => { setDisplayName(v); setError(''); }}
+            placeholder="نام نمایشی (مثلاً علی رضایی)..."
+            placeholderTextColor={colors.t3}
+            maxLength={50}
+            editable={!loading}
+          />
+        )}
         <TextInput
           style={styles.input}
           value={password}
@@ -113,6 +132,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md, paddingHorizontal: 16, paddingVertical: 13,
     fontFamily: fonts.regular, fontSize: 14, color: colors.t1, marginBottom: 10, textAlign: 'right',
   },
+  inputLtr: { textAlign: 'left' },
   error: { color: colors.red, fontFamily: fonts.regular, fontSize: 12, alignSelf: 'flex-end', marginBottom: 8 },
 
   submitBtn:         { width: '100%', backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: 13, alignItems: 'center', marginTop: 6 },

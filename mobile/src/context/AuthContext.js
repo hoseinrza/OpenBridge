@@ -19,16 +19,16 @@ export function AuthProvider({ children }) {
 
   const persistUser = useCallback(async (user) => {
     const normalized = {
-      id: user.id, name: user.username,
+      id: user.id, name: user.displayName || user.username, username: user.username,
       avatar: resolveUrl(user.avatar), bio: user.bio ?? '', status: 'online',
     };
     await storage.setUser(normalized);
     setCurrentUser(normalized);
   }, []);
 
-  const login = useCallback(async (username, password, mode) => {
+  const login = useCallback(async (username, password, mode, displayName) => {
     const user = mode === 'register'
-      ? await apiRegister(username, password)
+      ? await apiRegister(username, displayName, password)
       : await apiLogin(username, password);
     await persistUser(user);
   }, [persistUser]);

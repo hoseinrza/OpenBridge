@@ -82,11 +82,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       console.log(`[socket] message:send from=${socket.data.userId} to=${body.toId} recipientSocketsOnline=${recipientSockets.length}`);
       this.server.to(socket.data.userId).to(body.toId).emit('message:new', { ...msg, receiverId: body.toId });
 
-      // Auto read-receipt if receiver is online
+      // Auto read-receipt if receiver is online. The timer must not reject:
+      // the recipient may be deleted while the receipt is pending, and an
+      // unhandled rejection would take down the whole API process.
       if (await this.redis.isUserOnline(body.toId)) {
         setTimeout(async () => {
-          await this.messages.markRead(socket.data.userId, body.toId);
-          this.server.to(socket.data.userId).emit('message:read', { by: body.toId });
+          try {
+            await this.messages.markRead(socket.data.userId, body.toId);
+            this.server.to(socket.data.userId).emit('message:read', { by: body.toId });
+          } catch (err) {
+            console.error('[socket] auto read receipt failed', err);
+          }
         }, 1500);
       }
 
@@ -118,8 +124,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // ── Read receipt ────────────────────────────────────
   @SubscribeMessage('messages:read')
   async onRead(@ConnectedSocket() s: Socket, @MessageBody() body: { fromId: string }) {
-    await this.messages.markRead(body.fromId, s.data.userId);
-    this.server.to(body.fromId).emit('message:read', { by: s.data.userId });
+    try {
+      await this.messages.markRead(body.fromId, s.data.userId);
+      this.server.to(body.fromId).emit('message:read', { by: s.data.userId });
+    } catch (err) {
+      console.error('[socket] messages:read failed', err);
+    }
   }
 
   // ── Reactions ───────────────────────────────────────
@@ -128,11 +138,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() s: Socket,
     @MessageBody() body: { messageId: string; emoji: string; toId: string },
   ) {
-    const reaction = await this.messages.addReaction(body.messageId, s.data.userId, body.emoji);
-    this.server.to(s.data.userId).to(body.toId).emit('reaction:added', {
-      messageId: body.messageId,
-      ...reaction,
-    });
+    try {
+      const reaction = await this.messages.addReaction(body.messageId, s.data.userId, body.emoji);
+      this.server.to(s.data.userId).to(body.toId).emit('reaction:added', {
+        messageId: body.messageId,
+        ...reaction,
+      });
+    } catch (err) {
+      console.error('[socket] reaction:add failed', err);
+    }
   }
 
   // ── WebRTC call signaling (plain relay between the two peers' rooms) ──

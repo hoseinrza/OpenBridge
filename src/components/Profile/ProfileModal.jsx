@@ -8,10 +8,11 @@ function joinedAt(dateStr) {
 }
 
 export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
-  const [editing, setEditing]   = useState(false);
-  const [name,    setName]      = useState(user.name);
-  const [bio,     setBio]       = useState(user.bio ?? '');
-  const [avatar,  setAvatar]    = useState(user.avatar);
+  const [editing,  setEditing]  = useState(false);
+  const [name,     setName]     = useState(user.name);
+  const [username, setUsername] = useState(user.username ?? '');
+  const [bio,      setBio]      = useState(user.bio ?? '');
+  const [avatar,   setAvatar]   = useState(user.avatar);
   const [saving,  setSaving]    = useState(false);
   const [error,   setError]     = useState('');
   const fileInputRef = useRef(null);
@@ -31,13 +32,22 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
   }
 
   async function handleSave() {
-    if (!name.trim()) { setError('نام نمی‌تواند خالی باشد'); return; }
+    const trimmedName     = name.trim();
+    const trimmedUsername = username.trim();
+    if (!trimmedName) { setError('نام نمایشی نمی‌تواند خالی باشد'); return; }
+    if (trimmedUsername.length < 2 || !/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
+      setError('نام کاربری باید فقط شامل حروف انگلیسی، عدد و _ باشد');
+      return;
+    }
     setError('');
     setSaving(true);
     try {
-      const patch = { name: name.trim(), bio: bio.trim(), avatar };
-      await updateProfile({ username: name.trim(), bio: bio.trim(), avatar });
-      onSaved?.(patch);
+      const body = { displayName: trimmedName, bio: bio.trim(), avatar };
+      // Legacy accounts may still have a non-English username; only send it
+      // when the user actually changes it so the new rule doesn't block them.
+      if (trimmedUsername !== user.username) body.username = trimmedUsername;
+      await updateProfile(body);
+      onSaved?.({ name: trimmedName, username: trimmedUsername, bio: bio.trim(), avatar });
       setEditing(false);
     } catch (err) {
       setError(err.message || 'ذخیره تغییرات ناموفق بود');
@@ -48,6 +58,7 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
 
   function handleCancelEdit() {
     setName(user.name);
+    setUsername(user.username ?? '');
     setBio(user.bio ?? '');
     setAvatar(user.avatar);
     setError('');
@@ -80,8 +91,17 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
             <input
               className="profile-input"
               value={name}
-              maxLength={30}
+              maxLength={50}
               onChange={e => setName(e.target.value)}
+            />
+
+            <label className="profile-label">نام کاربری (فقط انگلیسی، عدد و _)</label>
+            <input
+              className="profile-input ltr"
+              value={username}
+              maxLength={30}
+              onChange={e => setUsername(e.target.value)}
+              dir="ltr"
             />
 
             <label className="profile-label">درباره من</label>
@@ -105,6 +125,7 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
         ) : (
           <>
             <div className="profile-name">{user.name}</div>
+            {user.username && <div className="profile-username" dir="ltr">@{user.username}</div>}
             <div className="profile-status">
               <span className={`status-dot ${user.status}`} />
               {user.status === 'online' ? 'آنلاین' : user.status === 'idle' ? 'غیرفعال' : 'آفلاین'}

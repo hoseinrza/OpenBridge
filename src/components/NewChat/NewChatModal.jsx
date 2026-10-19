@@ -45,7 +45,7 @@ export default function NewChatModal({ onClose, onSelect }) {
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="نام کاربری را جستجو کن..."
+            placeholder="نام نمایشی یا نام کاربری را جستجو کن..."
           />
         </div>
 
@@ -61,7 +61,7 @@ export default function NewChatModal({ onClose, onSelect }) {
           {!loading && !error && !query.trim() && (
             <div className="newchat-state">
               <i className="fas fa-magnifying-glass" />
-              نام کاربری شخص مورد نظر را وارد کن تا گفتگوی جدید را شروع کنی
+              نام نمایشی یا نام کاربری شخص مورد نظر را وارد کن تا گفتگوی جدید را شروع کنی
             </div>
           )}
 
@@ -77,6 +77,7 @@ export default function NewChatModal({ onClose, onSelect }) {
               </div>
               <div className="newchat-result-info">
                 <span className="newchat-result-name">{user.name}</span>
+                <span className="newchat-result-username" dir="ltr">@{user.username}</span>
                 {user.bio && <span className="newchat-result-bio">{user.bio}</span>}
               </div>
               <i className="fas fa-arrow-left newchat-result-go" />

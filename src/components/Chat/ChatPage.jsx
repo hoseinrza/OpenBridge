@@ -136,7 +136,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               <p>یک گفتگو را از فهرست انتخاب کن یا با دکمهٔ «گفتگوی جدید» یک گفتگوی تازه بساز.</p>
             ) : (
               <>
-                <p>هنوز گفتگویی نداری. با جستجوی یوزرنیم یک نفر را پیدا کن و گفتگو را شروع کن.</p>
+                <p>هنوز گفتگویی نداری. با جستجوی نام نمایشی یا نام کاربری یک نفر را پیدا کن و گفتگو را شروع کن.</p>
                 <button className="empty-chat-btn" onClick={() => setNewChatOpen(true)}>
                   <i className="fas fa-magnifying-glass" /> شروع گفتگوی جدید
                 </button>

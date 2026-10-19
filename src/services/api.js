@@ -8,12 +8,13 @@ export function resolveUrl(path) {
   return path.startsWith('http') ? path : `${ORIGIN}${path}`;
 }
 
-// Converts a backend user record ({ username, online, ... }) to the frontend's user shape
+// Converts a backend user record ({ username, displayName, online, ... }) to the frontend's user shape
 export function normalizeUser(u) {
   if (!u) return null;
   return {
     id:        u.id,
-    name:      u.username,
+    name:      u.displayName || u.username,
+    username:  u.username,
     avatar:    u.avatar || '/images/user.png',
     bio:       u.bio ?? '',
     status:    u.online ? 'online' : 'offline',
@@ -48,8 +49,8 @@ async function request(method, path, body) {
 }
 
 // ── Auth ─────────────────────────────────────────────
-export async function register(username, password) {
-  const { user, token: t } = await request('POST', '/auth/register', { username, password });
+export async function register(username, displayName, password) {
+  const { user, token: t } = await request('POST', '/auth/register', { username, displayName, password });
   localStorage.setItem('chatapp_token', t);
   return user;
 }

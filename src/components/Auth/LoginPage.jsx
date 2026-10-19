@@ -2,25 +2,33 @@ import { useState } from 'react';
 import './LoginPage.css';
 
 export default function LoginPage({ onLogin }) {
-  const [mode,     setMode]     = useState('login'); // 'login' | 'register'
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error,    setError]    = useState('');
-  const [loading,  setLoading]  = useState(false);
+  const [mode,        setMode]        = useState('login'); // 'login' | 'register'
+  const [username,    setUsername]    = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [password,    setPassword]    = useState('');
+  const [error,       setError]       = useState('');
+  const [loading,     setLoading]     = useState(false);
 
   async function submit(e) {
     e.preventDefault();
-    const u = username.trim();
+    const u  = username.trim();
+    const dn = displayName.trim();
     if (!u)              { setError('نام کاربری را وارد کنید');       return; }
     if (u.length < 2)    { setError('حداقل ۲ کاراکتر وارد کنید');    return; }
+    if (mode === 'register' && !/^[a-zA-Z0-9_]+$/.test(u))
+                         { setError('نام کاربری باید فقط شامل حروف انگلیسی، عدد و _ باشد'); return; }
+    if (mode === 'register' && dn.length < 2)
+                         { setError('نام نمایشی باید حداقل ۲ کاراکتر باشد'); return; }
     if (!password)       { setError('رمز عبور را وارد کنید');         return; }
-    if (mode === 'register' && password.length < 6)
-                         { setError('رمز عبور حداقل ۶ کاراکتر');     return; }
+    if (new TextEncoder().encode(password).length > 72)
+                         { setError('حداکثر طول رمز عبور ۷۲ بایت است'); return; }
+    if (mode === 'register' && password.length < 8)
+                         { setError('رمز عبور باید حداقل ۸ کاراکتر باشد'); return; }
 
     setLoading(true);
     setError('');
     try {
-      await onLogin(u, password, mode);
+      await onLogin(u, password, mode, dn);
     } catch (err) {
       setError(err.message ?? 'خطا در اتصال به سرور');
     } finally {
@@ -38,28 +46,48 @@ export default function LoginPage({ onLogin }) {
         </p>
 
         <div className="login-tabs">
-          <button className={mode === 'login'    ? 'active' : ''} onClick={() => { setMode('login');    setError(''); }}>ورود</button>
-          <button className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setError(''); }}>ثبت‌نام</button>
+          <button type="button" className={mode === 'login'    ? 'active' : ''} onClick={() => { setMode('login'); setPassword(''); setError(''); }}>ورود</button>
+          <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setPassword(''); setError(''); }}>ثبت‌نام</button>
         </div>
 
         <form onSubmit={submit} className="login-form">
           <input
-            className="login-input"
+            className="login-input ltr"
             type="text"
+            name="username"
+            autoComplete="username"
+            required
             value={username}
             onChange={e => { setUsername(e.target.value); setError(''); }}
-            placeholder="نام کاربری..."
+            placeholder="نام کاربری (انگلیسی)..."
             autoFocus
             maxLength={30}
             disabled={loading}
           />
+          {mode === 'register' && (
+            <input
+              className="login-input"
+              type="text"
+              name="displayName"
+              autoComplete="nickname"
+              required
+              value={displayName}
+              onChange={e => { setDisplayName(e.target.value); setError(''); }}
+              placeholder="نام نمایشی (مثلاً علی رضایی)..."
+              maxLength={50}
+              disabled={loading}
+            />
+          )}
           <input
             className="login-input"
             type="password"
+            name="password"
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            required
             value={password}
             onChange={e => { setPassword(e.target.value); setError(''); }}
             placeholder="رمز عبور..."
-            maxLength={100}
+            maxLength={72}
             disabled={loading}
           />
           {error && <span className="login-error">{error}</span>}

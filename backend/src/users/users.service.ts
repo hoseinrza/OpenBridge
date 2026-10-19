@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
-const SAFE = { id: true, username: true, avatar: true, bio: true, status: true, createdAt: true };
+const SAFE = { id: true, username: true, displayName: true, avatar: true, bio: true, status: true, createdAt: true };
 
 @Injectable()
 export class UsersService {
@@ -20,8 +20,11 @@ export class UsersService {
   search(query: string, excludeId: string) {
     return this.prisma.user.findMany({
       where: {
-        username: { contains: query },
-        NOT:      { id: excludeId },
+        NOT: { id: excludeId },
+        OR: [
+          { username:    { contains: query, mode: 'insensitive' } },
+          { displayName: { contains: query, mode: 'insensitive' } },
+        ],
       },
       select:  SAFE,
       orderBy: { username: 'asc' },
