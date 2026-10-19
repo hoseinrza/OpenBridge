@@ -1,6 +1,6 @@
 .newchat-overlay {
   position: fixed; inset: 0; z-index: 200;
-  background: rgba(8,10,15,0.45);
+  background: rgba(37,37,37,0.32);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   display: flex; align-items: center; justify-content: center;
@@ -58,7 +58,7 @@
 }
 .newchat-search:hover { background: var(--glass-2); }
 .newchat-search:focus-within {
-  border-color: rgba(109,74,255,0.5);
+  border-color: rgba(197,22,29,0.45);
   box-shadow: 0 0 0 3px var(--accent-dim);
   background: var(--glass-2);
 }
@@ -93,7 +93,7 @@
   transition: background 0.18s var(--ease-out), color 0.18s var(--ease-out), transform 0.15s var(--ease-out);
   text-align: right; width: 100%;
 }
-.newchat-result:hover  { background: rgba(255,255,255,0.05); color: var(--t1); transform: translateX(-2px); }
+.newchat-result:hover  { background: var(--s3); color: var(--t1); transform: translateX(-2px); }
 .newchat-result:active { transform: scale(0.98); }
 
 .newchat-result-info {

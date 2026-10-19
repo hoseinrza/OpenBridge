@@ -9,8 +9,8 @@ export default function Sidebar({ users, activeUserId, onSelectUser, currentUser
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <img src="/images/logo.png" alt="Logo" className="sidebar-logo" />
-        <span>ChatRoom</span>
+        <img src="/logo.svg" alt="OpenBridge" className="sidebar-logo" />
+        <span>OpenBridge</span>
 
         {page === 'chat' && (
           <button className="icon-btn new-chat-btn" title="گفتگوی جدید" onClick={onNewChat}>

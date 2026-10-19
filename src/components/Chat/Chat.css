@@ -18,7 +18,7 @@
   height: var(--header);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  background: rgba(255,255,255,0.012);
+  background: rgba(37,37,37,0.015);
 }
 
 .chat-back-btn {
@@ -73,8 +73,8 @@
   flex-direction: column;
   gap: 4px;
   background-image:
-    radial-gradient(circle at 18% 15%, rgba(109,74,255,0.045) 0%, transparent 45%),
-    radial-gradient(circle at 85% 75%, rgba(53,208,127,0.03) 0%, transparent 50%);
+    radial-gradient(circle at 18% 15%, rgba(197,22,29,0.035) 0%, transparent 45%),
+    radial-gradient(circle at 85% 75%, rgba(255,201,40,0.09) 0%, transparent 50%);
 }
 
 /* Welcome */
@@ -98,7 +98,7 @@
 
 @keyframes avatarPulse {
   0%,100% { box-shadow: 0 0 0 4px var(--accent-dim), var(--shadow-md); }
-  50%     { box-shadow: 0 0 0 8px rgba(109,74,255,0.1), var(--shadow-md); }
+  50%     { box-shadow: 0 0 0 8px rgba(197,22,29,0.08), var(--shadow-md); }
 }
 
 @keyframes cardIn {
@@ -177,7 +177,7 @@
   transition: background 0.15s var(--ease-out), transform 0.2s var(--ease-spring);
 }
 
-.reaction-btn:hover  { background: rgba(255,255,255,0.08); transform: scale(1.3) rotate(-8deg); }
+.reaction-btn:hover  { background: var(--s3); transform: scale(1.3) rotate(-8deg); }
 .reaction-btn:active { transform: scale(1.1); }
 
 /* ════════ MESSAGE GROUP ════════ */
@@ -254,11 +254,11 @@
   background: var(--accent-grad);
   color: #fff;
   border-bottom-right-radius: 5px;
-  border: 1px solid rgba(255,255,255,0.18);
-  box-shadow: 0 3px 14px rgba(109,74,255,0.25), inset 0 1px 0 rgba(255,255,255,0.16);
+  border: 1px solid rgba(255,255,255,0.22);
+  box-shadow: 0 3px 14px rgba(197,22,29,0.22), inset 0 1px 0 rgba(255,255,255,0.18);
 }
 
-.msg-wrapper.mine .bubble:hover { box-shadow: 0 5px 20px rgba(109,74,255,0.35); }
+.msg-wrapper.mine .bubble:hover { box-shadow: 0 5px 20px rgba(197,22,29,0.30); }
 
 .msg-wrapper.mine .bubble:last-of-type { border-bottom-right-radius: 18px; }
 
@@ -281,7 +281,7 @@
 
 .msg-time    { font-size: 11px; color: var(--t3); }
 .msg-receipt { font-size: 12px; color: var(--t3); }
-.msg-receipt.read { color: #7eb6f7; }
+.msg-receipt.read { color: var(--green); }
 
 /* Inline reactions */
 .msg-reactions {
@@ -352,14 +352,14 @@
   border-radius: 26px;
   padding: 3px 6px 3px 16px;
   border: 1px solid var(--border);
-  box-shadow: 0 12px 30px -16px rgba(0,0,0,0.65);
+  box-shadow: 0 12px 30px -16px rgba(37,37,37,0.28);
   transition: border-color 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out), background 0.2s var(--ease-out);
 }
 
 .input-wrap:hover { background: var(--s3); }
 
 .input-wrap:focus-within {
-  border-color: rgba(109,74,255,0.5);
+  border-color: rgba(197,22,29,0.45);
   box-shadow: 0 0 0 3px var(--accent-dim);
   background: var(--s3);
 }
@@ -384,7 +384,7 @@
   transition: box-shadow 0.2s var(--ease-out), transform 0.15s var(--ease-spring), filter 0.15s;
 }
 
-.send-btn:hover  { box-shadow: 0 4px 20px rgba(109,74,255,0.5); filter: brightness(1.1); transform: translateY(-1px) scale(1.04); }
+.send-btn:hover  { box-shadow: 0 4px 20px rgba(197,22,29,0.42); filter: brightness(1.1); transform: translateY(-1px) scale(1.04); }
 .send-btn:active { transform: scale(0.88); }
 
 /* ════════ EMOJI PICKER ════════ */
@@ -427,7 +427,7 @@
   transition: background 0.12s, transform 0.1s;
 }
 
-.emoji-opt:hover { background: rgba(255,255,255,0.09); transform: scale(1.25); }
+.emoji-opt:hover { background: var(--s3); transform: scale(1.25); }
 
 .icon-btn.emoji.active { color: var(--yellow); }
 
@@ -453,7 +453,7 @@
   display: flex; align-items: center; gap: 8px;
   padding: 6px 20px;
   font-size: 12px; color: var(--t3);
-  background: rgba(109,74,255,0.06);
+  background: rgba(197,22,29,0.05);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -463,17 +463,18 @@
 .conn-banner {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 20px;
-  font-size: 12px; color: var(--yellow);
-  background: rgba(240,178,50,0.08);
-  border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--yellow-ink);
+  background: rgba(255,201,40,0.18);
+  border-bottom: 1px solid rgba(255,201,40,0.35);
   flex-shrink: 0;
 }
 
 .conn-banner i { font-size: 11px; }
 
 .search-highlight {
-  background: rgba(240,178,50,0.30);
-  color: var(--yellow);
+  background: rgba(255,201,40,0.45);
+  color: #252525;
+  font-weight: 600;
   border-radius: 3px;
   padding: 0 2px;
 }
@@ -560,7 +561,7 @@
 @media (max-width: 768px) {
   .chat-back-btn { display: flex; }
 
-  /* ── Glassmorphism chat header (OpenBridge brand tint) ── */
+  /* ── Frosted light chat header ── */
   .chat-header {
     position: sticky;
     top: 0;
@@ -568,22 +569,18 @@
     padding: env(safe-area-inset-top, 0) 6px 0 4px;
     height: calc(var(--header) + env(safe-area-inset-top, 0));
     gap: 2px;
-    /* Frosted glass: brand purple/blurple tint over a blurred backdrop */
-    background:
-      linear-gradient(135deg, rgba(139, 92, 246, 0.30), rgba(109, 74, 255, 0.22)),
-      rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(22px) saturate(180%);
-    -webkit-backdrop-filter: blur(22px) saturate(180%);
-    border-bottom: 1px solid var(--glass-edge);
+    background: rgba(255, 255, 255, 0.90);
+    backdrop-filter: blur(22px) saturate(160%);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    border-bottom: 1px solid var(--border);
     box-shadow:
-      0 6px 26px rgba(0, 0, 0, 0.30),
-      inset 0 1px 0 rgba(255, 255, 255, 0.10);
+      0 6px 26px rgba(37, 37, 37, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.90);
   }
 
-  /* White icons across the bar */
-  .chat-header .icon-btn { color: #fff; }
-  .chat-header .icon-btn:hover  { background: rgba(255, 255, 255, 0.16); color: #fff; transform: none; }
-  .chat-header .icon-btn:active { background: rgba(255, 255, 255, 0.24); }
+  .chat-header .icon-btn { color: var(--t2); }
+  .chat-header .icon-btn:hover  { background: var(--s3); color: var(--accent); transform: none; }
+  .chat-header .icon-btn:active { background: var(--s2); }
 
   .chat-back-btn { margin-left: 0; width: 40px; height: 40px; }
 
@@ -594,18 +591,18 @@
     gap: 11px;
     padding: 6px 4px;
   }
-  .chat-header-info.as-button:hover  { background: rgba(255, 255, 255, 0.10); }
-  .chat-header-info.as-button:active { background: rgba(255, 255, 255, 0.16); transform: none; }
+  .chat-header-info.as-button:hover  { background: var(--s3); }
+  .chat-header-info.as-button:active { background: var(--s2); transform: none; }
 
-  /* Bigger avatar in the header, with a ring so the status dot reads on color */
+  /* Bigger avatar in the header, with a white ring so the status dot reads */
   .chat-header .user-avatar.sm { width: 40px; height: 40px; }
   .chat-header .user-avatar.sm .status {
-    border: 2px solid rgba(255, 255, 255, 0.55);
+    border: 2px solid #fff;
     width: 11px; height: 11px;
   }
 
   .chat-header .chat-peer-name {
-    color: #fff;
+    color: var(--t1);
     font-size: 16px;
     font-weight: 600;
     max-width: 52vw;
@@ -614,17 +611,16 @@
     text-overflow: ellipsis;
   }
 
-  /* Status line: plain light text (no dot), Telegram-style */
+  /* Status line: plain colored text (no dot), Telegram-style */
   .chat-header .chat-peer-status {
-    color: rgba(255, 255, 255, 0.82);
+    color: var(--green);
     font-size: 12.5px;
   }
   .chat-header .chat-peer-status::before { display: none; }
 
   .chat-header-actions { gap: 0; }
 
-  /* In-header search, restyled for the colored bar */
-  .chat-header .search-bar-icon { color: rgba(255, 255, 255, 0.85); }
-  .chat-header .search-bar input { color: #fff; }
-  .chat-header .search-bar input::placeholder { color: rgba(255, 255, 255, 0.7); }
+  .chat-header .search-bar-icon { color: var(--t3); }
+  .chat-header .search-bar input { color: var(--t1); }
+  .chat-header .search-bar input::placeholder { color: var(--t3); }
 }

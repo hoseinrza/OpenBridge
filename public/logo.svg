@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" role="img" aria-label="OpenBridge">
   <defs>
     <linearGradient id="ob-bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#9b5bff"/>
-      <stop offset="0.55" stop-color="#863bff"/>
-      <stop offset="1" stop-color="#6a26e0"/>
+      <stop offset="0" stop-color="#E0322D"/>
+      <stop offset="0.55" stop-color="#C5161D"/>
+      <stop offset="1" stop-color="#A30F16"/>
     </linearGradient>
     <linearGradient id="ob-shine" x1="40" y1="40" x2="216" y2="216" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
@@ -36,6 +36,6 @@
   <!-- Connection nodes at each shore -->
   <circle cx="40" cy="182" r="13" fill="#ffffff"/>
   <circle cx="216" cy="182" r="13" fill="#ffffff"/>
-  <circle cx="40" cy="182" r="6" fill="#863bff"/>
-  <circle cx="216" cy="182" r="6" fill="#863bff"/>
+  <circle cx="40" cy="182" r="6" fill="#A30F16"/>
+  <circle cx="216" cy="182" r="6" fill="#A30F16"/>
 </svg>

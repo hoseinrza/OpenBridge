@@ -3,8 +3,8 @@
   display: flex; align-items: center; justify-content: center;
   background: var(--s0);
   background-image:
-    radial-gradient(ellipse 55% 45% at 10% 0%,  rgba(109,74,255,0.09) 0%, transparent 100%),
-    radial-gradient(ellipse 45% 35% at 90% 100%, rgba(53,208,127,0.05)  0%, transparent 100%);
+    radial-gradient(ellipse 55% 45% at 10% 0%,  rgba(197,22,29,0.07)  0%, transparent 100%),
+    radial-gradient(ellipse 45% 35% at 90% 100%, rgba(255,201,40,0.16) 0%, transparent 100%);
   position: relative;
   overflow: hidden;
 }
@@ -39,7 +39,7 @@
 
 @keyframes avatarPulse {
   0%,100% { box-shadow: 0 0 0 5px var(--accent-dim), var(--shadow-md); }
-  50%     { box-shadow: 0 0 0 9px rgba(109,74,255,0.12), var(--shadow-md); }
+  50%     { box-shadow: 0 0 0 9px rgba(197,22,29,0.10), var(--shadow-md); }
 }
 
 .login-title {
@@ -76,7 +76,7 @@
 
 .login-tabs button.active {
   background: var(--glass-2); color: var(--t1);
-  box-shadow: var(--shadow-sm), inset 0 0 0 1px rgba(255,255,255,0.08);
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px rgba(37,37,37,0.05);
   animation: cardIn 0.25s var(--ease-spring) both;
 }
 
@@ -105,7 +105,7 @@
 .login-input:hover { background: var(--glass-2); }
 
 .login-input:focus {
-  border-color: rgba(109,74,255,0.55);
+  border-color: rgba(197,22,29,0.45);
   box-shadow: 0 0 0 3px var(--accent-dim);
   background: var(--glass-2);
 }
@@ -135,6 +135,6 @@
   transition: box-shadow 0.2s var(--ease-out), transform 0.18s var(--ease-spring), filter 0.15s;
 }
 
-.login-btn:hover  { box-shadow: 0 6px 26px rgba(109,74,255,0.5); filter: brightness(1.08); transform: translateY(-1px); }
+.login-btn:hover  { box-shadow: 0 6px 26px rgba(197,22,29,0.38); filter: brightness(1.08); transform: translateY(-1px); }
 .login-btn:active { transform: scale(0.97); }
 .login-btn:disabled { opacity: 0.65; cursor: default; transform: none; }
