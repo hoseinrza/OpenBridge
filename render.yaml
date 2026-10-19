@@ -25,5 +25,10 @@ services:
         generateValue: true
       - key: JWT_EXPIRES_IN
         value: 7d
+      - key: NODE_ENV
+        value: production
+      # Set this to the deployed frontend origin, e.g. https://your-app.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
       - key: NODE_VERSION
         value: 20.11.1

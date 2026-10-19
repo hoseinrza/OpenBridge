@@ -12,10 +12,10 @@
 
 - 🔐 JWT authentication (register / login)
 - 💬 Real-time 1:1 messaging over WebSocket (Socket.IO)
+- 👥 Group chats with owner/member roles and membership management (web)
 - 🟢 Online/offline presence
-- 📎 File & image uploads
+- 📎 Private file & image uploads (signed, expiring URLs)
 - 😀 Message reactions
-- 📞 Video call signaling
 - 👤 User profiles (avatar, bio)
 
 ## 🧱 Tech stack
@@ -25,6 +25,27 @@
 | Frontend   | React 19, Vite, React Router, Socket.IO client       |
 | Backend    | NestJS 10, Socket.IO, Prisma, JWT, Passport          |
 | Database   | PostgreSQL (Prisma ORM)                              |
+
+## 🔒 Security
+
+OpenBridge is **not end-to-end encrypted**; the server stores message content
+in plaintext. See [docs/SECURITY.md](docs/SECURITY.md) for the confidentiality
+model, implemented controls, threat model, and known limitations.
+
+The API requires `JWT_SECRET` and refuses to start without it. In production it
+must be at least 32 characters. Cross-origin browser access is deny-by-default
+in production; set `CORS_ORIGINS` to a comma-separated allowlist when the web
+app and API are on different origins.
+
+## 🧪 Tests
+
+```bash
+cd backend
+npm run test:e2e   # builds the API and runs the security regression suite
+```
+
+The suite boots the Nest app against the configured PostgreSQL database,
+creates temporary users, and cleans them up. The web build check is `npm run build`.
 
 ## 🚀 Local development
 
@@ -60,6 +81,9 @@ The frontend deploys to **Vercel**; the backend + database deploy to **Render**.
 2. On [Render](https://dashboard.render.com): **New → Blueprint**, pick this repo.
    Render reads [`render.yaml`](render.yaml) and provisions the API + PostgreSQL.
 3. Copy the deployed API URL, e.g. `https://openbridge-api.onrender.com`.
+4. Set `CORS_ORIGINS` on the Render service to your frontend origin
+   (e.g. `https://openbridge.vercel.app`). Without it, cross-origin browser
+   requests from Vercel are rejected in production.
 
 ### Frontend → Vercel
 1. On [Vercel](https://vercel.com): **New Project**, import this repo (root directory).
