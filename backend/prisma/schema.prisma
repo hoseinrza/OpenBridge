@@ -46,6 +46,22 @@ model User {
   @@map("users")
 }
 
+// Short-lived login codes. Only the HMAC of the code is stored, and a new
+// request invalidates every unconsumed code for the same phone number.
+model OtpCode {
+  id         String    @id @default(uuid())
+  phone      String
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+  @@index([expiresAt])
+  @@map("otp_codes")
+}
+
 // One row per login. Access JWTs carry the session id, so revoking a row
 // invalidates its access token immediately (the strategy checks it on every
 // request). The refresh token is stored only as a SHA-256 hash.

@@ -2,23 +2,28 @@ import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './components/Auth/LoginPage.jsx';
 import ChatPage  from './components/Chat/ChatPage.jsx';
-import { login, register, logout } from './services/api.js';
+import { login, logout } from './services/api.js';
 
 function loadUser() {
   try { return JSON.parse(localStorage.getItem('chatapp_user')) || null; }
   catch { return null; }
 }
 
+function storeUser(user, setCurrentUser) {
+  const normalized = { id: user.id, name: user.displayName || user.username, username: user.username, avatar: user.avatar ?? '/images/user.png', bio: user.bio ?? '', status: 'online' };
+  localStorage.setItem('chatapp_user', JSON.stringify(normalized));
+  setCurrentUser(normalized);
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(loadUser);
 
-  async function handleLogin(username, password, mode, displayName) {
-    const user = mode === 'register'
-      ? await register(username, displayName, password)
-      : await login(username, password);
-    const normalized = { id: user.id, name: user.displayName || user.username, username: user.username, avatar: user.avatar ?? '/images/user.png', bio: user.bio ?? '', status: 'online' };
-    localStorage.setItem('chatapp_user', JSON.stringify(normalized));
-    setCurrentUser(normalized);
+  async function handleLogin(username, password) {
+    storeUser(await login(username, password), setCurrentUser);
+  }
+
+  function handleAuthenticated(user) {
+    storeUser(user, setCurrentUser);
   }
 
   function handleLogout() {
@@ -34,7 +39,7 @@ export default function App() {
     });
   }
 
-  if (!currentUser) return <LoginPage onLogin={handleLogin} />;
+  if (!currentUser) return <LoginPage onLogin={handleLogin} onAuthenticated={handleAuthenticated} />;
 
   return (
     <BrowserRouter>

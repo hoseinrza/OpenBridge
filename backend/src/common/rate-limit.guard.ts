@@ -3,6 +3,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Request, Response } from 'express';
+import { normalizeIranMobile } from './phone';
 
 export interface RateLimitOptions {
   /** Maximum requests allowed per key within the window. */
@@ -11,6 +12,9 @@ export interface RateLimitOptions {
   /** Also limit by the normalized `username` field in the request body. */
   byUsername?: boolean;
   usernameLimit?: number;
+  /** Also limit by the Iranian mobile number in the `phone` body field. */
+  byPhone?: boolean;
+  phoneLimit?: number;
 }
 
 export const RATE_LIMIT_KEY = 'openbridge:rate-limit';
@@ -56,6 +60,17 @@ export class RateLimitGuard implements CanActivate {
         checks.push({
           key: `${route}:user:${username}`,
           limit: options.usernameLimit ?? options.limit,
+        });
+      }
+    }
+    if (options.byPhone) {
+      const phone = typeof request.body?.phone === 'string'
+        ? normalizeIranMobile(request.body.phone)
+        : null;
+      if (phone) {
+        checks.push({
+          key: `${route}:phone:${phone}`,
+          limit: options.phoneLimit ?? options.limit,
         });
       }
     }

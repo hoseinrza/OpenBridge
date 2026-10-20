@@ -74,6 +74,70 @@ Known gaps for this sprint:
 - Font Awesome still loads from a CDN (blocks a strict CSP/offline PWA).
 - E2EE is still not implemented and video calls remain absent.
 
+## Phone OTP authentication (2026-10-20)
+
+The primary login flow is now an Iranian mobile number plus a one-time code.
+Legacy username/password login is kept for existing accounts, but registration
+UI is gone — new accounts are created by verifying an OTP.
+
+- **Normalization** (`backend/src/common/phone.ts`, mirrored in
+  `src/utils/phone.js` and `mobile/src/utils/phone.js`): accepts
+  `09xxxxxxxxx`, `+989…`, `00989…`, `989…`, and `9xxxxxxxxx`, converts Persian
+  and Arabic digits, strips separators, and canonicalizes to `^09\d{9}$`.
+- **Endpoints**: `POST /auth/otp/request` and `POST /auth/otp/verify`
+  (`backend/src/auth/`). Codes are 6 random digits (`randomInt`), stored only
+  as an HMAC-SHA256 digest keyed with `JWT_SECRET`, compared with
+  `timingSafeEqual`, expire after `OTP_TTL_SECONDS` (300 s), and are locked
+  after `OTP_MAX_ATTEMPTS` (5) wrong entries. A new request consumes prior
+  unconsumed codes; verification consumes the code conditionally so a code is
+  single-use under races. Requests are throttled per IP
+  (`AUTH_OTP_REQUEST_LIMIT`) and per phone number
+  (`AUTH_OTP_REQUEST_PHONE_LIMIT`) with 429 + `Retry-After`.
+- **Accounts**: the normalized phone is stored in the existing unique
+  `username` column; `PATCH /users/me` rejects username changes for phone
+  accounts. Phone accounts get a random 32-byte password so the legacy
+  password endpoint cannot be used to take them over. `isNewUser` verification
+  requires a display name (2–50 chars) and creates the account with a normal
+  `withSession` response (session row + access JWT + rotating refresh token).
+- **Test mode**: until an SMS provider is integrated, the code is generated
+  server-side and returned in the response **only outside production**
+  (`OTP_TEST_MODE`). With `NODE_ENV=production`, `POST /auth/otp/request`
+  returns 503 («ارسال پیامک هنوز فعال نشده است») and never creates a code.
+  Both web and mobile show the test code in a clearly labelled box
+  («کد تست (فقط محیط توسعه)») with the same flow as production.
+- **Web** (`src/components/Auth/LoginPage.jsx`): two-step form (phone → code),
+  Persian-digit input handling, `autocomplete="one-time-code"`, 30 s resend
+  countdown, «تغییر شماره» link, required display-name field for new users,
+  and a legacy «ورود با نام کاربری و رمز» mode for old accounts.
+- **Mobile** (`mobile/src/screens/LoginScreen.js`): the same two-step flow with
+  `phone-pad`/`number-pad` keyboards, `textContentType`/`autoComplete="sms-otp"`
+  hints, live-region test-code box, and the same legacy password mode.
+
+Verification for this batch:
+
+- `backend`: `npm run build` passed and `npm run test:e2e` is now **14/14**,
+  including three new OTP tests: full lifecycle (invalid phone 400, `+98`
+  normalization, wrong code 401, missing display name 400, successful verify,
+  single-use rejection, `/users/me`, rename lock, re-login), expiry and
+  attempt lockout (expired code rejected; 5 wrong attempts invalidate the
+  code; a fresh request recovers), and per-phone throttling (3 requests then
+  429 with `Retry-After`).
+- Live run against the local stack (PostgreSQL + built API + Vite dev): the
+  full web flow was exercised through the browser — phone submit, code step
+  with focus on the code input, wrong-code error, and successful login that
+  stored a session for `username 09990000002` and rendered the app shell with
+  zero console errors. A node script verified the raw API path for
+  `09990000001` including `isNewUser` on first request and `false` on the
+  second.
+- Screenshot/DOM audits at 1440×900, 375×812 (light + dark), 320×720, and the
+  code step in both themes: horizontal overflow 0, unlabeled buttons/inputs 0,
+  correct headings, target phone shown on the code step.
+- `web`: lint clean; production build passed. `mobile`: `expo export --platform
+  android` bundled successfully (see below).
+- QA users (`09990000001`, `09990000002`), their sessions/conversations, and
+  all `09990000xx` OTP rows were deleted from the local database afterwards;
+  pre-existing accounts were untouched.
+
 
 ## Validation actually run
 
@@ -138,22 +202,28 @@ Known gaps for this sprint:
 - Mobile now lists, reads, sends in, and creates groups, but group
   administration (add/remove members, rename, group avatar) is not exposed in
   either client.
+- OTP login has no SMS provider: outside production the code is returned in
+  the API response (test mode); in production the request endpoint returns 503
+  until a provider (e.g. Kavenegar/SMS.ir) is integrated. OTP throttling is
+  in-memory like the rest of the auth limits.
 
 ## Next priorities
 
-1. Add a session-management UI on web (list active sessions, revoke individual
+1. Integrate a real SMS provider behind the existing OTP service boundary and
+   disable test-mode code exposure in all non-local environments.
+2. Add a session-management UI on web (list active sessions, revoke individual
    devices) using the existing endpoints.
-2. Move throttling/presence to a shared store (Redis) before running more than
+3. Move throttling/presence to a shared store (Redis) before running more than
    one API instance.
-3. Add authorization tests for group membership changes (add/remove participant)
+4. Add authorization tests for group membership changes (add/remove participant)
    and message edit/delete once those endpoints exist.
-4. Capture and display the E2EE `Session`/device list as the precursor to
+5. Capture and display the E2EE `Session`/device list as the precursor to
    multi-device key management; run the Phase 0 library gate described in the
    E2EE design before any cryptographic implementation.
-5. Add a web security review pass (CSP, token storage trade-off) and cover the
+6. Add a web security review pass (CSP, token storage trade-off) and cover the
    signed-URL download path with a cross-user authorization test.
-6. Run the mobile app on a native emulator or device (RTL header, safe areas,
+7. Run the mobile app on a native emulator or device (RTL header, safe areas,
    keyboard avoidance) and add automated visual-regression coverage for the
    documented viewport matrix.
-7. Self-host Font Awesome so the web client can run without a CDN and under a
+8. Self-host Font Awesome so the web client can run without a CDN and under a
    strict CSP.

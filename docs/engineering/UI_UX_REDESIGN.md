@@ -89,10 +89,13 @@ attention, never a background behind white text.
   for a newline, attachment button with an accessible label, emoji picker
   anchored above the trigger, send disabled state, upload and send errors shown
   as dismissible `role="alert"` notes instead of failing silently.
-- **Login**: split brand panel and form panel, segmented login/register tabs
-  with proper `tablist` keyboard handling (arrow keys, Home/End), labelled
-  fields, password visibility switch, inline errors with `role="alert"`,
-  loading state with a spinner and disabled controls.
+- **Login**: split brand panel and form panel. Since the OTP rework (see
+  `OVERNIGHT_PROGRESS.md`), the primary flow is a two-step phone → code form
+  with a required display-name field for new users, a 30 s resend countdown,
+  a «تغییر شماره» link, a clearly labelled test-code box, and a link to a
+  legacy username/password mode for existing accounts. Labelled fields,
+  inline errors with `role="alert"`, loading state with a spinner and disabled
+  controls are unchanged.
 - **Modals and new chat**: shared focus-trapping modal with labelled headings;
   new-chat/group creation exposes search, multi-select, validation, and errors.
 - **Shared UI**: `Avatar`, `Modal`, and `ThemeToggle` live in
@@ -104,9 +107,11 @@ attention, never a background behind white text.
   dedicated `accentText` for text/icons on dark surfaces and fixed
   `onBubbleOut` for white text on red bubbles. Navigation and status bar follow
   the active theme.
-- **Login**: brand icon and wordmark, tagline, login/register tabs with
-  `tablist`/`tab` roles and selected state, labelled inputs, password visibility
-  switch, inline alert, safe-area scrolling, and Persian validation.
+- **Login**: brand icon and wordmark, tagline, and (since the OTP rework) the
+  same two-step phone → code flow as web with phone/number-pad keyboards,
+  `textContentType` and `sms-otp` autofill hints, a live-region test-code box,
+  30 s resend countdown, and a legacy password mode with a visibility switch,
+  inline alert, safe-area scrolling, and Persian validation.
 - **Chat list**: safe-area-aware shell, search with clear action, rows with
   avatars and group badges, unread counts, pull-to-refresh, retry banner,
   distinct empty/search-empty states, and a footer with the signed-in user and
@@ -131,8 +136,9 @@ attention, never a background behind white text.
 
 - Every icon-only control has an `aria-label`/`accessibilityLabel`; decorative
   icons are hidden from assistive tech.
-- Tabs implement `tablist`, `tab`, `aria-selected`/`accessibilityState`, and
-  keyboard navigation; the login panel is a labelled `tabpanel`.
+- Tab semantics (`tablist`, `tab`, `aria-selected`/`accessibilityState`) are
+  used by the chat-header message search toggle; the login form no longer uses
+  tabs since the OTP rework.
 - Focus uses a visible `:focus-visible` ring (2 px, theme-aware). Focus order
   follows the RTL visual order.
 - Errors use `role="alert"`/`accessibilityRole="alert"`; connection and typing
@@ -158,8 +164,10 @@ Web (Vite on `:5173`, API on `:3000`, local PostgreSQL), light and dark:
 - Screens reviewed: login at 1440 and 375, chat at 768 and 375, group chat at
   375, conversation list at 1440, dark chat at 1440 and 375, emoji popover
   anchoring.
-- Keyboard: login tabs respond to arrow keys and Home/End; focus moves to the
-  register tab and back.
+- Keyboard: the login form is fully keyboard-operable (phone submit moves
+  focus to the code field; all controls are reachable links/buttons with
+  visible focus). The earlier login-tab keyboard test applied before the OTP
+  rework removed the tabs.
 - Live behavior: sending a real message over the socket incremented the
   conversation and rendered the message; theme toggle and logout confirmation
   worked; sidebar and header message search returned results.

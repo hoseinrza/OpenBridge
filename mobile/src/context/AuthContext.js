@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { storage } from '../services/storage';
-import { login as apiLogin, register as apiRegister, logout as apiLogout, resolveUrl, setUnauthorizedHandler } from '../services/api';
+import {
+  login as apiLogin, logout as apiLogout, requestOtp as apiRequestOtp,
+  verifyOtp as apiVerifyOtp, resolveUrl, setUnauthorizedHandler,
+} from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -26,10 +29,15 @@ export function AuthProvider({ children }) {
     setCurrentUser(normalized);
   }, []);
 
-  const login = useCallback(async (username, password, mode, displayName) => {
-    const user = mode === 'register'
-      ? await apiRegister(username, displayName, password)
-      : await apiLogin(username, password);
+  const requestOtp = useCallback((phone) => apiRequestOtp(phone), []);
+
+  const verifyOtp = useCallback(async (phone, code, displayName) => {
+    const user = await apiVerifyOtp(phone, code, displayName);
+    await persistUser(user);
+  }, [persistUser]);
+
+  const login = useCallback(async (username, password) => {
+    const user = await apiLogin(username, password);
     await persistUser(user);
   }, [persistUser]);
 
@@ -47,7 +55,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ currentUser, loading, login, logout, updateProfile }}>
+    <AuthContext.Provider value={{ currentUser, loading, requestOtp, verifyOtp, login, logout, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

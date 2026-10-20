@@ -15,6 +15,11 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-le
 process.env.AUTH_LOGIN_LIMIT = process.env.AUTH_LOGIN_LIMIT || '3';
 process.env.AUTH_LOGIN_USERNAME_LIMIT = process.env.AUTH_LOGIN_USERNAME_LIMIT || '3';
 process.env.AUTH_REGISTER_LIMIT = process.env.AUTH_REGISTER_LIMIT || '20';
+// The OTP tests deliberately spend several requests; keep the per-phone
+// bucket at its production default so the throttle test still exercises it.
+process.env.AUTH_OTP_REQUEST_LIMIT = process.env.AUTH_OTP_REQUEST_LIMIT || '50';
+process.env.AUTH_OTP_REQUEST_PHONE_LIMIT = process.env.AUTH_OTP_REQUEST_PHONE_LIMIT || '3';
+process.env.AUTH_OTP_VERIFY_LIMIT = process.env.AUTH_OTP_VERIFY_LIMIT || '50';
 
 const { NestFactory } = require('@nestjs/core');
 const { ValidationPipe } = require('@nestjs/common');
@@ -32,6 +37,7 @@ const PNG_1X1 = Buffer.from(
 
 const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const createdUserIds = [];
+const otpPhones = [];
 const uploadedFiles = [];
 const sockets = {};
 
@@ -234,9 +240,14 @@ before(async () => {
 after(async () => {
   for (const socket of Object.values(sockets)) socket?.disconnect();
 
-  if (prisma && createdUserIds.length) {
-    await prisma.conversation.deleteMany({ where: { participants: { some: { userId: { in: createdUserIds } } } } });
-    await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
+  if (prisma) {
+    if (otpPhones.length) {
+      await prisma.otpCode.deleteMany({ where: { phone: { in: otpPhones } } });
+    }
+    if (createdUserIds.length) {
+      await prisma.conversation.deleteMany({ where: { participants: { some: { userId: { in: createdUserIds } } } } });
+      await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
+    }
     await prisma.$disconnect();
   }
   for (const filename of uploadedFiles) {
@@ -488,6 +499,131 @@ test('refresh tokens rotate and session revocation is immediate', async () => {
     method: 'POST',
     body: { refreshToken: loginC.data.refreshToken },
   })).status, 401, 'revoked refresh token');
+});
+
+test('phone OTP verifies, creates an account, and locks the phone username', async () => {
+  const phone = `0912${String(Date.now()).slice(-7)}`;
+  otpPhones.push(phone);
+
+  const invalid = await api('/auth/otp/request', {
+    method: 'POST',
+    body: { phone: '12345' },
+  });
+  assert.equal(invalid.status, 400, 'invalid phone rejected');
+
+  // The formatted international form must normalize to the stored 09... form.
+  const requested = await api('/auth/otp/request', {
+    method: 'POST',
+    body: { phone: `+98${phone.slice(1)}` },
+  });
+  assert.equal(requested.status, 200);
+  assert.equal(requested.data.phone, phone, 'phone normalized');
+  assert.equal(requested.data.isNewUser, true);
+  assert.match(requested.data.testCode, /^\d{6}$/);
+  assert.ok(requested.data.expiresInSeconds > 0);
+
+  const wrongCode = requested.data.testCode === '000000' ? '111111' : '000000';
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: wrongCode },
+  })).status, 401, 'wrong code rejected');
+
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: requested.data.testCode },
+  })).status, 400, 'display name required for a new account');
+
+  const verified = await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: requested.data.testCode, displayName: 'OTP User' },
+  });
+  assert.equal(verified.status, 200);
+  assert.equal(verified.data.user.username, phone);
+  assert.equal(verified.data.user.displayName, 'OTP User');
+  assert.equal(typeof verified.data.token, 'string');
+  assert.equal(typeof verified.data.refreshToken, 'string');
+  createdUserIds.push(verified.data.user.id);
+
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: requested.data.testCode, displayName: 'OTP User' },
+  })).status, 401, 'code is single use');
+
+  assert.equal((await api('/users/me', { token: verified.data.token })).status, 200);
+  assert.equal((await api('/users/me', {
+    method: 'PATCH',
+    token: verified.data.token,
+    body: { username: 'renamed_phone_user' },
+  })).status, 400, 'phone cannot be changed through profile');
+
+  const again = await api('/auth/otp/request', {
+    method: 'POST',
+    body: { phone },
+  });
+  assert.equal(again.status, 200);
+  assert.equal(again.data.isNewUser, false, 'existing account detected');
+
+  const verifiedAgain = await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: again.data.testCode },
+  });
+  assert.equal(verifiedAgain.status, 200, 'existing account logs in without display name');
+  assert.equal(verifiedAgain.data.user.id, verified.data.user.id);
+});
+
+test('expired and over-attempted OTP codes are rejected', async () => {
+  const phone = `0936${String(Date.now()).slice(-7)}`;
+  otpPhones.push(phone);
+
+  const first = await api('/auth/otp/request', { method: 'POST', body: { phone } });
+  assert.equal(first.status, 200);
+  await prisma.otpCode.updateMany({
+    where: { phone, consumedAt: null },
+    data:  { expiresAt: new Date(Date.now() - 1000) },
+  });
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: first.data.testCode, displayName: 'Expired User' },
+  })).status, 401, 'expired code rejected');
+
+  const fresh = await api('/auth/otp/request', { method: 'POST', body: { phone } });
+  assert.equal(fresh.status, 200);
+  const wrongCode = fresh.data.testCode === '000000' ? '111111' : '000000';
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    assert.equal((await api('/auth/otp/verify', {
+      method: 'POST',
+      body: { phone, code: wrongCode },
+    })).status, 401, `wrong attempt ${attempt} rejected`);
+  }
+
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: fresh.data.testCode, displayName: 'Expired User' },
+  })).status, 401, 'correct code refused after too many attempts');
+
+  const reset = await api('/auth/otp/request', { method: 'POST', body: { phone } });
+  assert.equal(reset.status, 200, 'a new request resets the attempt budget');
+  const verified = await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: reset.data.testCode, displayName: 'Expired User' },
+  });
+  assert.equal(verified.status, 200);
+  createdUserIds.push(verified.data.user.id);
+});
+
+test('OTP requests are throttled per phone number', async () => {
+  const phone = `0935${String(Date.now()).slice(-7)}`;
+  otpPhones.push(phone);
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const result = await api('/auth/otp/request', { method: 'POST', body: { phone } });
+    assert.equal(result.status, 200, `request ${attempt} allowed`);
+  }
+
+  const blocked = await api('/auth/otp/request', { method: 'POST', body: { phone } });
+  assert.equal(blocked.status, 429, 'fourth request for the same phone is rate limited');
+  assert.equal(blocked.data.message, 'تلاش‌های بیش از حد؛ لطفاً بعداً دوباره تلاش کنید');
+  assert.ok(Number(blocked.headers.get('retry-after')) > 0, 'Retry-After header');
 });
 
 test('login is throttled per IP and username', async () => {

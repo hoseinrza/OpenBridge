@@ -129,35 +129,96 @@
   margin-bottom: var(--sp-5);
 }
 
-/* ── Tabs ────────────────────────────────────────────────────── */
-.auth-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--sp-1);
-  padding: var(--sp-1);
-  background: var(--surface-2);
-  border-radius: var(--r-md);
-  margin-bottom: var(--sp-5);
+/* ── Phone / code flow ───────────────────────────────────────── */
+.auth-hint {
+  margin-top: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  line-height: 1.8;
 }
 
-.auth-tabs button {
-  min-height: 38px;
+.auth-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--sp-2);
   border: 0;
   border-radius: var(--r-sm);
   background: transparent;
-  color: var(--text-2);
-  font-size: var(--text-base);
-  font-weight: 500;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.6;
 }
 
-.auth-tabs button:hover { color: var(--text-1); }
+.auth-link:hover { text-decoration: underline; }
+.auth-link:disabled { color: var(--text-3); text-decoration: none; cursor: default; }
 
-.auth-tabs button.active {
-  background: var(--surface);
+.auth-switch {
+  width: 100%;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.auth-switch:hover { color: var(--accent); }
+
+.auth-target-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.auth-target {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+}
+
+.auth-target strong {
   color: var(--text-1);
   font-weight: 600;
-  box-shadow: var(--shadow-1);
+}
+
+.auth-code-input {
+  letter-spacing: 0.42em;
+  text-align: center;
+  font-weight: 600;
+  font-size: var(--text-lg) !important;
+  padding-inline-start: 0.42em;
+}
+
+.auth-test-code {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+}
+
+.auth-test-code i {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.auth-test-code strong {
+  color: var(--text-1);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  font-size: var(--text-base);
+}
+
+.auth-code-actions {
+  display: flex;
+  justify-content: center;
 }
 
 /* ── Fields ──────────────────────────────────────────────────── */
@@ -280,7 +341,6 @@
     max-width: 400px;
   }
   .auth-card-head h2 { font-size: var(--text-lg); }
-  .auth-tabs { background: var(--surface-2); }
-  .auth-tabs button.active { background: var(--surface); }
+  .auth-target-row { align-items: flex-start; }
   .auth-topbar { top: var(--sp-3); inset-inline-end: var(--sp-3); }
 }

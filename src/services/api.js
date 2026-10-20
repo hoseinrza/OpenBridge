@@ -127,14 +127,26 @@ async function request(method, path, body, retry = true) {
 }
 
 // ── Auth ─────────────────────────────────────────────
-export async function register(username, displayName, password) {
-  const data = await request('POST', '/auth/register', { username, displayName, password });
+export function requestOtp(phone) {
+  return request('POST', '/auth/otp/request', { phone });
+}
+
+export async function verifyOtp(phone, code, displayName) {
+  const data = await request('POST', '/auth/otp/verify', { phone, code, displayName });
   storeSession(data);
   return data.user;
 }
 
+// Legacy username/password login for accounts created before phone sign-in.
 export async function login(username, password) {
   const data = await request('POST', '/auth/login', { username, password });
+  storeSession(data);
+  return data.user;
+}
+
+// No longer used by the UI; kept for API compatibility and tests.
+export async function register(username, displayName, password) {
+  const data = await request('POST', '/auth/register', { username, displayName, password });
   storeSession(data);
   return data.user;
 }

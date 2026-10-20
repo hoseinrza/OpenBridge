@@ -1,14 +1,22 @@
 import {
-  Injectable, UnauthorizedException, ConflictException, NotFoundException,
+  BadRequestException, Injectable, UnauthorizedException, ConflictException,
+  NotFoundException, ServiceUnavailableException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { createHash, randomBytes } from 'crypto';
+import {
+  createHash, createHmac, randomBytes, randomInt, timingSafeEqual,
+} from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { RequestOtpDto } from './dto/request-otp.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { signedFileUrl } from '../uploads/file-urls';
-import { REFRESH_TOKEN_TTL_DAYS } from '../config/env';
+import {
+  IS_PRODUCTION, JWT_SECRET, OTP_MAX_ATTEMPTS, OTP_TEST_MODE, OTP_TTL_SECONDS,
+  REFRESH_TOKEN_TTL_DAYS,
+} from '../config/env';
 
 const SAFE = { id: true, username: true, displayName: true, avatar: true, status: true, createdAt: true };
 const REFRESH_TOKEN_BYTES = 48;
@@ -29,6 +37,20 @@ function hashRefreshToken(raw: string) {
 
 function generateRefreshToken() {
   return randomBytes(REFRESH_TOKEN_BYTES).toString('base64url');
+}
+
+function generateOtp() {
+  return randomInt(0, 1_000_000).toString().padStart(6, '0');
+}
+
+function hashOtp(phone: string, code: string) {
+  return createHmac('sha256', JWT_SECRET).update(`${phone}:${code}`).digest('hex');
+}
+
+function hashesMatch(storedHex: string, candidateHex: string) {
+  const stored = Buffer.from(storedHex, 'hex');
+  const candidate = Buffer.from(candidateHex, 'hex');
+  return stored.length === candidate.length && timingSafeEqual(stored, candidate);
 }
 
 @Injectable()
@@ -96,6 +118,92 @@ export class AuthService {
       refreshToken:     nextRefreshToken,
       sessionExpiresAt: session.expiresAt,
     };
+  }
+
+  async requestOtp(dto: RequestOtpDto) {
+    if (!OTP_TEST_MODE) {
+      throw new ServiceUnavailableException('ارسال پیامک هنوز فعال نشده است');
+    }
+
+    const phone = dto.phone;
+    const existing = await this.prisma.user.findUnique({
+      where:  { username: phone },
+      select: { id: true },
+    });
+
+    const code = generateOtp();
+    await this.prisma.$transaction([
+      // Requesting a new code invalidates any code that is still outstanding.
+      this.prisma.otpCode.updateMany({
+        where: { phone, consumedAt: null },
+        data:  { consumedAt: new Date() },
+      }),
+      this.prisma.otpCode.create({
+        data: {
+          phone,
+          codeHash:  hashOtp(phone, code),
+          expiresAt: new Date(Date.now() + OTP_TTL_SECONDS * 1000),
+        },
+      }),
+    ]);
+
+    return {
+      ok:               true,
+      phone,
+      isNewUser:        !existing,
+      expiresInSeconds: OTP_TTL_SECONDS,
+      ...(OTP_TEST_MODE ? { testCode: code } : {}),
+    };
+  }
+
+  async verifyOtp(dto: VerifyOtpDto, meta: SessionMeta = {}) {
+    const phone = dto.phone;
+    const record = await this.prisma.otpCode.findFirst({
+      where:   { phone, consumedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!record)
+      throw new UnauthorizedException('کد تأیید منقضی شده؛ دوباره درخواست کنید');
+    if (record.attempts >= OTP_MAX_ATTEMPTS)
+      throw new UnauthorizedException('تلاش‌های ناموفق زیاد بود؛ کد جدید درخواست کنید');
+    if (!hashesMatch(record.codeHash, hashOtp(phone, dto.code))) {
+      await this.prisma.otpCode.update({
+        where: { id: record.id },
+        data:  { attempts: { increment: 1 } },
+      });
+      throw new UnauthorizedException('کد تأیید نادرست است');
+    }
+
+    let user = await this.prisma.user.findUnique({
+      where:  { username: phone },
+      select: SAFE,
+    });
+    if (!user && (!dto.displayName || dto.displayName.trim().length < 2))
+      throw new BadRequestException('برای ساخت حساب، نام نمایشی را وارد کنید');
+
+    // Conditional consumption makes a code single-use even if two verifies
+    // race with the same code.
+    const consumed = await this.prisma.otpCode.updateMany({
+      where: { id: record.id, consumedAt: null },
+      data:  { consumedAt: new Date() },
+    });
+    if (consumed.count !== 1)
+      throw new UnauthorizedException('این کد قبلاً استفاده شده است');
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          username:    phone,
+          displayName: dto.displayName!.trim(),
+          // Phone accounts never use password login; store an unguessable hash
+          // so the legacy password endpoint cannot be used for this account.
+          password:    await bcrypt.hash(randomBytes(32).toString('base64url'), 10),
+        },
+        select: SAFE,
+      });
+    }
+
+    return this.withSession(this.withSignedAvatar(user), user.id, meta);
   }
 
   async logout(userId: string, sessionId: string) {
