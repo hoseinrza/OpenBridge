@@ -27,6 +27,8 @@ services:
         value: 7d
       - key: NODE_ENV
         value: production
+      - key: TRUST_PROXY
+        value: "1"
       # Set this to the deployed frontend origin, e.g. https://your-app.vercel.app
       - key: CORS_ORIGINS
         sync: false

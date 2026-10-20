@@ -9,6 +9,10 @@ const { join } = require('node:path');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-least-32-characters-long';
+// Keep the login throttle small enough to exercise it without flooding.
+process.env.AUTH_LOGIN_LIMIT = process.env.AUTH_LOGIN_LIMIT || '3';
+process.env.AUTH_LOGIN_USERNAME_LIMIT = process.env.AUTH_LOGIN_USERNAME_LIMIT || '3';
+process.env.AUTH_REGISTER_LIMIT = process.env.AUTH_REGISTER_LIMIT || '20';
 
 const { NestFactory } = require('@nestjs/core');
 const { ValidationPipe } = require('@nestjs/common');
@@ -353,4 +357,23 @@ test('CORS rejects unknown origins and allows configured dev origins', async () 
 
   const local = await fetch(`${origin}${API_PREFIX}`, { headers: { Origin: 'http://localhost:5173' } });
   assert.equal(local.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+});
+
+test('login is throttled per IP and username', async () => {
+  const victim = `obt_${suffix}_alice`;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const result = await api('/auth/login', {
+      method: 'POST',
+      body: { username: victim, password: 'WrongPass123!' },
+    });
+    assert.equal(result.status, 401, `attempt ${attempt} still reaches password check`);
+  }
+
+  const blocked = await api('/auth/login', {
+    method: 'POST',
+    body: { username: victim, password: 'WrongPass123!' },
+  });
+  assert.equal(blocked.status, 429, 'fourth attempt is rate limited');
+  assert.equal(blocked.data.message, 'تلاش‌های بیش از حد؛ لطفاً بعداً دوباره تلاش کنید');
+  assert.ok(Number(blocked.headers.get('retry-after')) > 0, 'Retry-After header');
 });

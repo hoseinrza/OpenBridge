@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JWT_SECRET, JWT_EXPIRES_IN } from '../config/env';
+import { RateLimitGuard } from '../common/rate-limit.guard';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { JWT_SECRET, JWT_EXPIRES_IN } from '../config/env';
       signOptions: { expiresIn: JWT_EXPIRES_IN },
     }),
   ],
-  providers:   [AuthService, JwtStrategy],
+  providers:   [AuthService, JwtStrategy, RateLimitGuard],
   controllers: [AuthController],
   exports:     [JwtModule],
 })

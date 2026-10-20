@@ -23,6 +23,35 @@ if (IS_PRODUCTION && JWT_SECRET.length < 32) {
   throw new Error('JWT_SECRET must be at least 32 characters in production');
 }
 
+function positiveInt(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+// Express `trust proxy` setting. Set to the number of proxies in front of the
+// API (for example 1 behind nginx/Render) so rate limiting sees client IPs
+// instead of the proxy address.
+export const TRUST_PROXY: number | false = (() => {
+  const raw = process.env.TRUST_PROXY?.trim();
+  if (!raw || raw === '0' || raw === 'false') return false;
+  if (raw === 'true') return 1;
+  const hops = Number(raw);
+  if (!Number.isInteger(hops) || hops < 1) throw new Error('TRUST_PROXY must be a positive integer, true, or false');
+  return hops;
+})();
+
+// Auth throttling: per-IP and per-username fixed windows, reset on restart.
+export const AUTH_LOGIN_LIMIT = positiveInt('AUTH_LOGIN_LIMIT', 10);
+export const AUTH_LOGIN_USERNAME_LIMIT = positiveInt('AUTH_LOGIN_USERNAME_LIMIT', 5);
+export const AUTH_LOGIN_WINDOW_SECONDS = positiveInt('AUTH_LOGIN_WINDOW_SECONDS', 900);
+export const AUTH_REGISTER_LIMIT = positiveInt('AUTH_REGISTER_LIMIT', 5);
+export const AUTH_REGISTER_WINDOW_SECONDS = positiveInt('AUTH_REGISTER_WINDOW_SECONDS', 3600);
+
 // Comma-separated list of browser origins allowed to call the HTTP API and
 // the Socket.IO endpoint. Native apps and same-origin requests send no Origin
 // header and are always allowed. When unset in development we allow only

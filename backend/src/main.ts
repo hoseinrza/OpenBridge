@@ -2,12 +2,14 @@ import 'reflect-metadata';
 import './config/env';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
-import { isOriginAllowed } from './config/env';
+import { isOriginAllowed, TRUST_PROXY } from './config/env';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  if (TRUST_PROXY !== false) app.set('trust proxy', TRUST_PROXY);
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.enableCors({

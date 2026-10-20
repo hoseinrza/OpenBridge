@@ -37,6 +37,10 @@ name, avatar, bio, status, and creation date to any authenticated user.
   the handshake `auth.token`.
 - Token claims are limited to `sub`; the user is loaded from the database on
   every authenticated request, so deleted accounts lose access immediately.
+- Login and registration are throttled per client IP and per username
+  (defaults: 10 logins/15 min per IP, 5 per username, 5 registrations/hour per
+  IP). `TRUST_PROXY` must be set when behind a reverse proxy so the real client
+  IP is used.
 - Logout is client-side token deletion. There is no server-side session or
   refresh-token revocation yet (see limitations).
 
@@ -103,7 +107,9 @@ name, avatar, bio, status, and creation date to any authenticated user.
 
 - No E2EE; the server can read message content.
 - No refresh tokens, session listing, or server-side revocation.
-- No HTTP rate limiting on login/register endpoints yet (only socket events are limited).
+- HTTP auth throttling is in-memory and per-process (10 logins/15 min per IP,
+  5 per username, 5 registrations/hour per IP by default), so multi-instance
+  deployments would need a shared store such as Redis.
 - Socket rate limiting and presence are in-memory, so they are per-process and
   reset on restart; a multi-instance deployment needs a shared store.
 - Signed attachment URLs are bearer capabilities: anyone with the URL can use it
