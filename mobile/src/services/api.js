@@ -33,6 +33,7 @@ export function normalizeUser(u) {
   if (!u) return null;
   return {
     id:        u.id,
+    kind:      'direct',
     name:      u.displayName || u.username,
     username:  u.username,
     avatar:    resolveUrl(u.avatar),
@@ -40,6 +41,21 @@ export function normalizeUser(u) {
     status:    u.online ? 'online' : 'offline',
     createdAt: u.createdAt,
     unread:    0,
+  };
+}
+
+export function normalizeGroup(g) {
+  if (!g) return null;
+  return {
+    id:           g.id,
+    kind:         'group',
+    name:         g.name,
+    avatar:       resolveUrl(g.avatar),
+    memberCount:  g.participants?.length ?? 0,
+    participants: (g.participants ?? []).map(normalizeUser).filter(Boolean),
+    unread:       g.unread ?? 0,
+    updatedAt:    g.updatedAt,
+    status:       'group',
   };
 }
 
@@ -149,10 +165,22 @@ export function fetchMessages(targetUserId, skip = 0) {
   return request('GET', `/messages/${targetUserId}?take=50&skip=${skip}`);
 }
 
+export function fetchGroupMessages(conversationId, skip = 0) {
+  return request('GET', `/messages/groups/${conversationId}?take=50&skip=${skip}`);
+}
+
 // People the current user has actually chatted with — new accounts get an
 // empty list; conversations are started on demand via username search.
 export function fetchConversations() {
   return request('GET', '/messages/conversations');
+}
+
+export function fetchGroups() {
+  return request('GET', '/messages/groups');
+}
+
+export function createGroup(name, memberIds) {
+  return request('POST', '/messages/groups', { name, memberIds });
 }
 
 // ── Upload (wired up in Phase 6) ───────────────────────

@@ -1,37 +1,73 @@
-import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View,
+} from 'react-native';
 import { FontAwesome6 } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { fetchConversations, normalizeUser } from '../services/api';
-import { colors, fonts, radius } from '../theme';
+import { fetchConversations, fetchGroups, normalizeGroup, normalizeUser } from '../services/api';
+import { fonts, radius, spacing, type, useAppTheme } from '../theme';
+import { formatConversationTime } from '../utils/time';
+import Avatar from '../components/Avatar';
 
 export default function ChatListScreen({ navigation }) {
   const { currentUser, logout } = useAuth();
   const { socket } = useSocket();
-  const [users, setUsers]     = useState([]);
+  const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const [items, setItems]   = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError]   = useState('');
+  const [query, setQuery]   = useState('');
 
-  const load = useCallback((silent = false) => {
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable
+          onPress={() => navigation.navigate('NewGroup')}
+          hitSlop={10}
+          style={styles.headerBtn}
+          accessibilityRole="button"
+          accessibilityLabel="ساخت گروه جدید"
+        >
+          <FontAwesome6 name="users" size={17} color={colors.text1} />
+          <View style={styles.headerPlus}>
+            <FontAwesome6 name="plus" size={8} color={colors.onAccent} />
+          </View>
+        </Pressable>
+      ),
+    });
+  }, [navigation, colors, styles]);
+
+  const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
-    fetchConversations()
-      .then(list => setUsers(
-        list
+    setError('');
+    try {
+      const [direct, groups] = await Promise.all([fetchConversations(), fetchGroups()]);
+      const list = [
+        ...direct
           .filter(c => c.user)
-          .map(c => ({ ...normalizeUser(c.user), unread: c.unread }))
-          .filter(u => u.id),
-      ))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+          .map(c => ({
+            ...normalizeUser(c.user),
+            unread: c.unread ?? 0,
+            updatedAt: c.updatedAt,
+          })),
+        ...groups.map(normalizeGroup).filter(Boolean),
+      ].sort((a, b) => new Date(b.updatedAt ?? 0) - new Date(a.updatedAt ?? 0));
+      setItems(list);
+    } catch (err) {
+      setError(err.message ?? 'دریافت گفتگوها ناموفق بود');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  // Refresh every time the list screen regains focus (e.g. coming back from
-  // a chat where new messages may have changed unread counts/ordering).
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // Keep the list live while messages arrive — even when the user isn't
-  // inside a chat screen (the socket now lives in SocketProvider).
   useEffect(() => {
     if (!socket) return undefined;
     const refresh = () => load(true);
@@ -43,93 +79,328 @@ export default function ChatListScreen({ navigation }) {
     };
   }, [socket, load]);
 
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(item =>
+      item.name?.toLowerCase().includes(q) || item.username?.toLowerCase().includes(q),
+    );
+  }, [items, query]);
+
+  function confirmLogout() {
+    Alert.alert('خروج از حساب', 'از حساب OpenBridge خارج می‌شوی؟', [
+      { text: 'انصراف', style: 'cancel' },
+      { text: 'خروج', style: 'destructive', onPress: logout },
+    ]);
+  }
+
+  function renderRow({ item }) {
+    const isGroup = item.kind === 'group';
+    const unread = item.unread ?? 0;
+    return (
+      <Pressable
+        style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+        onPress={() => navigation.navigate('Chat', { peer: item })}
+        accessibilityRole="button"
+        accessibilityLabel={`${item.name}${unread ? `، ${unread} پیام خوانده‌نشده` : ''}`}
+      >
+        <Avatar
+          uri={item.avatar}
+          name={item.name}
+          group={isGroup}
+          status={isGroup ? undefined : item.status}
+        />
+
+        <View style={styles.rowBody}>
+          <View style={styles.rowTop}>
+            <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+            {!!item.updatedAt && (
+              <Text style={styles.time}>{formatConversationTime(item.updatedAt)}</Text>
+            )}
+          </View>
+
+          <View style={styles.rowBottom}>
+            <Text style={styles.meta} numberOfLines={1}>
+              {isGroup ? `${item.memberCount ?? 0} عضو` : `@${item.username ?? ''}`}
+            </Text>
+            {unread > 0 && (
+              <View style={styles.badge} accessibilityLabel={`${unread} پیام خوانده‌نشده`}>
+                <Text style={styles.badgeText}>{unread.toLocaleString('fa-IR')}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </Pressable>
+    );
+  }
+
+  const empty = !loading && !error && visible.length === 0;
+
   return (
     <View style={styles.container}>
-      <FlatList
-        data={users}
-        keyExtractor={(u) => u.id}
-        refreshing={loading}
-        onRefresh={() => load()}
-        contentContainerStyle={users.length === 0 ? styles.emptyList : undefined}
-        ListEmptyComponent={
-          !loading && (
-            <View style={styles.empty}>
-              <FontAwesome6 name="comment-dots" size={28} color={colors.t3} />
-              <Text style={styles.emptyText}>هنوز گفتگویی نداری</Text>
-            </View>
-          )
-        }
-        renderItem={({ item }) => (
+      <View style={styles.searchWrap}>
+        <FontAwesome6 name="magnifying-glass" size={13} color={colors.text3} />
+        <TextInput
+          style={styles.searchInput}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="جستجوی گفتگو…"
+          placeholderTextColor={colors.text3}
+          accessibilityLabel="جستجوی گفتگو"
+          returnKeyType="search"
+        />
+        {!!query && (
           <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-            onPress={() => navigation.navigate('Chat', { peer: item })}
+            onPress={() => setQuery('')}
+            hitSlop={10}
+            style={styles.searchClear}
+            accessibilityRole="button"
+            accessibilityLabel="پاک‌کردن جستجو"
           >
-            <View style={styles.avatarWrap}>
-              {item.avatar
-                ? <Image source={{ uri: item.avatar }} style={styles.avatar} />
-                : (
-                  <View style={[styles.avatar, styles.avatarFallback]}>
-                    <FontAwesome6 name="user" size={16} color={colors.t2} />
-                  </View>
-                )}
-              <View style={[styles.dot, { backgroundColor: item.status === 'online' ? colors.green : colors.t3 }]} />
-            </View>
-
-            <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-
-            {item.unread > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{item.unread}</Text>
-              </View>
-            )}
+            <FontAwesome6 name="xmark" size={12} color={colors.text2} />
           </Pressable>
         )}
-      />
+      </View>
 
-      <View style={styles.footer}>
-        <View style={styles.footerUser}>
-          {currentUser?.avatar
-            ? <Image source={{ uri: currentUser.avatar }} style={styles.footerAvatar} />
-            : (
-              <View style={[styles.footerAvatar, styles.avatarFallback]}>
-                <FontAwesome6 name="user" size={13} color={colors.t2} />
-              </View>
-            )}
-          <Text style={styles.myName} numberOfLines={1}>{currentUser?.name}</Text>
+      {!!error && (
+        <View style={styles.errorBanner} accessibilityRole="alert">
+          <FontAwesome6 name="triangle-exclamation" size={13} color={colors.danger} />
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable onPress={() => load()} hitSlop={8} accessibilityRole="button">
+            <Text style={styles.retryText}>تلاش دوباره</Text>
+          </Pressable>
         </View>
-        <Pressable onPress={logout} hitSlop={10}>
-          <FontAwesome6 name="right-from-bracket" size={16} color={colors.t2} />
+      )}
+
+      {loading && items.length === 0 ? (
+        <View style={styles.state}>
+          <ActivityIndicator color={colors.accent} />
+          <Text style={styles.stateText}>در حال بارگذاری گفتگوها…</Text>
+        </View>
+      ) : empty ? (
+        <View style={styles.state}>
+          <View style={styles.emptyIcon}>
+            <FontAwesome6 name={query ? 'magnifying-glass' : 'comments'} size={24} color={colors.accentText} />
+          </View>
+          <Text style={styles.emptyTitle}>
+            {query ? 'گفتگویی پیدا نشد' : 'هنوز گفتگویی نداری'}
+          </Text>
+          <Text style={styles.stateText}>
+            {query
+              ? 'عبارت دیگری را جستجو کن.'
+              : 'گفتگوها پس از رد و بدل شدن پیام اینجا نمایش داده می‌شوند. با دکمهٔ بالای صفحه یک گروه بساز.'}
+          </Text>
+          {query ? (
+            <Pressable style={styles.stateBtn} onPress={() => setQuery('')} accessibilityRole="button">
+              <Text style={styles.stateBtnText}>پاک‌کردن جستجو</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={styles.stateBtn}
+              onPress={() => navigation.navigate('NewGroup')}
+              accessibilityRole="button"
+            >
+              <FontAwesome6 name="users" size={13} color={colors.onAccent} />
+              <Text style={styles.stateBtnText}>ساخت گروه جدید</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : (
+        <FlatList
+          data={visible}
+          keyExtractor={item => `${item.kind}-${item.id}`}
+          renderItem={renderRow}
+          refreshing={loading}
+          onRefresh={() => load()}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.listContent}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+        />
+      )}
+
+      <View style={[styles.footer, { paddingBottom: spacing.sm + insets.bottom }]}>
+        <View style={styles.footerUser}>
+          <Avatar uri={currentUser?.avatar} name={currentUser?.name} size={32} />
+          <View style={styles.footerText}>
+            <Text style={styles.myName} numberOfLines={1}>{currentUser?.name}</Text>
+            {!!currentUser?.username && (
+              <Text style={styles.myUsername} numberOfLines={1}>@{currentUser.username}</Text>
+            )}
+          </View>
+        </View>
+        <Pressable
+          onPress={confirmLogout}
+          hitSlop={10}
+          style={styles.logoutBtn}
+          accessibilityRole="button"
+          accessibilityLabel="خروج از حساب"
+        >
+          <FontAwesome6 name="right-from-bracket" size={16} color={colors.text2} />
         </Pressable>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.s0 },
+function makeStyles(colors) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
 
-  row: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 16, paddingVertical: 10 },
-  rowPressed: { backgroundColor: colors.s2 },
+    searchWrap: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginHorizontal: spacing.lg,
+      marginTop: spacing.md,
+      marginBottom: spacing.sm,
+      paddingHorizontal: spacing.md,
+      height: 44,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: radius.md,
+    },
+    searchInput: {
+      flex: 1,
+      minHeight: 42,
+      color: colors.text1,
+      fontFamily: fonts.regular,
+      fontSize: type.base,
+      textAlign: 'right',
+      padding: 0,
+    },
+    searchClear: {
+      width: 28, height: 28, borderRadius: radius.pill,
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: colors.surface2,
+    },
 
-  avatarWrap: { width: 44, height: 44 },
-  avatar: { width: 44, height: 44, borderRadius: 22 },
-  avatarFallback: { backgroundColor: colors.s2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
-  dot: { position: 'absolute', bottom: 0, left: 0, width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: colors.s0 },
+    listContent: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+    row: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: spacing.md,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm + 2,
+      minHeight: 64,
+      borderRadius: radius.md,
+    },
+    rowPressed: { backgroundColor: colors.surface2 },
+    rowBody: { flex: 1, gap: 3 },
+    rowTop: { flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm },
+    rowBottom: { flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm },
+    name: {
+      flex: 1,
+      color: colors.text1,
+      fontFamily: fonts.semibold,
+      fontSize: type.base,
+      textAlign: 'right',
+    },
+    time: {
+      color: colors.text3,
+      fontFamily: fonts.regular,
+      fontSize: type.xs,
+    },
+    meta: {
+      flex: 1,
+      color: colors.text3,
+      fontFamily: fonts.regular,
+      fontSize: type.sm,
+      textAlign: 'right',
+    },
+    separator: { height: 1, backgroundColor: colors.border, marginHorizontal: spacing.lg },
 
-  name: { flex: 1, color: colors.t1, fontFamily: fonts.medium, fontSize: 14, textAlign: 'right' },
+    badge: {
+      minWidth: 20, height: 20, paddingHorizontal: 6,
+      borderRadius: radius.pill,
+      backgroundColor: colors.accent,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    badgeText: { color: colors.onAccent, fontFamily: fonts.semibold, fontSize: type.xs },
 
-  badge: { backgroundColor: colors.accent, minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  badgeText: { color: '#fff', fontFamily: fonts.semibold, fontSize: 11 },
+    state: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.md,
+      paddingHorizontal: spacing.xxxl,
+    },
+    stateText: {
+      color: colors.text2,
+      fontFamily: fonts.regular,
+      fontSize: type.sm,
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+    emptyIcon: {
+      width: 64, height: 64, borderRadius: radius.xl,
+      backgroundColor: colors.accentSoft,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    emptyTitle: { color: colors.text1, fontFamily: fonts.semibold, fontSize: type.md },
+    stateBtn: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginTop: spacing.sm,
+      minHeight: 44,
+      paddingHorizontal: spacing.lg,
+      borderRadius: radius.md,
+      backgroundColor: colors.accent,
+    },
+    stateBtnText: { color: colors.onAccent, fontFamily: fonts.semibold, fontSize: type.base },
 
-  emptyList: { flexGrow: 1 },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100, gap: 12 },
-  emptyText: { color: colors.t3, fontFamily: fonts.regular, fontSize: 13 },
+    errorBanner: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.sm,
+      backgroundColor: colors.dangerSoft,
+    },
+    errorText: {
+      flex: 1,
+      color: colors.text1,
+      fontFamily: fonts.regular,
+      fontSize: type.sm,
+      textAlign: 'right',
+    },
+    retryText: { color: colors.accentText, fontFamily: fonts.semibold, fontSize: type.sm },
 
-  footer: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border,
-  },
-  footerUser: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
-  footerAvatar: { width: 30, height: 30, borderRadius: 15 },
-  myName: { color: colors.t1, fontFamily: fonts.semibold, fontSize: 13 },
-});
+    footer: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: spacing.md,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    footerUser: { flex: 1, flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm },
+    footerText: { flex: 1 },
+    myName: { color: colors.text1, fontFamily: fonts.semibold, fontSize: type.sm, textAlign: 'right' },
+    myUsername: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.xs, textAlign: 'right' },
+    logoutBtn: {
+      width: 44, height: 44, borderRadius: radius.md,
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: colors.surface2,
+    },
+
+    headerBtn: {
+      width: 40, height: 40,
+      alignItems: 'center', justifyContent: 'center',
+      marginHorizontal: spacing.xs,
+    },
+    headerPlus: {
+      position: 'absolute', top: 6, right: 4,
+      width: 14, height: 14, borderRadius: radius.pill,
+      backgroundColor: colors.accent,
+      alignItems: 'center', justifyContent: 'center',
+    },
+  });
+}

@@ -1,122 +1,426 @@
-import { useCallback, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator, FlatList, Image, KeyboardAvoidingView, Linking, Platform,
+  Pressable, StyleSheet, Text, TextInput, View,
+} from 'react-native';
 import { FontAwesome6 } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useChat } from '../hooks/useChat';
-import { colors, fonts } from '../theme';
+import { fonts, radius, spacing, type, useAppTheme } from '../theme';
+import { dayKey, formatDayLabel } from '../utils/time';
+import Avatar from '../components/Avatar';
+
+const GROUP_GAP = 5 * 60 * 1000;
+
+function buildRows(messages) {
+  const rows = [];
+  let prevMsg = null;
+  let prevDay = null;
+
+  messages.forEach((msg, index) => {
+    const day = dayKey(msg.createdAt);
+    if (day !== prevDay) {
+      rows.push({ type: 'day', key: `day-${day}`, label: formatDayLabel(msg.createdAt) });
+      prevMsg = null;
+      prevDay = day;
+    }
+    const next = messages[index + 1];
+    const samePrev = prevMsg && prevMsg.senderId === msg.senderId && msg.createdAt - prevMsg.createdAt < GROUP_GAP;
+    const sameNext = next && next.senderId === msg.senderId && next.createdAt - msg.createdAt < GROUP_GAP;
+    rows.push({ type: 'msg', key: msg.id, msg, first: !samePrev, last: !sameNext });
+    prevMsg = msg;
+  });
+
+  return rows;
+}
 
 export default function ChatScreen({ route }) {
   const peer = route.params?.peer;
   const { currentUser } = useAuth();
-  const { messages, isTyping, connected, sendMessage, notifyTyping } = useChat(peer, currentUser);
-  const [text, setText]   = useState('');
+  const { colors } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const {
+    messages, isTyping, typingName, connected,
+    historyState, historyError, retryHistory,
+    sendMessage, notifyTyping,
+  } = useChat(peer, currentUser);
+  const [text, setText] = useState('');
   const [error, setError] = useState('');
+  const [sending, setSending] = useState(false);
+  const listRef = useRef(null);
 
-  const onSend = useCallback(() => {
-    if (!text.trim()) return;
-    if (!sendMessage(text)) {
-      setError('اتصال به سرور برقرار نیست — دوباره تلاش کن');
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const isGroup = peer?.kind === 'group';
+  const rows = useMemo(() => buildRows(messages).reverse(), [messages]);
+
+  const onSend = useCallback(async () => {
+    const value = text.trim();
+    if (!value || sending) return;
+    setSending(true);
+    setError('');
+    const result = await sendMessage(value);
+    setSending(false);
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
-    setError('');
     setText('');
-  }, [text, sendMessage]);
+  }, [text, sending, sendMessage]);
+
+  function openFile(msg) {
+    if (msg.src) Linking.openURL(msg.src).catch(() => setError('باز کردن فایل ناموفق بود'));
+  }
+
+  const canSend = !!text.trim() && !sending && connected;
+
+  function renderItem({ item }) {
+    if (item.type === 'day') {
+      return (
+        <View style={styles.dayRow}>
+          <View style={styles.dayPill}>
+            <Text style={styles.dayText}>{item.label}</Text>
+          </View>
+        </View>
+      );
+    }
+
+    const { msg, first, last } = item;
+    const isMine = msg.side === 'mine';
+    const reactions = Object.entries(msg.reactions ?? {}).filter(([, count]) => count > 0);
+
+    return (
+      <View style={[styles.msgRow, isMine ? styles.msgRowMine : styles.msgRowOther]}>
+        <View style={[styles.bubbleCol, isMine ? styles.bubbleColMine : styles.bubbleColOther]}>
+          {isGroup && !isMine && first && (
+            <Text style={styles.sender} numberOfLines={1}>{msg.sender || 'کاربر'}</Text>
+          )}
+
+          <View style={[
+            styles.bubble,
+            isMine ? styles.bubbleMine : styles.bubbleOther,
+            last && (isMine ? styles.bubbleMineLast : styles.bubbleOtherLast),
+          ]}>
+            {msg.type === 'image' && msg.src ? (
+              <Pressable onPress={() => openFile(msg)} accessibilityRole="imagebutton" accessibilityLabel="باز کردن تصویر">
+                <Image
+                  source={{ uri: msg.src }}
+                  style={styles.image}
+                  resizeMode="cover"
+                  accessibilityLabel={msg.text || 'تصویر ارسالی'}
+                />
+              </Pressable>
+            ) : msg.type === 'file' && msg.src ? (
+              <Pressable
+                style={[styles.fileRow, isMine && styles.fileRowMine]}
+                onPress={() => openFile(msg)}
+                accessibilityRole="button"
+                accessibilityLabel={`دانلود ${msg.name || 'فایل'}`}
+              >
+                <FontAwesome6 name="file-arrow-down" size={15} color={isMine ? colors.onBubbleOut : colors.accentText} />
+                <Text style={[styles.fileName, isMine && styles.textMine]} numberOfLines={1}>
+                  {msg.name || 'فایل'}
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {!!msg.text && (
+              <Text style={[styles.bubbleText, isMine && styles.bubbleTextMine]}>{msg.text}</Text>
+            )}
+
+            {reactions.length > 0 && (
+              <View style={styles.reactions}>
+                {reactions.map(([emoji, count]) => (
+                  <View key={emoji} style={[styles.reactionChip, isMine && styles.reactionChipMine]}>
+                    <Text style={styles.reactionText}>{emoji} {count}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={[styles.metaRow, isMine ? styles.metaRowMine : styles.metaRowOther]}>
+              <Text style={[styles.time, isMine && styles.timeMine]}>{msg.time}</Text>
+              {isMine && (
+                <FontAwesome6
+                  name="check-double"
+                  size={10}
+                  color={msg.read ? '#FFE0DE' : 'rgba(255,255,255,0.68)'}
+                  accessibilityLabel={msg.read ? 'خوانده شد' : 'ارسال شد'}
+                />
+              )}
+            </View>
+          </View>
+        </View>
+
+        {!isMine && (
+          <View style={styles.avatarSlot}>
+            {last
+              ? <Avatar uri={msg.avatar} name={msg.sender || peer?.name} size={28} />
+              : null}
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  const header = isGroup ? (
+    <View style={styles.intro}>
+      <Avatar name={peer?.name} group size={64} />
+      <Text style={styles.introName}>{peer?.name}</Text>
+      <Text style={styles.introMeta}>گروه شامل {(peer?.memberCount ?? 0).toLocaleString('fa-IR')} عضو</Text>
+      {peer?.participants?.length > 0 && (
+        <Text style={styles.introMembers} numberOfLines={3}>
+          {peer.participants.map(p => p.name).join('، ')}
+        </Text>
+      )}
+    </View>
+  ) : (
+    <View style={styles.intro}>
+      <Avatar uri={peer?.avatar} name={peer?.name} size={64} status={peer?.status} />
+      <Text style={styles.introName}>{peer?.name}</Text>
+      <Text style={styles.introMeta}>
+        {peer?.status === 'online' ? 'آنلاین' : 'آفلاین'}
+        {peer?.username ? ` · @${peer.username}` : ''}
+      </Text>
+    </View>
+  );
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 56 + insets.top : 0}
     >
       {!connected && (
         <View style={styles.offlineBar}>
-          <Text style={styles.offlineText}>در حال اتصال...</Text>
+          <Text style={styles.offlineText}>در حال اتصال به سرور…</Text>
         </View>
       )}
 
-      <FlatList
-        data={[...messages].reverse()}
-        inverted
-        keyExtractor={(m) => String(m.id)}
-        contentContainerStyle={styles.list}
-        renderItem={({ item }) => (
-          <View style={[styles.row, item.side === 'mine' ? styles.rowMine : styles.rowOther]}>
-            <View style={[styles.bubble, item.side === 'mine' ? styles.bubbleMine : styles.bubbleOther]}>
-              <Text style={[styles.bubbleText, item.side === 'mine' && styles.bubbleTextMine]}>{item.text}</Text>
-              <View style={styles.metaRow}>
-                <Text style={[styles.time, item.side === 'mine' && styles.timeMine]}>{item.time}</Text>
-                {item.side === 'mine' && (
-                  <FontAwesome6
-                    name="check-double"
-                    size={11}
-                    color={item.read ? '#BFD8FF' : 'rgba(255,255,255,0.6)'}
-                  />
-                )}
-              </View>
+      {historyState === 'loading' && messages.length === 0 ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator color={colors.accent} />
+          <Text style={styles.stateText}>در حال دریافت پیام‌ها…</Text>
+        </View>
+      ) : historyState === 'error' && messages.length === 0 ? (
+        <View style={styles.centerState}>
+          <FontAwesome6 name="triangle-exclamation" size={22} color={colors.danger} />
+          <Text style={styles.stateText}>{historyError || 'دریافت پیام‌ها ناموفق بود'}</Text>
+          <Pressable style={styles.retryBtn} onPress={retryHistory} accessibilityRole="button">
+            <FontAwesome6 name="rotate-right" size={12} color={colors.onAccent} />
+            <Text style={styles.retryText}>تلاش دوباره</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <FlatList
+          ref={listRef}
+          data={rows}
+          inverted
+          keyExtractor={item => item.key}
+          renderItem={renderItem}
+          contentContainerStyle={styles.list}
+          ListFooterComponent={header}
+          ListEmptyComponent={
+            <View style={styles.centerState}>
+              <Text style={styles.stateText}>هنوز پیامی رد و بدل نشده — اولین پیام را بنویس.</Text>
             </View>
-          </View>
-        )}
-      />
-
-      {isTyping && (
-        <Text style={styles.typing}>{peer?.name} در حال نوشتن است...</Text>
+          }
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+        />
       )}
 
-      {!!error && <Text style={styles.sendError}>{error}</Text>}
+      {isTyping && (
+        <View style={styles.typingRow}>
+          <View style={styles.typingDots}>
+            <View style={styles.typingDot} />
+            <View style={styles.typingDot} />
+            <View style={styles.typingDot} />
+          </View>
+          <Text style={styles.typingText} numberOfLines={1}>{typingName || peer?.name} در حال نوشتن است…</Text>
+        </View>
+      )}
 
-      <View style={styles.composer}>
+      {!!error && (
+        <View style={styles.sendErrorRow} accessibilityRole="alert">
+          <FontAwesome6 name="circle-exclamation" size={12} color={colors.danger} />
+          <Text style={styles.sendError}>{error}</Text>
+          <Pressable onPress={() => setError('')} hitSlop={10} accessibilityRole="button" accessibilityLabel="بستن خطا">
+            <FontAwesome6 name="xmark" size={12} color={colors.text2} />
+          </Pressable>
+        </View>
+      )}
+
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
         <TextInput
           style={styles.input}
           value={text}
-          onChangeText={(v) => { setText(v); setError(''); notifyTyping(); }}
-          placeholder="پیامی بنویسید..."
-          placeholderTextColor={colors.t3}
+          onChangeText={(value) => { setText(value); setError(''); notifyTyping(); }}
+          placeholder={connected ? 'پیامت را بنویس…' : 'در انتظار اتصال…'}
+          placeholderTextColor={colors.text3}
           multiline
+          maxLength={4000}
+          accessibilityLabel="متن پیام"
         />
-        <Pressable style={styles.sendBtn} onPress={onSend}>
-          <FontAwesome6 name="paper-plane" size={15} color="#fff" />
+        <Pressable
+          style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
+          onPress={onSend}
+          disabled={!canSend}
+          accessibilityRole="button"
+          accessibilityLabel="ارسال پیام"
+          accessibilityState={{ disabled: !canSend }}
+        >
+          {sending
+            ? <ActivityIndicator color={colors.onAccent} size="small" />
+            : <FontAwesome6 name="paper-plane" size={15} color={canSend ? colors.onAccent : colors.text3} />}
         </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.s0 },
-  list: { padding: 16, gap: 6, flexGrow: 1, justifyContent: 'flex-end' },
+function makeStyles(colors) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.chat },
+    list: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md },
 
-  offlineBar: { backgroundColor: colors.s2, paddingVertical: 5, alignItems: 'center' },
-  offlineText: { color: colors.t3, fontFamily: fonts.regular, fontSize: 11 },
+    offlineBar: { backgroundColor: colors.surface2, paddingVertical: 5, alignItems: 'center' },
+    offlineText: { color: colors.text2, fontFamily: fonts.regular, fontSize: type.xs },
 
-  row: { flexDirection: 'row' },
-  rowMine:  { justifyContent: 'flex-end' },
-  rowOther: { justifyContent: 'flex-start' },
+    centerState: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.md,
+      paddingHorizontal: spacing.xxxl,
+    },
+    stateText: { color: colors.text2, fontFamily: fonts.regular, fontSize: type.sm, textAlign: 'center', lineHeight: 22 },
+    retryBtn: {
+      flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,
+      minHeight: 44, paddingHorizontal: spacing.lg,
+      borderRadius: radius.md, backgroundColor: colors.accent,
+    },
+    retryText: { color: colors.onAccent, fontFamily: fonts.semibold, fontSize: type.sm },
 
-  bubble: { maxWidth: '78%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9, marginVertical: 3 },
-  bubbleOther: { backgroundColor: colors.s2, borderWidth: 1, borderColor: colors.border, borderBottomLeftRadius: 4 },
-  bubbleMine:  { backgroundColor: colors.accent, borderBottomRightRadius: 4 },
+    // VirtualizedList flips footer/empty cells itself for `inverted`; adding a
+    // manual scaleY here would double-flip the content upside down.
+    intro: {
+      alignItems: 'center',
+      gap: spacing.xs,
+      paddingVertical: spacing.xl,
+      paddingHorizontal: spacing.lg,
+    },
+    introName: { color: colors.text1, fontFamily: fonts.semibold, fontSize: type.md, marginTop: spacing.xs },
+    introMeta: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.sm },
+    introMembers: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.xs, textAlign: 'center', marginTop: spacing.xs },
 
-  bubbleText:     { color: colors.t1, fontFamily: fonts.regular, fontSize: 14, textAlign: 'right' },
-  bubbleTextMine: { color: '#fff' },
+    dayRow: { alignItems: 'center', marginVertical: spacing.md, paddingVertical: spacing.xs },
+    dayPill: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: 3,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surface2,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    dayText: { color: colors.text3, fontFamily: fonts.medium, fontSize: type.xs },
 
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
-  time:     { color: colors.t3, fontFamily: fonts.regular, fontSize: 10 },
-  timeMine: { color: 'rgba(255,255,255,0.75)' },
+    msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, marginVertical: 2 },
+    msgRowMine: { justifyContent: 'flex-start' },
+    msgRowOther: { justifyContent: 'flex-end' },
+    avatarSlot: { width: 28 },
+    bubbleCol: { maxWidth: '78%' },
+    bubbleColMine: { alignItems: 'flex-start' },
+    bubbleColOther: { alignItems: 'flex-end' },
+    sender: { color: colors.accentText, fontFamily: fonts.medium, fontSize: type.xs, marginBottom: 3, marginHorizontal: 4 },
 
-  typing: { color: colors.t3, fontFamily: fonts.regular, fontSize: 12, paddingHorizontal: 16, paddingBottom: 4 },
-  sendError: { color: colors.red, fontFamily: fonts.regular, fontSize: 11, paddingHorizontal: 16, paddingBottom: 4, textAlign: 'right' },
+    bubble: {
+      borderRadius: radius.lg,
+      paddingHorizontal: spacing.md + 2,
+      paddingVertical: spacing.sm + 2,
+      gap: 4,
+      minWidth: 74,
+    },
+    bubbleOther: {
+      backgroundColor: colors.bubbleIn,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderBottomRightRadius: radius.xs,
+    },
+    bubbleMine: { backgroundColor: colors.bubbleOut, borderBottomLeftRadius: radius.xs },
+    bubbleOtherLast: { borderBottomRightRadius: radius.xs },
+    bubbleMineLast: { borderBottomLeftRadius: radius.xs },
 
-  composer: {
-    flexDirection: 'row', alignItems: 'flex-end', gap: 8,
-    paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border,
-  },
-  input: {
-    flex: 1, backgroundColor: colors.s2, borderWidth: 1, borderColor: colors.border,
-    borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 120,
-    color: colors.t1, fontFamily: fonts.regular, fontSize: 14, textAlign: 'right',
-  },
-  sendBtn: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent,
-    alignItems: 'center', justifyContent: 'center',
-  },
-});
+    bubbleText: { color: colors.text1, fontFamily: fonts.regular, fontSize: type.base, lineHeight: 22 },
+    bubbleTextMine: { color: colors.onBubbleOut },
+    textMine: { color: colors.onBubbleOut },
+
+    image: { width: 220, height: 160, maxWidth: '100%', borderRadius: radius.sm },
+    fileRow: {
+      flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,
+      paddingVertical: 2, maxWidth: 240,
+    },
+    fileRowMine: {},
+    fileName: { flex: 1, color: colors.accentText, fontFamily: fonts.medium, fontSize: type.sm },
+
+    reactions: { flexDirection: 'row-reverse', gap: 4, marginTop: 2 },
+    reactionChip: {
+      paddingHorizontal: 6, paddingVertical: 1,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surface2,
+    },
+    reactionChipMine: { backgroundColor: 'rgba(255,255,255,0.18)' },
+    reactionText: { color: colors.text1, fontFamily: fonts.regular, fontSize: type.xs },
+
+    metaRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, marginTop: 1 },
+    metaRowMine: { justifyContent: 'flex-start' },
+    metaRowOther: { justifyContent: 'flex-end' },
+    time: { color: colors.text3, fontFamily: fonts.regular, fontSize: 10 },
+    timeMine: { color: 'rgba(255,255,255,0.78)' },
+
+    typingRow: {
+      flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,
+      paddingHorizontal: spacing.lg, paddingBottom: spacing.xs,
+    },
+    typingDots: { flexDirection: 'row', gap: 3 },
+    typingDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.text3 },
+    typingText: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.xs },
+
+    sendErrorRow: {
+      flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,
+      marginHorizontal: spacing.md, marginBottom: spacing.xs,
+      paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+      borderRadius: radius.sm, backgroundColor: colors.dangerSoft,
+    },
+    sendError: { flex: 1, color: colors.text1, fontFamily: fonts.regular, fontSize: type.sm, textAlign: 'right' },
+
+    composer: {
+      flexDirection: 'row-reverse', alignItems: 'flex-end', gap: spacing.sm,
+      paddingHorizontal: spacing.md, paddingTop: spacing.sm,
+      borderTopWidth: 1, borderTopColor: colors.border,
+      backgroundColor: colors.chat,
+    },
+    input: {
+      flex: 1,
+      minHeight: 44,
+      maxHeight: 132,
+      paddingHorizontal: spacing.md + 2,
+      paddingTop: 11,
+      paddingBottom: 10,
+      borderRadius: radius.lg,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      backgroundColor: colors.surface,
+      color: colors.text1,
+      fontFamily: fonts.regular,
+      fontSize: type.base,
+      textAlign: 'right',
+    },
+    sendBtn: {
+      width: 44, height: 44, borderRadius: radius.md,
+      backgroundColor: colors.accent,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    sendBtnDisabled: { backgroundColor: colors.surface3 },
+  });
+}

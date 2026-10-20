@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -6,56 +6,42 @@ import * as SplashScreen from 'expo-splash-screen';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
-import { colors, fontAssets, fonts } from './src/theme';
+import { fontAssets, fonts, navFonts, useAppTheme } from './src/theme';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { SocketProvider } from './src/context/SocketContext';
 import LoginScreen from './src/screens/LoginScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatScreen from './src/screens/ChatScreen';
-import VideoCallScreen from './src/screens/VideoCallScreen';
+import NewGroupScreen from './src/screens/NewGroupScreen';
 
 SplashScreen.preventAutoHideAsync();
 
 const Stack = createNativeStackNavigator();
 
-const navTheme = {
-  dark: true,
-  colors: {
-    primary:      colors.accent,
-    background:   colors.s0,
-    card:         colors.s1,
-    text:         colors.t1,
-    border:       colors.border,
-    notification: colors.accent,
-  },
-  fonts: {
-    regular: { fontFamily: fonts.regular,  fontWeight: '400' },
-    medium:  { fontFamily: fonts.medium,   fontWeight: '500' },
-    bold:    { fontFamily: fonts.bold,     fontWeight: '700' },
-    heavy:   { fontFamily: fonts.bold,     fontWeight: '800' },
-  },
-};
-
-const screenOptions = {
-  headerStyle: { backgroundColor: colors.s1 },
-  headerTintColor: colors.t1,
-  headerTitleStyle: { fontFamily: fonts.semibold },
-  contentStyle: { backgroundColor: colors.s0 },
-};
-
 function RootNavigator() {
   const { currentUser, loading } = useAuth();
+  const { colors } = useAppTheme();
 
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.s0, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
 
   return (
-    <Stack.Navigator screenOptions={screenOptions}>
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: colors.surface },
+        headerTintColor: colors.text1,
+        headerTitleStyle: { fontFamily: fonts.semibold, fontSize: 16 },
+        headerTitleAlign: 'center',
+        headerShadowVisible: false,
+        headerBackButtonDisplayMode: 'minimal',
+        contentStyle: { backgroundColor: colors.bg },
+      }}
+    >
       {!currentUser ? (
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
       ) : (
@@ -66,7 +52,7 @@ function RootNavigator() {
             component={ChatScreen}
             options={({ route }) => ({ title: route.params?.peer?.name ?? 'گفتگو' })}
           />
-          <Stack.Screen name="VideoCall" component={VideoCallScreen} options={{ title: 'تماس' }} />
+          <Stack.Screen name="NewGroup" component={NewGroupScreen} options={{ title: 'گروه جدید' }} />
         </>
       )}
     </Stack.Navigator>
@@ -75,6 +61,20 @@ function RootNavigator() {
 
 export default function App() {
   const [fontsLoaded, fontError] = useFonts(fontAssets);
+  const { dark, colors } = useAppTheme();
+
+  const navTheme = useMemo(() => ({
+    dark,
+    colors: {
+      primary: colors.accent,
+      background: colors.bg,
+      card: colors.surface,
+      text: colors.text1,
+      border: colors.border,
+      notification: colors.accent,
+    },
+    fonts: navFonts,
+  }), [dark, colors]);
 
   useEffect(() => {
     if (fontsLoaded || fontError) SplashScreen.hideAsync();
@@ -86,7 +86,7 @@ export default function App() {
     <AuthProvider>
       <SocketProvider>
         <NavigationContainer theme={navTheme}>
-          <StatusBar style="light" />
+          <StatusBar style={dark ? 'light' : 'dark'} />
           <RootNavigator />
         </NavigationContainer>
       </SocketProvider>

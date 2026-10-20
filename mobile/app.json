@@ -5,8 +5,8 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
-    "backgroundColor": "#0F1117",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#F6F3EE",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.openbridge.mobile"
@@ -14,9 +14,8 @@
     "android": {
       "package": "com.openbridge.mobile",
       "adaptiveIcon": {
-        "backgroundColor": "#0F1117",
+        "backgroundColor": "#C5161D",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       }
     },
@@ -29,7 +28,14 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0F1117"
+          "backgroundColor": "#F6F3EE",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#121110",
+            "image": "./assets/splash-icon.png"
+          }
         }
       ]
     ]
