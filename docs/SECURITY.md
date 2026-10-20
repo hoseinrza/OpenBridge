@@ -66,7 +66,8 @@ name, avatar, bio, status, and creation date to any authenticated user.
 
 ## WebSocket hardening
 
-- Every connection validates the JWT signature/algorithm and that the user row still exists.
+- Every connection validates the JWT signature/algorithm and that its
+  server-side session is still active.
 - Per-socket rate limits: messages 30/10s, typing 20/10s, read receipts
   20/10s, reactions 20/10s, call signaling 40/10s.
 - Incoming packets are capped at 256 KB.
@@ -82,6 +83,10 @@ name, avatar, bio, status, and creation date to any authenticated user.
 - Uploads require authentication and are limited to 60 per user per hour, 10 MB each.
 - A MIME/extension allowlist rejects HTML, SVG, scripts, and executables.
 - Image files are checked against magic bytes, not just the declared MIME type.
+- Optional ClamAV scanning (`UPLOAD_SCAN_ENABLED=true`, `CLAMAV_HOST`,
+  `CLAMAV_PORT`) streams each file to clamd over INSTREAM before the upload is
+  accepted. Scan errors fail closed with 503, and infected files are deleted.
+  Scanning is off by default because it requires a running clamd instance.
 - Stored filenames are server-generated UUIDs; the original name is metadata only.
 - The uploads directory is no longer served statically.
 - API responses issue expiring HMAC-signed URLs (default 7 days,
@@ -125,7 +130,8 @@ name, avatar, bio, status, and creation date to any authenticated user.
 - Signed attachment URLs are bearer capabilities: anyone with the URL can use it
   until expiry. Authorization is enforced when the URL is issued, not on each
   download. Removed members may retain valid URLs for up to the TTL.
-- No virus scanning of uploaded documents.
+- Malware scanning is disabled unless a clamd instance is configured; the
+  default deployment does not scan uploads.
 - Message edit/delete and account deletion workflows are not implemented.
 - Database rows and attachment files are stored unencrypted at rest.
 - Web lint currently reports pre-existing errors; CI runs build and backend

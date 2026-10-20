@@ -1,6 +1,7 @@
 import {
   BadRequestException, Controller, ForbiddenException, Get, NotFoundException,
-  Param, Post, Query, Request, Res, UploadedFile, UseGuards, UseInterceptors,
+  Param, Post, Query, Request, Res, ServiceUnavailableException, UploadedFile,
+  UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -10,6 +11,7 @@ import { extname, join, normalize } from 'path';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { verifyFileSignature } from './file-urls';
+import { UploadScanner } from './upload-scanner';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -70,6 +72,8 @@ async function contentMatchesType(path: string, mimetype: string): Promise<boole
 export class UploadsController {
   private uploadBuckets = new Map<string, { count: number; resetAt: number }>();
 
+  constructor(private readonly scanner: UploadScanner) {}
+
   private assertUploadRate(userId: string) {
     const now = Date.now();
     const bucket = this.uploadBuckets.get(userId);
@@ -115,6 +119,18 @@ export class UploadsController {
     if (!validContent) {
       await unlink(file.path).catch(() => {});
       throw new BadRequestException('محتوای فایل با نوع آن مطابقت ندارد');
+    }
+
+    let scan;
+    try {
+      scan = await this.scanner.scan(file.path);
+    } catch {
+      await unlink(file.path).catch(() => {});
+      throw new ServiceUnavailableException('اسکن امنیتی فایل در حال حاضر در دسترس نیست');
+    }
+    if (!scan.clean) {
+      await unlink(file.path).catch(() => {});
+      throw new BadRequestException('فایل آلوده است');
     }
 
     return {

@@ -46,6 +46,10 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       TRUST_PROXY: ${TRUST_PROXY:-1}
+      UPLOAD_SCAN_ENABLED: ${UPLOAD_SCAN_ENABLED:-false}
+      # Point at your clamd container/host if you enable scanning.
+      CLAMAV_HOST: ${CLAMAV_HOST:-127.0.0.1}
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
       FILE_URL_SECRET: ${FILE_URL_SECRET:-}
       FILE_URL_TTL_SECONDS: ${FILE_URL_TTL_SECONDS:-604800}
       PORT: 3000

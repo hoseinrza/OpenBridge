@@ -4,8 +4,10 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { unlink } = require('node:fs/promises');
+const net = require('node:net');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
+const { EICAR } = require('./fixtures');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-least-32-characters-long';
@@ -38,6 +40,44 @@ let prisma;
 let origin;
 let group;
 let messageId;
+let clamStub;
+let clamScanCount = 0;
+
+// Minimal clamd stand-in speaking INSTREAM: replies FOUND for EICAR tests and
+// OK otherwise. It lets the upload path exercise the real network protocol.
+function startClamStub() {
+  const server = net.createServer(socket => {
+    let buffer = Buffer.alloc(0);
+    let payload = Buffer.alloc(0);
+    let commandSeen = false;
+
+    socket.on('data', chunk => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (!commandSeen) {
+        const end = buffer.indexOf(0);
+        if (end === -1) return;
+        buffer = buffer.subarray(end + 1);
+        commandSeen = true;
+      }
+      while (buffer.length >= 4) {
+        const length = buffer.readUInt32BE(0);
+        if (length === 0) {
+          buffer = buffer.subarray(4);
+          clamScanCount += 1;
+          const infected = payload.includes(EICAR);
+          socket.end(Buffer.from(infected ? 'stream: Eicar-Test-Signature FOUND\0' : 'stream: OK\0'));
+          return;
+        }
+        if (buffer.length < 4 + length) return;
+        payload = Buffer.concat([payload, buffer.subarray(4, 4 + length)]);
+        buffer = buffer.subarray(4 + length);
+      }
+    });
+  });
+  return new Promise(resolve => {
+    server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port }));
+  });
+}
 
 async function api(path, { method = 'GET', token, body, headers = {} } = {}) {
   const response = await fetch(`${origin}${API_PREFIX}${path}`, {
@@ -123,6 +163,11 @@ async function upload(token, buffer, type, filename) {
 }
 
 before(async () => {
+  clamStub = await startClamStub();
+  process.env.UPLOAD_SCAN_ENABLED = 'true';
+  process.env.CLAMAV_HOST = '127.0.0.1';
+  process.env.CLAMAV_PORT = String(clamStub.port);
+
   app = await NestFactory.create(AppModule, { logger: false });
   // Tests send X-Forwarded-For in the throttling case, so trust one proxy hop.
   app.set('trust proxy', 1);
@@ -197,6 +242,7 @@ after(async () => {
   for (const filename of uploadedFiles) {
     await unlink(join(process.cwd(), 'uploads', filename)).catch(() => {});
   }
+  await new Promise(resolve => clamStub?.server.close(resolve));
   await app?.close();
 });
 
@@ -332,6 +378,10 @@ test('uploads are type-checked and only readable through signed URLs', async () 
   const disguised = await upload(alice.token, Buffer.from('<script>alert(1)</script>'), 'image/png', 'fake.png');
   assert.equal(disguised.status, 400, 'fake PNG');
 
+  const infected = await upload(alice.token, Buffer.from(EICAR), 'text/plain', 'eicar.txt');
+  assert.equal(infected.status, 400, 'malware rejected');
+  assert.equal(infected.data.message, 'فایل آلوده است');
+
   const valid = await upload(alice.token, PNG_1X1, 'image/png', 'pixel.png');
   assert.equal(valid.status, 201, 'valid PNG');
   assert.match(valid.data.url, /^\/uploads\/[a-f0-9-]+\.png$/);
@@ -361,6 +411,7 @@ test('uploads are type-checked and only readable through signed URLs', async () 
 
   assert.match(filename, /^[a-f0-9-]+\.png$/);
   assert.equal(uploadedFiles.includes(filename), true);
+  assert.ok(clamScanCount >= 2, 'clean and infected uploads both reached clamd');
 });
 
 test('CORS rejects unknown origins and allows configured dev origins', async () => {
