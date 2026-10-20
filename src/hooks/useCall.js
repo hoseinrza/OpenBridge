@@ -19,11 +19,12 @@ export function useCall(currentUser) {
 
   const apiRef         = useRef({});
   const currentUserRef = useRef(currentUser);
-  currentUserRef.current = currentUser;
 
-  // Call duration timer, runs only while connected
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+
+  // Call duration timer, runs only while connected.
   useEffect(() => {
-    if (callState !== 'active') { setSeconds(0); return; }
+    if (callState !== 'active') return undefined;
     const id = setInterval(() => setSeconds(s => s + 1), 1000);
     return () => clearInterval(id);
   }, [callState]);
@@ -41,7 +42,7 @@ export function useCall(currentUser) {
   // ── socket connection + WebRTC session lifecycle ─────
   useEffect(() => {
     const token = localStorage.getItem('chatapp_token');
-    if (!token || !currentUser) { apiRef.current = {}; return; }
+    if (!token || !currentUserRef.current) { apiRef.current = {}; return; }
 
     let socket;
     let cancelled = false;
@@ -65,6 +66,7 @@ export function useCall(currentUser) {
       setLocalStream(null); setRemoteStream(null);
       setPeer(null); setCallType(null);
       setMicOn(true); setCamOn(true);
+      setSeconds(0);
       setPhase('idle');
     }
 

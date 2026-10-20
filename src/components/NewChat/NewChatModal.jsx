@@ -20,10 +20,10 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
   useEffect(() => {
     clearTimeout(debounceRef.current);
     const q = query.trim();
-    if (!q) { setResults([]); setLoading(false); setError(''); return; }
+    if (!q) return undefined;
 
-    setLoading(true);
     debounceRef.current = setTimeout(() => {
+      setLoading(true);
       searchUsers(q)
         .then(list => { setResults(list.map(normalizeUser).filter(Boolean)); setError(''); })
         .catch(() => setError('جستجو ناموفق بود'))
@@ -32,6 +32,15 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
 
     return () => clearTimeout(debounceRef.current);
   }, [query]);
+
+  function handleQueryChange(value) {
+    setQuery(value);
+    if (value.trim()) return;
+    clearTimeout(debounceRef.current);
+    setResults([]);
+    setLoading(false);
+    setError('');
+  }
 
   function switchMode(next) {
     setMode(next);
@@ -134,7 +143,7 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
             ref={inputRef}
             type="text"
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={e => handleQueryChange(e.target.value)}
             placeholder={mode === 'group' ? 'جستجوی عضو برای افزودن...' : 'نام نمایشی یا نام کاربری را جستجو کن...'}
           />
         </div>

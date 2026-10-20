@@ -52,33 +52,39 @@ export function useChat(targetUser, currentUser, onIncoming) {
   const [messages,  setMessages]  = useState([]);
   const [typingPeer, setTypingPeer] = useState(null);
   const [connected, setConnected] = useState(false);
+  const currentUserId  = currentUser?.id;
+  const targetId       = targetUser?.id;
   const socketRef      = useRef(null);
   const typingTimerRef = useRef(null);
   const targetRef      = useRef(targetUser);
   const currentUserRef = useRef(currentUser);
   const onIncomingRef  = useRef(onIncoming);
-  targetRef.current      = targetUser;
-  currentUserRef.current = currentUser;
-  onIncomingRef.current  = onIncoming;
 
   // Pull anything that was persisted while the socket was down (messages are
   // not replayed by the server on reconnect) and merge it with live state.
   const refreshHistoryRef = useRef(() => {});
-  refreshHistoryRef.current = () => {
-    const target = targetRef.current;
-    const me     = currentUserRef.current;
-    if (!target || !me) return;
-    fetchTargetMessages(target)
-      .then(msgs => {
-        setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, me.id))));
-      })
-      .catch(() => {});
-  };
+
+  // Keep refs in sync after render; writing refs during render is unsafe.
+  useEffect(() => {
+    targetRef.current      = targetUser;
+    currentUserRef.current = currentUser;
+    onIncomingRef.current  = onIncoming;
+    refreshHistoryRef.current = () => {
+      const target = targetRef.current;
+      const me     = currentUserRef.current;
+      if (!target || !me) return;
+      fetchTargetMessages(target)
+        .then(msgs => {
+          setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, me.id))));
+        })
+        .catch(() => {});
+    };
+  });
 
   // ── Socket connection (one per signed-in user, not per conversation) ──
   useEffect(() => {
     const token = localStorage.getItem('chatapp_token');
-    if (!token || !currentUser) return undefined;
+    if (!token || !currentUserId) return undefined;
 
     const socket = io(SOCKET_URL, {
       // Read the current token on every (re)connect so a refreshed access
@@ -168,30 +174,30 @@ export function useChat(targetUser, currentUser, onIncoming) {
       socketRef.current = null;
       setConnected(false);
     };
-  }, [currentUser?.id]);
+  }, [currentUserId]);
 
   // Mark the conversation as read whenever the active chat changes.
   useEffect(() => {
-    if (!targetUser || !socketRef.current) return;
-    socketRef.current.emit('messages:read', readPayload(targetUser));
-  }, [targetUser?.id]);
+    const target = targetRef.current;
+    if (!target || !socketRef.current) return;
+    socketRef.current.emit('messages:read', readPayload(target));
+  }, [targetId]);
 
   // ── Load history ──────────────────────────────────────
   useEffect(() => {
-    if (!targetUser || !currentUser) return undefined;
-    setMessages([]);
-    setTypingPeer(null);
+    const target = targetRef.current;
+    if (!target || !currentUserId) return undefined;
 
     let cancelled = false;
-    fetchTargetMessages(targetUser)
+    fetchTargetMessages(target)
       .then(msgs => {
         if (cancelled) return;
-        setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, currentUser.id))));
+        setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, currentUserId))));
       })
       .catch(() => {});
 
     return () => { cancelled = true; };
-  }, [targetUser?.id, currentUser?.id]);
+  }, [targetId, currentUserId]);
 
   // ── Send ─────────────────────────────────────────────
   const sendMessage = useCallback(async (payload) => {
@@ -211,7 +217,9 @@ export function useChat(targetUser, currentUser, onIncoming) {
           fileName: uploaded.name,
           fileSize: uploaded.size,
         });
-      } catch {}
+      } catch {
+        return false;
+      }
       return true;
     }
 
@@ -241,7 +249,10 @@ export function useChat(targetUser, currentUser, onIncoming) {
     });
   }, [targetUser]);
 
-  const clearMessages = useCallback(() => setMessages([]), []);
+  const clearMessages = useCallback(() => {
+    setMessages([]);
+    setTypingPeer(null);
+  }, []);
 
   return {
     messages, isTyping: !!typingPeer, typingPeer,

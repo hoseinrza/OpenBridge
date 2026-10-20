@@ -49,7 +49,7 @@ export default function VideoCallPage({ currentUser, onLogout }) {
         <div className="video-controls">
           <button
             className={`ctrl-btn ${micOn ? '' : 'off'}`}
-            onClick={() => toggleMic(videoRef.current)}
+            onClick={() => toggleMic()}
           >
             <i className={`fas fa-${micOn ? 'microphone' : 'microphone-slash'}`} />
             <span>میکروفون</span>
@@ -57,7 +57,7 @@ export default function VideoCallPage({ currentUser, onLogout }) {
 
           <button
             className={`ctrl-btn ${camOn ? '' : 'off'}`}
-            onClick={() => toggleCam(videoRef.current, placeholderRef.current)}
+            onClick={() => toggleCam(placeholderRef.current)}
           >
             <i className={`fas fa-${camOn ? 'video' : 'video-slash'}`} />
             <span>دوربین</span>

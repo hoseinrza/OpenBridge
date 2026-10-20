@@ -31,7 +31,7 @@ export function useVideo() {
   }, []);
 
   // Toggle mic
-  const toggleMic = useCallback((videoEl) => {
+  const toggleMic = useCallback(() => {
     setMicOn(prev => {
       const next = !prev;
       streamRef.current?.getAudioTracks().forEach(t => { t.enabled = next; });
@@ -40,7 +40,7 @@ export function useVideo() {
   }, []);
 
   // Toggle camera
-  const toggleCam = useCallback((videoEl, placeholderEl) => {
+  const toggleCam = useCallback((placeholderEl) => {
     setCamOn(prev => {
       const next = !prev;
       streamRef.current?.getVideoTracks().forEach(t => { t.enabled = next; });
@@ -61,7 +61,7 @@ export function useVideo() {
           placeholderEl.classList.add('active');
           setScreenOn(false);
         });
-      } catch {}
+      } catch { /* user dismissed the picker or capture failed */ }
     } else {
       videoEl.srcObject?.getTracks().forEach(t => t.stop());
       videoEl.srcObject = null;

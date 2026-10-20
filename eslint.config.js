@@ -5,7 +5,9 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // This config covers the web app only; the backend and mobile app have
+  // their own toolchains and compiled output.
+  globalIgnores(['dist', 'backend', 'mobile', 'capacitor']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
