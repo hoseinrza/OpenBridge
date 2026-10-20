@@ -10,9 +10,10 @@ with database or server access) can read every message. TLS protects traffic
 in transit only; it is not a substitute for E2EE.
 
 No custom cryptography has been introduced. If E2EE is added later, it must be
-built on a maintained protocol implementation (for example libsignal), with
-client-side key storage, multi-device support, key verification, and an
-explicit migration path for existing plaintext history.
+built on a maintained protocol implementation, with client-side key storage,
+multi-device support, key verification, and an explicit migration path for
+existing plaintext history. A protocol evaluation and phased design proposal
+(no implementation) is in `docs/engineering/E2EE_DESIGN.md`.
 
 ## Confidentiality model
 
@@ -134,5 +135,6 @@ name, avatar, bio, status, and creation date to any authenticated user.
   default deployment does not scan uploads.
 - Message edit/delete and account deletion workflows are not implemented.
 - Database rows and attachment files are stored unencrypted at rest.
-- Web lint currently reports pre-existing errors; CI runs build and backend
-  security tests only.
+- Web lint is clean and CI runs lint plus the production build alongside the
+  backend security suite. The CI database is ephemeral; no deployment is
+  performed by CI.
