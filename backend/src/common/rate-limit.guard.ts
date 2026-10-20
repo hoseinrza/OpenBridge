@@ -9,9 +9,6 @@ export interface RateLimitOptions {
   /** Maximum requests allowed per key within the window. */
   limit: number;
   windowMs: number;
-  /** Also limit by the normalized `username` field in the request body. */
-  byUsername?: boolean;
-  usernameLimit?: number;
   /** Also limit by the Iranian mobile number in the `phone` body field. */
   byPhone?: boolean;
   phoneLimit?: number;
@@ -52,17 +49,6 @@ export class RateLimitGuard implements CanActivate {
     const checks: Array<{ key: string; limit: number }> = [
       { key: `${route}:ip:${ip}`, limit: options.limit },
     ];
-    if (options.byUsername) {
-      const username = typeof request.body?.username === 'string'
-        ? request.body.username.trim().toLowerCase()
-        : '';
-      if (username) {
-        checks.push({
-          key: `${route}:user:${username}`,
-          limit: options.usernameLimit ?? options.limit,
-        });
-      }
-    }
     if (options.byPhone) {
       const phone = typeof request.body?.phone === 'string'
         ? normalizeIranMobile(request.body.phone)

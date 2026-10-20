@@ -90,17 +90,29 @@ attention, never a background behind white text.
   anchored above the trigger, send disabled state, upload and send errors shown
   as dismissible `role="alert"` notes instead of failing silently.
 - **Login**: split brand panel and form panel. Since the OTP rework (see
-  `OVERNIGHT_PROGRESS.md`), the primary flow is a two-step phone → code form.
-  New users must pick a unique username plus a display name in the code step
-  (username field first, focus managed accordingly), with a 30 s resend
-  countdown, a «تغییر شماره» link, a clearly labelled test-code box, and a
-  link to a legacy username/password mode for existing accounts. Labelled
-  fields, inline errors with `role="alert"`, loading state with a spinner and
-  disabled controls are unchanged.
+  `OVERNIGHT_PROGRESS.md`) the primary flow is phone → code, and since the
+  multi-step follow-up a brand-new number continues into two more screens:
+  `phone → code → username → name`. Each screen asks for exactly one thing,
+  carries a step tracker («مرحله ۱ از ۴ · شماره») with dots plus a text label
+  so the position is not colour-only, moves focus to the step's first field,
+  and keeps the 30 s resend countdown, «تغییر شماره», a labelled test-code box,
+  inline `role="alert"` errors and spinner/disabled busy states. The last step
+  previews the identity being created — initials avatar, display name and
+  `@username` — and marks نام خانوادگی with an «اختیاری» badge. The legacy
+  username/password mode is gone: there is no password endpoint any more.
+- **Profile**: view and edit states now separate نام and نام خانوادگی (family
+  name optional, empty clears it) and the username stays editable; the phone is
+  a read-only field («شماره موبایل برای ورود ثابت می‌ماند»).
 - **Modals and new chat**: shared focus-trapping modal with labelled headings;
   new-chat/group creation exposes search, multi-select, validation, and errors.
 - **Shared UI**: `Avatar`, `Modal`, and `ThemeToggle` live in
-  `src/components/ui/`; time formatting lives in `src/utils/time.js`.
+  `src/components/ui/`; time formatting lives in `src/utils/time.js`. An
+  `Avatar` with no photo no longer falls back to a stock picture: it draws the
+  first letter of the first and last word of the name (one letter when there is
+  one word) on one of eight gradients chosen by a hash of the name, so the same
+  person always gets the same colours. The fallback is `aria-hidden` — the name
+  is already next to it — and `/images/user.png` was deleted along with every
+  reference to it.
 
 ## Mobile changes
 
@@ -108,11 +120,15 @@ attention, never a background behind white text.
   dedicated `accentText` for text/icons on dark surfaces and fixed
   `onBubbleOut` for white text on red bubbles. Navigation and status bar follow
   the active theme.
-- **Login**: brand icon and wordmark, tagline, and (since the OTP rework) the
-  same two-step phone → code flow as web with phone/number-pad keyboards,
+- **Login**: brand icon and wordmark, tagline, and the same four-step wizard as
+  web (`phone → code → username → name`) with a dot-and-text step tracker
+  exposed through `accessibilityLabel`, phone/number-pad keyboards,
   `textContentType` and `sms-otp` autofill hints, a live-region test-code box,
-  30 s resend countdown, and a legacy password mode with a visibility switch,
-  inline alert, safe-area scrolling, and Persian validation.
+  30 s resend countdown, an identity preview on the last step, inline alerts,
+  safe-area scrolling, and Persian validation. The legacy password mode, its
+  visibility switch and the mode toggle were deleted. `Avatar` mirrors the web
+  initials rule; RN has no CSS gradient, so the deterministic palette is used
+  as a flat tint behind white letters.
 - **Chat list**: safe-area-aware shell, search with clear action, rows with
   avatars and group badges, unread counts, pull-to-refresh, retry banner,
   distinct empty/search-empty states, and a footer with the signed-in user and
@@ -187,6 +203,31 @@ Mobile (Expo app rendered through react-native-web in headless Chrome at
 Web checks: `npm run lint` clean; `npm run build` succeeded (Vite 8, 78 modules,
 ~330 KB JS / ~44 KB CSS before gzip). Backend: `npm run test:e2e` 11/11 passing
 against real PostgreSQL.
+
+### Re-run for the multi-step sign-up and initials avatars
+
+- The whole wizard was driven in the in-app browser against the live stack with
+  a brand-new number: request → code (test code from the API) → username →
+  name, ending in a real 201 `POST /auth/signup`, a session in `localStorage`
+  (`firstName: علی`, `lastName: رضایی`, `avatar: null`) and the app shell
+  loading with zero console errors. The step tracker was observed advancing
+  ۱ از ۴ → ۴ از ۴, the sign-up preview drew «عر» from the two name fields, and
+  clearing نام خانوادگی in the profile editor collapsed the modal avatar to a
+  single «ع» before saving; the row came back as `firstName: "علی"`,
+  `lastName: null`, `displayName: "علی"`.
+- Layout at narrow widths was measured, not eyeballed: the login page was
+  mounted in hidden same-origin iframes at 375 and 320 in both themes.
+  Horizontal overflow was 0 in all four runs, the card stayed inside the
+  viewport, and the longest tracker label («مرحله ۱ از ۴ · نام کاربری»,
+  101 px) fitted with room to spare.
+- **No screenshots were captured for this batch**: the in-app browser reported
+  no visible surface (`NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`), so every check
+  above is a DOM/computed-style measurement or an accessibility snapshot.
+  Colour contrast of the new avatar gradients was not re-audited.
+- Web `npm run lint` clean and `npm run build` succeeded; backend
+  `npm run test:e2e` 16/16; `npx expo export --platform android` bundled the
+  rewritten mobile login (exit 0). The mobile app itself was not run on a
+  device or emulator, as before.
 
 ## Limitations and honest caveats
 

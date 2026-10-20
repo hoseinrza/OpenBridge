@@ -5,6 +5,19 @@ import Modal from '../ui/Modal.jsx';
 import './ProfileModal.css';
 
 const STATUS_TEXT = { online: 'آنلاین', idle: 'غیرفعال', dnd: 'مشغول', offline: 'آفلاین' };
+// Mirrors the backend rule: letters of any script (Persian ZWNJ included),
+// spaces, apostrophes and hyphens; at least two characters.
+const NAME_PATTERN = /^[\p{L}][\p{L}\p{M}\u200c'’ .-]{1,49}$/u;
+
+// Accounts predating the name split only have a display name, so fall back to
+// its first word rather than showing an empty required field.
+function nameParts(user) {
+  if (user.firstName) {
+    return { firstName: user.firstName, lastName: user.lastName ?? '' };
+  }
+  const parts = String(user.name ?? '').trim().split(/\s+/).filter(Boolean);
+  return { firstName: parts[0] ?? '', lastName: parts.slice(1).join(' ') };
+}
 
 function joinedAt(dateStr) {
   if (!dateStr) return null;
@@ -13,7 +26,8 @@ function joinedAt(dateStr) {
 
 export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
   const [editing,  setEditing]  = useState(false);
-  const [name,     setName]     = useState(user.name);
+  const [firstName, setFirstName] = useState(() => nameParts(user).firstName);
+  const [lastName,  setLastName]  = useState(() => nameParts(user).lastName);
   const [username, setUsername] = useState(user.username ?? '');
   const [bio,      setBio]      = useState(user.bio ?? '');
   const [avatar,   setAvatar]   = useState(user.avatar);
@@ -21,11 +35,12 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
   const [uploading,    setUploading]    = useState(false);
   const [error,        setError]        = useState('');
   const fileInputRef = useRef(null);
-  const nameInputRef = useRef(null);
+  const firstNameRef = useRef(null);
   const phone = user.phone ?? null;
+  const previewName = [firstName.trim(), lastName.trim()].filter(Boolean).join(' ') || user.name;
 
   useEffect(() => {
-    if (editing) nameInputRef.current?.focus();
+    if (editing) firstNameRef.current?.focus();
   }, [editing]);
 
   async function handleAvatarPick(e) {
@@ -47,9 +62,11 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
 
   async function handleSave(e) {
     e?.preventDefault();
-    const trimmedName     = name.trim();
+    const given      = firstName.trim();
+    const family     = lastName.trim();
     const trimmedUsername = username.trim();
-    if (!trimmedName) { setError('نام نمایشی نمی‌تواند خالی باشد'); return; }
+    if (!NAME_PATTERN.test(given)) { setError('نام باید حداقل ۲ حرف باشد و عدد نداشته باشد'); return; }
+    if (family && !NAME_PATTERN.test(family)) { setError('نام خانوادگی باید حداقل ۲ حرف باشد و عدد نداشته باشد'); return; }
     if (trimmedUsername.length < 2 || !/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
       setError('نام کاربری باید فقط شامل حروف انگلیسی، عدد و _ باشد');
       return;
@@ -57,7 +74,7 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
     setError('');
     setSaving(true);
     try {
-      const body = { displayName: trimmedName, bio: bio.trim() };
+      const body = { firstName: given, lastName: family, bio: bio.trim() };
       // Only persist real uploads; resolveUrl()/fallback images are display
       // URLs and would be rejected by the server's avatar validation.
       const avatarUpload = uploadPath(avatar);
@@ -66,7 +83,14 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
       // when the user actually changes it so the new rule doesn't block them.
       if (trimmedUsername !== user.username) body.username = trimmedUsername;
       await updateProfile(body);
-      onSaved?.({ name: trimmedName, username: trimmedUsername, bio: bio.trim(), avatar });
+      onSaved?.({
+        name: [given, family].filter(Boolean).join(' '),
+        firstName: given,
+        lastName: family,
+        username: trimmedUsername,
+        bio: bio.trim(),
+        avatar,
+      });
       setEditing(false);
     } catch (err) {
       setError(err.message || 'ذخیره تغییرات ناموفق بود');
@@ -76,7 +100,8 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
   }
 
   function handleCancelEdit() {
-    setName(user.name);
+    setFirstName(nameParts(user).firstName);
+    setLastName(nameParts(user).lastName);
     setUsername(user.username ?? '');
     setBio(user.bio ?? '');
     setAvatar(user.avatar);
@@ -95,7 +120,7 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
 
       <div className="profile-scroll">
         <div className="profile-avatar-wrap">
-          <Avatar src={avatar} name={name || user.name} size={88} />
+          <Avatar src={avatar} name={previewName} size={88} />
           {editing && (
             <>
               <button
@@ -121,15 +146,34 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
         {editing ? (
           <form className="profile-form" onSubmit={handleSave}>
             <div className="field">
-              <label className="field-label" htmlFor="profile-name">نام نمایشی</label>
+              <label className="field-label" htmlFor="profile-first-name">نام</label>
               <input
-                id="profile-name"
-                ref={nameInputRef}
+                id="profile-first-name"
+                ref={firstNameRef}
                 className="field-input"
-                value={name}
+                value={firstName}
                 maxLength={50}
-                onChange={e => setName(e.target.value)}
+                autoComplete="given-name"
+                onChange={e => setFirstName(e.target.value)}
               />
+            </div>
+
+            <div className="field">
+              <label className="field-label" htmlFor="profile-last-name">
+                نام خانوادگی
+                <span className="field-optional">اختیاری</span>
+              </label>
+              <input
+                id="profile-last-name"
+                className="field-input"
+                value={lastName}
+                maxLength={50}
+                autoComplete="family-name"
+                onChange={e => setLastName(e.target.value)}
+              />
+              <span className="field-hint" id="profile-last-hint">
+                خالی بگذاری، فقط نام کوچک نمایش داده می‌شود.
+              </span>
             </div>
 
             <div className="field">

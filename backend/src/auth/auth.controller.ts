@@ -3,18 +3,15 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthService, SessionMeta } from './auth.service';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { SignupDto } from './dto/signup.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RateLimit, RateLimitGuard, clientIp } from '../common/rate-limit.guard';
 import {
-  AUTH_LOGIN_LIMIT, AUTH_LOGIN_USERNAME_LIMIT, AUTH_LOGIN_WINDOW_SECONDS,
-  AUTH_REGISTER_LIMIT, AUTH_REGISTER_WINDOW_SECONDS,
   AUTH_OTP_REQUEST_LIMIT, AUTH_OTP_REQUEST_PHONE_LIMIT, AUTH_OTP_VERIFY_LIMIT,
-  AUTH_OTP_WINDOW_SECONDS,
+  AUTH_SIGNUP_LIMIT, AUTH_OTP_WINDOW_SECONDS,
 } from '../config/env';
 
 function sessionMeta(request: Request): SessionMeta {
@@ -34,28 +31,6 @@ interface AuthenticatedRequest extends Request {
 export class AuthController {
   constructor(private auth: AuthService) {}
 
-  @Post('register')
-  @RateLimit({
-    limit: AUTH_REGISTER_LIMIT,
-    windowMs: AUTH_REGISTER_WINDOW_SECONDS * 1000,
-    byUsername: true,
-  })
-  register(@Body() dto: RegisterDto, @Req() request: Request) {
-    return this.auth.register(dto, sessionMeta(request));
-  }
-
-  @Post('login')
-  @HttpCode(200)
-  @RateLimit({
-    limit: AUTH_LOGIN_LIMIT,
-    windowMs: AUTH_LOGIN_WINDOW_SECONDS * 1000,
-    byUsername: true,
-    usernameLimit: AUTH_LOGIN_USERNAME_LIMIT,
-  })
-  login(@Body() dto: LoginDto, @Req() request: Request) {
-    return this.auth.login(dto, sessionMeta(request));
-  }
-
   @Post('otp/request')
   @HttpCode(200)
   @RateLimit({
@@ -73,6 +48,15 @@ export class AuthController {
   @RateLimit({ limit: AUTH_OTP_VERIFY_LIMIT, windowMs: AUTH_OTP_WINDOW_SECONDS * 1000 })
   verifyOtp(@Body() dto: VerifyOtpDto, @Req() request: Request) {
     return this.auth.verifyOtp(dto, sessionMeta(request));
+  }
+
+  // Second half of the sign-up: the phone is already verified, this only turns
+  // the issued token into an account.
+  @Post('signup')
+  @HttpCode(201)
+  @RateLimit({ limit: AUTH_SIGNUP_LIMIT, windowMs: AUTH_OTP_WINDOW_SECONDS * 1000 })
+  signup(@Body() dto: SignupDto, @Req() request: Request) {
+    return this.auth.completeSignup(dto, sessionMeta(request));
   }
 
   @Post('refresh')

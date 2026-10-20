@@ -6,10 +6,18 @@ import {
 import { FontAwesome6 } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
+import Avatar from '../components/Avatar';
 import { normalizeIranMobile } from '../utils/phone';
 import { fonts, radius, spacing, type, useAppTheme } from '../theme';
 
 const DIGIT_MAP = { fa: '۰۱۲۳۴۵۶۷۸۹', ar: '٠١٢٣٤٥٦٧٨٩' };
+const USERNAME_PATTERN = /^[a-zA-Z0-9_]{2,30}$/;
+// Mirrors the backend rule: letters of any script (Persian ZWNJ included),
+// spaces, apostrophes and hyphens; at least two characters.
+const NAME_PATTERN = /^[\p{L}][\p{L}\p{M}\u200c'’ .-]{1,49}$/u;
+
+const STEPS = ['phone', 'code', 'username', 'name'];
+const STEP_LABELS = { phone: 'شماره', code: 'کد تأیید', username: 'نام کاربری', name: 'نام شما' };
 
 function normalizeCode(value) {
   return value
@@ -24,31 +32,26 @@ function persianNumber(value) {
 }
 
 export default function LoginScreen() {
-  const { requestOtp, verifyOtp, login } = useAuth();
+  const { requestOtp, verifyOtp, completeSignup } = useAuth();
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
 
-  const [mode,        setMode]        = useState('otp');    // 'otp' | 'password'
-  const [step,        setStep]        = useState('phone');  // 'phone' | 'code'
+  const [step,        setStep]        = useState('phone');
   const [phone,       setPhone]       = useState('');
   const [code,        setCode]        = useState('');
+  const [signupToken, setSignupToken] = useState('');
   const [newUsername, setNewUsername] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const [firstName,   setFirstName]   = useState('');
+  const [lastName,    setLastName]    = useState('');
   const [isNewUser,   setIsNewUser]   = useState(false);
   const [testCode,    setTestCode]    = useState('');
   const [resendIn,    setResendIn]    = useState(0);
 
-  const [username,     setUsername]     = useState('');
-  const [password,     setPassword]     = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-
   const [error,      setError]      = useState('');
-  const [busyAction, setBusyAction] = useState(null); // 'request' | 'verify' | 'resend' | 'password'
+  const [busyAction, setBusyAction] = useState(null); // 'request' | 'verify' | 'resend' | 'signup'
   const busy = busyAction !== null;
 
-  const codeRef     = useRef(null);
-  const nameRef     = useRef(null);
-  const passwordRef = useRef(null);
+  const lastNameRef = useRef(null);
 
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
@@ -58,19 +61,7 @@ export default function LoginScreen() {
     return () => clearTimeout(timer);
   }, [resendIn]);
 
-  function switchMode(next) {
-    if (busy || next === mode) return;
-    setMode(next);
-    setError('');
-    setStep('phone');
-    setCode('');
-    setTestCode('');
-    setNewUsername('');
-    setDisplayName('');
-    setIsNewUser(false);
-    setResendIn(0);
-    setShowPassword(false);
-  }
+  const steps = isNewUser ? STEPS : STEPS.slice(0, 2);
 
   async function issueCode(isResend = false) {
     if (busy) return;
@@ -90,7 +81,6 @@ export default function LoginScreen() {
       setCode('');
       setStep('code');
       setResendIn(30);
-      if (isResend) codeRef.current?.focus();
     } catch (err) {
       setError(err.message ?? 'خطا در اتصال به سرور');
     } finally {
@@ -101,27 +91,16 @@ export default function LoginScreen() {
   async function submitCode() {
     if (busy) return;
     if (code.length !== 6) { setError('کد تأیید باید ۶ رقم باشد'); return; }
-    if (isNewUser) {
-      const u = newUsername.trim();
-      if (u.length < 2 || !/^[a-zA-Z0-9_]+$/.test(u)) {
-        setError('نام کاربری باید فقط شامل حروف انگلیسی، عدد و _ باشد (حداقل ۲ کاراکتر)');
-        return;
-      }
-      if (displayName.trim().length < 2) {
-        setError('نام نمایشی باید حداقل ۲ کاراکتر باشد');
-        return;
-      }
-    }
 
     setBusyAction('verify');
     setError('');
     try {
-      await verifyOtp(
-        phone,
-        code,
-        isNewUser ? newUsername.trim() : undefined,
-        isNewUser ? displayName.trim() : undefined,
-      );
+      const result = await verifyOtp(phone, code);
+      if (result.requiresSignup) {
+        setSignupToken(result.signupToken);
+        setIsNewUser(true);
+        setStep('username');
+      }
     } catch (err) {
       setError(err.message ?? 'خطا در اتصال به سرور');
     } finally {
@@ -129,46 +108,69 @@ export default function LoginScreen() {
     }
   }
 
-  function changePhone() {
+  function submitUsername() {
     if (busy) return;
+    if (!USERNAME_PATTERN.test(newUsername.trim())) {
+      setError('نام کاربری باید ۲ تا ۳۰ کاراکتر و فقط حروف انگلیسی، عدد و _ باشد');
+      return;
+    }
+    setError('');
+    setStep('name');
+  }
+
+  async function submitName() {
+    if (busy) return;
+    const given = firstName.trim();
+    const family = lastName.trim();
+    if (!NAME_PATTERN.test(given)) {
+      setError('نام باید حداقل ۲ حرف باشد و عدد نداشته باشد');
+      return;
+    }
+    if (family && !NAME_PATTERN.test(family)) {
+      setError('نام خانوادگی باید حداقل ۲ حرف باشد و عدد نداشته باشد');
+      return;
+    }
+
+    setBusyAction('signup');
+    setError('');
+    try {
+      await completeSignup(signupToken, {
+        username: newUsername.trim(),
+        firstName: given,
+        lastName: family || undefined,
+      });
+    } catch (err) {
+      // A 401 means the verification window closed, so the code has to be
+      // requested again from the first screen.
+      if (err.status === 401) startOver();
+      setError(err.message ?? 'خطا در اتصال به سرور');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function startOver() {
     setStep('phone');
     setCode('');
-    setTestCode('');
+    setSignupToken('');
     setNewUsername('');
-    setDisplayName('');
+    setFirstName('');
+    setLastName('');
     setIsNewUser(false);
+    setTestCode('');
     setResendIn(0);
     setError('');
   }
 
-  async function submitPassword() {
-    if (busy) return;
-    const u = username.trim();
-    if (!u) { setError('نام کاربری را وارد کنید'); return; }
-    if (!password) { setError('رمز عبور را وارد کنید'); return; }
+  const heading = {
+    phone:    { title: 'ورود یا ثبت‌نام', sub: 'شماره موبایلت را وارد کن تا کد تأیید صادر شود.' },
+    code:     { title: 'کد تأیید',        sub: 'کد ۶ رقمی صادرشده برای شماره‌ات را وارد کن.' },
+    username: { title: 'نام کاربری',      sub: 'این نام یکتاست و راهی است که دیگران تو را با آن پیدا می‌کنند.' },
+    name:     { title: 'نام تو',          sub: 'این نام را در چت‌ها می‌بینند. نام خانوادگی اختیاری است.' },
+  }[step];
 
-    setBusyAction('password');
-    setError('');
-    try {
-      await login(u, password);
-    } catch (err) {
-      setError(err.message ?? 'خطا در اتصال به سرور');
-    } finally {
-      setBusyAction(null);
-    }
-  }
-
-  const heading = mode === 'password'
-    ? { title: 'ورود با رمز عبور', sub: 'این روش برای حساب‌های قدیمی است.' }
-    : step === 'phone'
-      ? { title: 'ورود یا ثبت‌نام', sub: 'شماره موبایلات را وارد کن تا کد تأیید صادر شود.' }
-      : { title: 'کد تأیید', sub: 'کد ۶ رقمی صادرشده را وارد کن.' };
-
-  const footNote = mode === 'password'
-    ? 'اگر شماره موبایلات را به حساب وصل کرده‌ای، از ورود با کد تأیید استفاده کن.'
-    : step === 'phone'
-      ? 'با تأیید شماره، اگر حسابی نداشته باشی در مرحله بعد نام کاربری و نام نمایشی انتخاب می‌کنی.'
-      : 'اگر شماره را اشتباه وارد کردی، گزینه «تغییر شماره» را بزن.';
+  const previewName = [firstName.trim(), lastName.trim()].filter(Boolean).join(' ');
+  const trackerIndex = steps.indexOf(step) + 1;
 
   return (
     <KeyboardAvoidingView
@@ -195,99 +197,28 @@ export default function LoginScreen() {
             <Text style={styles.formSub}>{heading.sub}</Text>
           </View>
 
-          {mode === 'password' ? (
-            <>
-              <View style={styles.field}>
-                <Text style={styles.label}>نام کاربری</Text>
-                <TextInput
-                  style={[styles.input, styles.inputLtr]}
-                  value={username}
-                  onChangeText={(value) => { setUsername(value); setError(''); }}
-                  placeholder="username"
-                  placeholderTextColor={colors.text3}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="username"
-                  maxLength={30}
-                  editable={!busy}
-                  accessibilityLabel="نام کاربری"
-                  returnKeyType="next"
-                  onSubmitEditing={() => passwordRef.current?.focus()}
-                />
-              </View>
-
-              <View style={styles.field}>
-                <Text style={styles.label}>رمز عبور</Text>
-                <View style={styles.passwordRow}>
-                  <TextInput
-                    ref={passwordRef}
-                    style={[styles.input, styles.passwordInput]}
-                    value={password}
-                    onChangeText={(value) => { setPassword(value); setError(''); }}
-                    placeholder="••••••••"
-                    placeholderTextColor={colors.text3}
-                    secureTextEntry={!showPassword}
-                    autoComplete="current-password"
-                    maxLength={72}
-                    editable={!busy}
-                    accessibilityLabel="رمز عبور"
-                    returnKeyType="go"
-                    onSubmitEditing={submitPassword}
+          {trackerIndex > 0 && (
+            <View style={styles.tracker} accessible accessibilityRole="text"
+              accessibilityLabel={`مرحله ${persianNumber(trackerIndex)} از ${persianNumber(steps.length)}، ${STEP_LABELS[step]}`}>
+              <View style={styles.trackerDots} accessibilityElementsHidden>
+                {steps.map((key, index) => (
+                  <View
+                    key={key}
+                    style={[
+                      styles.trackerDot,
+                      index < trackerIndex - 1 && styles.trackerDotDone,
+                      index === trackerIndex - 1 && styles.trackerDotCurrent,
+                    ]}
                   />
-                  <Pressable
-                    onPress={() => setShowPassword(value => !value)}
-                    hitSlop={6}
-                    style={styles.eyeBtn}
-                    accessibilityRole="switch"
-                    accessibilityLabel={showPassword ? 'پنهان کردن رمز عبور' : 'نمایش رمز عبور'}
-                    accessibilityState={{ checked: showPassword }}
-                  >
-                    <FontAwesome6
-                      name={showPassword ? 'eye-slash' : 'eye'}
-                      size={15}
-                      color={colors.text2}
-                    />
-                  </Pressable>
-                </View>
+                ))}
               </View>
+              <Text style={styles.trackerLabel}>
+                مرحله {persianNumber(trackerIndex)} از {persianNumber(steps.length)} · {STEP_LABELS[step]}
+              </Text>
+            </View>
+          )}
 
-              {!!error && (
-                <View style={styles.errorRow} accessibilityRole="alert">
-                  <FontAwesome6 name="circle-exclamation" size={13} color={colors.danger} />
-                  <Text style={styles.error}>{error}</Text>
-                </View>
-              )}
-
-              <Pressable
-                style={[styles.submit, busy && styles.submitBusy]}
-                onPress={submitPassword}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="ورود به حساب"
-                accessibilityState={{ disabled: busy, busy }}
-              >
-                {busyAction === 'password' ? (
-                  <ActivityIndicator color={colors.onAccent} />
-                ) : (
-                  <>
-                    <FontAwesome6 name="arrow-left" size={14} color={colors.onAccent} />
-                    <Text style={styles.submitText}>ورود به حساب</Text>
-                  </>
-                )}
-              </Pressable>
-
-              <Pressable
-                style={styles.switchBtn}
-                onPress={() => switchMode('otp')}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="ورود با شماره موبایل"
-                accessibilityState={{ disabled: busy }}
-              >
-                <Text style={styles.linkText}>ورود با شماره موبایل</Text>
-              </Pressable>
-            </>
-          ) : step === 'phone' ? (
+          {step === 'phone' && (
             <>
               <View style={styles.field}>
                 <Text style={styles.label}>شماره موبایل</Text>
@@ -305,6 +236,7 @@ export default function LoginScreen() {
                   accessibilityLabel="شماره موبایل"
                   returnKeyType="send"
                   onSubmitEditing={() => issueCode(false)}
+                  autoFocus
                 />
                 <Text style={styles.hint}>مثلاً ۰۹۱۲۳۴۵۶۷۸۹ یا +۹۸۹۱۲۳۴۵۶۷۸۹</Text>
               </View>
@@ -333,26 +265,17 @@ export default function LoginScreen() {
                   </>
                 )}
               </Pressable>
-
-              <Pressable
-                style={styles.switchBtn}
-                onPress={() => switchMode('password')}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="ورود با نام کاربری و رمز، حساب‌های قدیمی"
-                accessibilityState={{ disabled: busy }}
-              >
-                <Text style={styles.linkText}>ورود با نام کاربری و رمز (حساب‌های قدیمی)</Text>
-              </Pressable>
             </>
-          ) : (
+          )}
+
+          {step === 'code' && (
             <>
               <View style={styles.targetRow}>
                 <Text style={styles.target}>
                   کد تأیید برای <Text style={styles.targetValue}>{phone}</Text> صادر شد.
                 </Text>
                 <Pressable
-                  onPress={changePhone}
+                  onPress={startOver}
                   hitSlop={6}
                   style={styles.linkBtn}
                   disabled={busy}
@@ -364,54 +287,9 @@ export default function LoginScreen() {
                 </Pressable>
               </View>
 
-              {isNewUser && (
-                <>
-                  <View style={styles.field}>
-                    <Text style={styles.label}>نام کاربری</Text>
-                    <TextInput
-                      style={[styles.input, styles.inputLtr]}
-                      value={newUsername}
-                      onChangeText={(value) => { setNewUsername(value); setError(''); }}
-                      placeholder="username"
-                      placeholderTextColor={colors.text3}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      autoComplete="username"
-                      maxLength={30}
-                      editable={!busy}
-                      accessibilityLabel="نام کاربری"
-                      returnKeyType="next"
-                      onSubmitEditing={() => nameRef.current?.focus()}
-                      autoFocus
-                    />
-                    <Text style={styles.hint}>هر نام کاربری یکتاست؛ فقط حروف انگلیسی، عدد و _</Text>
-                  </View>
-
-                  <View style={styles.field}>
-                    <Text style={styles.label}>نام نمایشی</Text>
-                    <TextInput
-                      ref={nameRef}
-                      style={styles.input}
-                      value={displayName}
-                      onChangeText={(value) => { setDisplayName(value); setError(''); }}
-                      placeholder="مثلاً علی رضایی"
-                      placeholderTextColor={colors.text3}
-                      autoComplete="name"
-                      maxLength={50}
-                      editable={!busy}
-                      accessibilityLabel="نام نمایشی"
-                      returnKeyType="next"
-                      onSubmitEditing={() => codeRef.current?.focus()}
-                    />
-                    <Text style={styles.hint}>این نام برای بقیه کاربران نمایش داده می‌شود.</Text>
-                  </View>
-                </>
-              )}
-
               <View style={styles.field}>
                 <Text style={styles.label}>کد تأیید ۶ رقمی</Text>
                 <TextInput
-                  ref={codeRef}
                   style={[styles.input, styles.codeInput]}
                   value={code}
                   onChangeText={(value) => { setCode(normalizeCode(value)); setError(''); }}
@@ -425,7 +303,7 @@ export default function LoginScreen() {
                   accessibilityLabel="کد تأیید ۶ رقمی"
                   returnKeyType="done"
                   onSubmitEditing={submitCode}
-                  autoFocus={!isNewUser}
+                  autoFocus
                 />
               </View>
 
@@ -450,19 +328,15 @@ export default function LoginScreen() {
                 onPress={submitCode}
                 disabled={busy}
                 accessibilityRole="button"
-                accessibilityLabel={isNewUser ? 'ساخت حساب و ورود' : 'تأیید و ورود'}
+                accessibilityLabel={isNewUser ? 'ادامه ثبت‌نام' : 'تأیید و ورود'}
                 accessibilityState={{ disabled: busy, busy }}
               >
                 {busyAction === 'verify' ? (
                   <ActivityIndicator color={colors.onAccent} />
                 ) : (
                   <>
-                    <FontAwesome6
-                      name={isNewUser ? 'user-plus' : 'arrow-left'}
-                      size={14}
-                      color={colors.onAccent}
-                    />
-                    <Text style={styles.submitText}>{isNewUser ? 'ساخت حساب و ورود' : 'تأیید و ورود'}</Text>
+                    <FontAwesome6 name="arrow-left" size={14} color={colors.onAccent} />
+                    <Text style={styles.submitText}>{isNewUser ? 'ادامه ثبت‌نام' : 'تأیید و ورود'}</Text>
                   </>
                 )}
               </Pressable>
@@ -485,9 +359,158 @@ export default function LoginScreen() {
               </Pressable>
             </>
           )}
+
+          {step === 'username' && (
+            <>
+              <View style={styles.field}>
+                <Text style={styles.label}>نام کاربری</Text>
+                <TextInput
+                  style={[styles.input, styles.inputLtr]}
+                  value={newUsername}
+                  onChangeText={(value) => { setNewUsername(value); setError(''); }}
+                  placeholder="username"
+                  placeholderTextColor={colors.text3}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="username"
+                  maxLength={30}
+                  editable={!busy}
+                  accessibilityLabel="نام کاربری"
+                  returnKeyType="done"
+                  onSubmitEditing={submitUsername}
+                  autoFocus
+                />
+                <Text style={styles.hint}>هر نام کاربری یکتاست؛ فقط حروف انگلیسی، عدد و _ (۲ تا ۳۰ کاراکتر). بعداً می‌توانی عوضش کنی.</Text>
+              </View>
+
+              {!!error && (
+                <View style={styles.errorRow} accessibilityRole="alert">
+                  <FontAwesome6 name="circle-exclamation" size={13} color={colors.danger} />
+                  <Text style={styles.error}>{error}</Text>
+                </View>
+              )}
+
+              <Pressable
+                style={[styles.submit, busy && styles.submitBusy]}
+                onPress={submitUsername}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="ادامه به نام شما"
+                accessibilityState={{ disabled: busy }}
+              >
+                <FontAwesome6 name="arrow-left" size={14} color={colors.onAccent} />
+                <Text style={styles.submitText}>ادامه</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.switchBtn}
+                onPress={startOver}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="انصراف و تغییر شماره موبایل"
+                accessibilityState={{ disabled: busy }}
+              >
+                <Text style={styles.linkText}>انصراف و تغییر شماره</Text>
+              </Pressable>
+            </>
+          )}
+
+          {step === 'name' && (
+            <>
+              {!!previewName && (
+                <View style={styles.preview} accessibilityLiveRegion="polite">
+                  <Avatar name={previewName} size={48} />
+                  <View style={styles.previewText}>
+                    <Text style={styles.previewName} numberOfLines={1}>{previewName}</Text>
+                    <Text style={styles.previewHandle} accessibilityLabel={`نام کاربری ${newUsername}`}>@{newUsername.trim()}</Text>
+                  </View>
+                </View>
+              )}
+
+              <View style={styles.field}>
+                <Text style={styles.label}>نام</Text>
+                <TextInput
+                  style={styles.input}
+                  value={firstName}
+                  onChangeText={(value) => { setFirstName(value); setError(''); }}
+                  placeholder="مثلاً علی"
+                  placeholderTextColor={colors.text3}
+                  autoComplete="given-name"
+                  maxLength={50}
+                  editable={!busy}
+                  accessibilityLabel="نام"
+                  returnKeyType="next"
+                  onSubmitEditing={() => lastNameRef.current?.focus()}
+                  autoFocus
+                />
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>
+                  نام خانوادگی
+                  <Text style={styles.optionalBadge}>اختیاری</Text>
+                </Text>
+                <TextInput
+                  ref={lastNameRef}
+                  style={styles.input}
+                  value={lastName}
+                  onChangeText={(value) => { setLastName(value); setError(''); }}
+                  placeholder="مثلاً رضایی"
+                  placeholderTextColor={colors.text3}
+                  autoComplete="family-name"
+                  maxLength={50}
+                  editable={!busy}
+                  accessibilityLabel="نام خانوادگی، اختیاری"
+                  returnKeyType="done"
+                  onSubmitEditing={submitName}
+                />
+                <Text style={styles.hint}>خالی بگذاری، فقط نام کوچک نمایش داده می‌شود. تصویر پروفایل هم تا وقتی عکس ندازی، همین حرف اول نامت است.</Text>
+              </View>
+
+              {!!error && (
+                <View style={styles.errorRow} accessibilityRole="alert">
+                  <FontAwesome6 name="circle-exclamation" size={13} color={colors.danger} />
+                  <Text style={styles.error}>{error}</Text>
+                </View>
+              )}
+
+              <Pressable
+                style={[styles.submit, busy && styles.submitBusy]}
+                onPress={submitName}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="ساخت حساب و ورود"
+                accessibilityState={{ disabled: busy, busy }}
+              >
+                {busyAction === 'signup' ? (
+                  <ActivityIndicator color={colors.onAccent} />
+                ) : (
+                  <>
+                    <FontAwesome6 name="user-plus" size={14} color={colors.onAccent} />
+                    <Text style={styles.submitText}>ساخت حساب و ورود</Text>
+                  </>
+                )}
+              </Pressable>
+
+              <Pressable
+                style={styles.switchBtn}
+                onPress={() => setStep('username')}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel="بازگشت به نام کاربری"
+                accessibilityState={{ disabled: busy }}
+              >
+                <Text style={styles.linkText}>بازگشت به نام کاربری</Text>
+              </Pressable>
+            </>
+          )}
         </View>
 
-        <Text style={styles.footNote}>{footNote}</Text>
+        <Text style={styles.footNote}>
+          {step === 'phone'
+            ? 'شماره، هویت تو در OpenBridge است. اگر حسابی نداشته باشی، بعد از تأیید کد در دو مرحله بعد نام کاربری و نامت را انتخاب می‌کنی.'
+            : 'اگر شماره را اشتباه وارد کردی، از «تغییر شماره» یا «انصراف» استفاده کن.'}
+        </Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -526,8 +549,30 @@ function makeStyles(colors) {
     formTitle: { color: colors.text1, fontFamily: fonts.bold, fontSize: type.lg, textAlign: 'right' },
     formSub: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.sm, textAlign: 'right', lineHeight: 20 },
 
+    tracker: { flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm },
+    trackerDots: { flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.xs },
+    trackerDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.border,
+    },
+    trackerDotDone: { backgroundColor: colors.accentSoft },
+    trackerDotCurrent: { backgroundColor: colors.accent, width: 18 },
+    trackerLabel: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.xs },
+
     field: { gap: spacing.xs },
     label: { color: colors.text2, fontFamily: fonts.medium, fontSize: type.sm, textAlign: 'right' },
+    optionalBadge: {
+      color: colors.text3,
+      fontFamily: fonts.regular,
+      fontSize: type.xs,
+      backgroundColor: colors.surface3,
+      borderRadius: radius.pill,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 1,
+      marginInlineStart: spacing.sm,
+    },
     input: {
       height: 48,
       paddingHorizontal: spacing.md + 2,
@@ -548,18 +593,21 @@ function makeStyles(colors) {
       fontFamily: fonts.semibold,
       fontSize: type.lg,
     },
-    passwordRow: { position: 'relative' },
-    passwordInput: { paddingLeft: 48 },
-    eyeBtn: {
-      position: 'absolute',
-      left: 2,
-      top: 2,
-      width: 44,
-      height: 44,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     hint: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.xs, textAlign: 'right', lineHeight: 18 },
+
+    preview: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: spacing.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface2,
+      padding: spacing.md,
+    },
+    previewText: { flex: 1, gap: 2 },
+    previewName: { color: colors.text1, fontFamily: fonts.semibold, fontSize: type.base, textAlign: 'right' },
+    previewHandle: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.xs, textAlign: 'right' },
 
     targetRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm },
     target: { flex: 1, color: colors.text2, fontFamily: fonts.regular, fontSize: type.sm, textAlign: 'right', lineHeight: 20 },

@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import ThemeToggle from '../ui/ThemeToggle.jsx';
-import { requestOtp, verifyOtp } from '../../services/api.js';
+import Avatar from '../ui/Avatar.jsx';
+import { requestOtp, verifyOtp, completeSignup } from '../../services/api.js';
 import { normalizeIranMobile } from '../../utils/phone.js';
 import './LoginPage.css';
 
 const DIGIT_MAP = { fa: '۰۱۲۳۴۵۶۷۸۹', ar: '٠١٢٣٤٥٦٧٨٩' };
+const USERNAME_PATTERN = /^[a-zA-Z0-9_]{2,30}$/;
+// Mirrors the backend rule: letters of any script (Persian ZWNJ included),
+// spaces, apostrophes and hyphens; at least two characters.
+const NAME_PATTERN = /^[\p{L}][\p{L}\p{M}\u200c'’ .-]{1,49}$/u;
+
+const SIGN_UP_STEPS = ['phone', 'code', 'username', 'name'];
+const STEP_LABELS = { phone: 'شماره', code: 'کد تأیید', username: 'نام کاربری', name: 'نام شما' };
 
 function normalizeCode(value) {
   return value
@@ -14,54 +22,65 @@ function normalizeCode(value) {
     .slice(0, 6);
 }
 
-export default function LoginPage({ onLogin, onAuthenticated }) {
-  const [flow,        setFlow]        = useState('otp');     // 'otp' | 'password'
-  const [step,        setStep]        = useState('phone');   // 'phone' | 'code'
+function toFa(value) {
+  return String(value).replace(/\d/g, digit => DIGIT_MAP.fa[Number(digit)]);
+}
+
+function StepTracker({ steps, current }) {
+  const index = steps.indexOf(current) + 1;
+  if (index < 1) return null;
+  return (
+    <div className="auth-tracker">
+      <div className="auth-tracker-dots" aria-hidden="true">
+        {steps.map((key, i) => (
+          <span key={key} className={`auth-tracker-dot ${i < index ? 'is-done' : ''} ${i === index - 1 ? 'is-current' : ''}`} />
+        ))}
+      </div>
+      <span className="auth-tracker-label">
+        مرحله {toFa(index)} از {toFa(steps.length)} · {STEP_LABELS[current]}
+      </span>
+    </div>
+  );
+}
+
+const HEADINGS = {
+  phone:    { title: 'ورود یا ثبت‌نام', sub: 'شماره موبایلت را وارد کن تا کد تأیید صادر شود.' },
+  code:     { title: 'کد تأیید',        sub: 'کد ۶ رقمی صادرشده برای شماره‌ات را وارد کن.' },
+  username: { title: 'نام کاربری',      sub: 'این نام یکتاست و راهی است که دیگران تو را با آن پیدا می‌کنند.' },
+  name:     { title: 'نام تو',          sub: 'این نام را در چت‌ها می‌بینند. نام خانوادگی اختیاری است.' },
+};
+
+export default function LoginPage({ onAuthenticated }) {
+  const [step,        setStep]        = useState('phone');
   const [phone,       setPhone]       = useState('');
   const [code,        setCode]        = useState('');
-  const [newUsername, setNewUsername] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const [signupToken, setSignupToken] = useState('');
+  const [username,    setUsername]    = useState('');
+  const [firstName,   setFirstName]   = useState('');
+  const [lastName,    setLastName]    = useState('');
   const [isNewUser,   setIsNewUser]   = useState(false);
   const [testCode,    setTestCode]    = useState('');
   const [resendIn,    setResendIn]    = useState(0);
 
-  const [username,     setUsername]     = useState('');
-  const [password,     setPassword]     = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-
   const [error,      setError]      = useState('');
-  const [busyAction, setBusyAction] = useState(null); // 'request' | 'verify' | 'resend' | 'password'
+  const [busyAction, setBusyAction] = useState(null); // 'request' | 'verify' | 'resend' | 'signup' | 'continue'
   const busy = busyAction !== null;
 
   const phoneRef    = useRef(null);
   const codeRef     = useRef(null);
   const usernameRef = useRef(null);
-  const newUsernameRef = useRef(null);
+  const firstNameRef = useRef(null);
 
   useEffect(() => {
-    if (flow === 'password') usernameRef.current?.focus();
-    else if (step === 'code') {
-      if (isNewUser) newUsernameRef.current?.focus();
-      else codeRef.current?.focus();
-    }
-    else phoneRef.current?.focus();
-  }, [flow, step, isNewUser]);
+    const target = { phone: phoneRef, code: codeRef, username: usernameRef, name: firstNameRef }[step];
+    target.current?.focus();
+  }, [step]);
 
   useEffect(() => {
     if (resendIn <= 0) return undefined;
     const timer = setTimeout(() => setResendIn(value => Math.max(0, value - 1)), 1000);
     return () => clearTimeout(timer);
   }, [resendIn]);
-
-  function switchFlow(next) {
-    if (busy) return;
-    setFlow(next);
-    setError('');
-    setCode('');
-    setTestCode('');
-    setResendIn(0);
-    setShowPassword(false);
-  }
 
   async function issueCode(isResend = false) {
     const normalized = normalizeIranMobile(phone);
@@ -88,37 +107,81 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
     }
   }
 
-  async function submitPhone(e) {
+  function submitPhone(e) {
     e.preventDefault();
-    await issueCode(false);
+    issueCode(false);
   }
 
   async function submitCode(e) {
     e.preventDefault();
     if (code.length !== 6) { setError('کد تأیید باید ۶ رقم باشد'); return; }
-    if (isNewUser) {
-      const u = newUsername.trim();
-      if (u.length < 2 || !/^[a-zA-Z0-9_]+$/.test(u)) {
-        setError('نام کاربری باید فقط شامل حروف انگلیسی، عدد و _ باشد (حداقل ۲ کاراکتر)');
-        return;
-      }
-      if (displayName.trim().length < 2) {
-        setError('نام نمایشی باید حداقل ۲ کاراکتر باشد');
-        return;
-      }
-    }
 
     setBusyAction('verify');
     setError('');
     try {
-      const user = await verifyOtp(
-        phone,
-        code,
-        isNewUser ? newUsername.trim() : undefined,
-        isNewUser ? displayName.trim() : undefined,
-      );
+      const result = await verifyOtp(phone, code);
+      if (result.requiresSignup) {
+        setSignupToken(result.signupToken);
+        setIsNewUser(true);
+        setStep('username');
+      } else {
+        onAuthenticated(result.user);
+      }
+    } catch (err) {
+      setError(err.message ?? 'خطا در اتصال به سرور');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function submitUsername(e) {
+    e.preventDefault();
+    if (!USERNAME_PATTERN.test(username.trim())) {
+      setError('نام کاربری باید ۲ تا ۳۰ کاراکتر و فقط حروف انگلیسی، عدد و _ باشد');
+      usernameRef.current?.focus();
+      return;
+    }
+    setError('');
+    setStep('name');
+  }
+
+  async function submitName(e) {
+    e.preventDefault();
+    const given  = firstName.trim();
+    const family = lastName.trim();
+    if (!NAME_PATTERN.test(given)) {
+      setError('نام باید حداقل ۲ حرف باشد و عدد نداشته باشد');
+      firstNameRef.current?.focus();
+      return;
+    }
+    if (family && !NAME_PATTERN.test(family)) {
+      setError('نام خانوادگی باید حداقل ۲ حرف باشد و عدد نداشته باشد');
+      return;
+    }
+
+    setBusyAction('signup');
+    setError('');
+    try {
+      const user = await completeSignup(signupToken, {
+        username:  username.trim(),
+        firstName: given,
+        lastName:  family || undefined,
+      });
       onAuthenticated(user);
     } catch (err) {
+      // A 401 means the verification window closed, so the code has to be
+      // requested again from the first screen.
+      if (err.status === 401) {
+        setSignupToken('');
+        setUsername('');
+        setFirstName('');
+        setLastName('');
+        setIsNewUser(false);
+        setCode('');
+        setTestCode('');
+        setResendIn(0);
+        setStep('phone');
+      }
       setError(err.message ?? 'خطا در اتصال به سرور');
     } finally {
       setBusyAction(null);
@@ -129,36 +192,19 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
     if (busy) return;
     setStep('phone');
     setCode('');
-    setTestCode('');
-    setNewUsername('');
-    setDisplayName('');
+    setSignupToken('');
+    setUsername('');
+    setFirstName('');
+    setLastName('');
     setIsNewUser(false);
+    setTestCode('');
     setResendIn(0);
     setError('');
   }
 
-  async function submitPassword(e) {
-    e.preventDefault();
-    const u = username.trim();
-    if (!u) { setError('نام کاربری را وارد کنید'); return; }
-    if (!password) { setError('رمز عبور را وارد کنید'); return; }
-
-    setBusyAction('password');
-    setError('');
-    try {
-      await onLogin(u, password);
-    } catch (err) {
-      setError(err.message ?? 'خطا در اتصال به سرور');
-    } finally {
-      setBusyAction(null);
-    }
-  }
-
-  const heading = flow === 'password'
-    ? { title: 'ورود با رمز عبور', sub: 'این روش برای حساب‌های ساخته‌شده پیش از ورود با موبایل است.' }
-    : step === 'phone'
-      ? { title: 'ورود یا ثبت‌نام', sub: 'شماره موبایلات را وارد کن تا کد تأیید صادر شود.' }
-      : { title: 'کد تأیید', sub: 'کد ۶ رقمی صادرشده برای شماره‌ات را وارد کن.' };
+  const heading = HEADINGS[step];
+  const steps = isNewUser ? SIGN_UP_STEPS : SIGN_UP_STEPS.slice(0, 2);
+  const previewName = [firstName.trim(), lastName.trim()].filter(Boolean).join(' ');
 
   return (
     <div className="auth-page">
@@ -201,93 +247,9 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
             <p>{heading.sub}</p>
           </header>
 
-          {flow === 'password' ? (
-            <form onSubmit={submitPassword} className="auth-form" noValidate>
-              <div className="field">
-                <label htmlFor="auth-username">نام کاربری</label>
-                <div className="field-control">
-                  <i className="fas fa-at field-icon" aria-hidden="true" />
-                  <input
-                    id="auth-username"
-                    ref={usernameRef}
-                    type="text"
-                    name="username"
-                    autoComplete="username"
-                    required
-                    value={username}
-                    onChange={e => { setUsername(e.target.value); setError(''); }}
-                    placeholder="username"
-                    dir="ltr"
-                    maxLength={30}
-                    disabled={busy}
-                    aria-invalid={!!error}
-                    aria-describedby={error ? 'auth-error' : undefined}
-                  />
-                </div>
-              </div>
+          <StepTracker steps={steps} current={step} />
 
-              <div className="field">
-                <label htmlFor="auth-password">رمز عبور</label>
-                <div className="field-control">
-                  <i className="fas fa-lock field-icon" aria-hidden="true" />
-                  <input
-                    id="auth-password"
-                    type={showPassword ? 'text' : 'password'}
-                    name="password"
-                    autoComplete="current-password"
-                    required
-                    value={password}
-                    onChange={e => { setPassword(e.target.value); setError(''); }}
-                    placeholder="رمز عبور"
-                    maxLength={72}
-                    disabled={busy}
-                    aria-invalid={!!error}
-                    aria-describedby={error ? 'auth-error' : undefined}
-                  />
-                  <button
-                    type="button"
-                    className="password-toggle"
-                    onClick={() => setShowPassword(value => !value)}
-                    aria-label={showPassword ? 'پنهان‌کردن رمز عبور' : 'نمایش رمز عبور'}
-                    aria-pressed={showPassword}
-                    tabIndex={0}
-                  >
-                    <i className={`fas fa-${showPassword ? 'eye-slash' : 'eye'}`} aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-
-              {error && (
-                <div className="auth-error" id="auth-error" role="alert">
-                  <i className="fas fa-circle-exclamation" aria-hidden="true" />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              <button className="btn btn-primary auth-submit" type="submit" disabled={busy}>
-                {busyAction === 'password' ? (
-                  <>
-                    <i className="fas fa-circle-notch spin" aria-hidden="true" />
-                    لطفاً صبر کنید…
-                  </>
-                ) : (
-                  <>
-                    <i className="fas fa-arrow-left" aria-hidden="true" />
-                    ورود به OpenBridge
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                className="auth-link auth-switch"
-                onClick={() => switchFlow('otp')}
-                disabled={busy}
-              >
-                ورود با شماره موبایل
-              </button>
-            </form>
-          ) : step === 'phone' ? (
+          {step === 'phone' && (
             <form onSubmit={submitPhone} className="auth-form" noValidate>
               <div className="field">
                 <label htmlFor="auth-phone">شماره موبایل</label>
@@ -338,19 +300,13 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
               </button>
 
               <p className="auth-note">
-                با تأیید شماره، اگر حسابی نداشته باشی در مرحله بعد نام کاربری و نام نمایشی انتخاب می‌کنی.
+                شماره، هویت تو در OpenBridge است. اگر حسابی نداشته باشی، بعد از تأیید کد،
+                در دو مرحله‌ی بعد نام کاربری و نامت را انتخاب می‌کنی.
               </p>
-
-              <button
-                type="button"
-                className="auth-link auth-switch"
-                onClick={() => switchFlow('password')}
-                disabled={busy}
-              >
-                ورود با نام کاربری و رمز (حساب‌های قدیمی)
-              </button>
             </form>
-          ) : (
+          )}
+
+          {step === 'code' && (
             <form onSubmit={submitCode} className="auth-form" noValidate>
               <div className="auth-target-row">
                 <span className="auth-target">
@@ -360,60 +316,6 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
                   تغییر شماره
                 </button>
               </div>
-
-              {isNewUser && (
-                <>
-                  <div className="field">
-                    <label htmlFor="auth-new-username">نام کاربری</label>
-                    <div className="field-control">
-                      <i className="fas fa-at field-icon" aria-hidden="true" />
-                      <input
-                        id="auth-new-username"
-                        ref={newUsernameRef}
-                        type="text"
-                        name="username"
-                        autoComplete="username"
-                        required
-                        value={newUsername}
-                        onChange={e => { setNewUsername(e.target.value); setError(''); }}
-                        placeholder="username"
-                        dir="ltr"
-                        maxLength={30}
-                        disabled={busy}
-                        aria-invalid={!!error}
-                        aria-describedby={error ? 'auth-error' : 'auth-username-hint'}
-                      />
-                    </div>
-                    <p className="auth-hint" id="auth-username-hint">
-                      هر نام کاربری یکتاست؛ فقط حروف انگلیسی، عدد و _ (حداقل ۲ کاراکتر).
-                    </p>
-                  </div>
-
-                  <div className="field">
-                    <label htmlFor="auth-display-name">نام نمایشی</label>
-                    <div className="field-control">
-                      <i className="fas fa-user field-icon" aria-hidden="true" />
-                      <input
-                        id="auth-display-name"
-                        type="text"
-                        name="displayName"
-                        autoComplete="nickname"
-                        required
-                        value={displayName}
-                        onChange={e => { setDisplayName(e.target.value); setError(''); }}
-                        placeholder="مثلاً علی رضایی"
-                        maxLength={50}
-                        disabled={busy}
-                        aria-invalid={!!error}
-                        aria-describedby={error ? 'auth-error' : 'auth-display-hint'}
-                      />
-                    </div>
-                    <p className="auth-hint" id="auth-display-hint">
-                      این نام برای بقیه کاربران نمایش داده می‌شود.
-                    </p>
-                  </div>
-                </>
-              )}
 
               <div className="field">
                 <label htmlFor="auth-code">کد تأیید ۶ رقمی</label>
@@ -462,15 +364,10 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
                     <i className="fas fa-circle-notch spin" aria-hidden="true" />
                     لطفاً صبر کنید…
                   </>
-                ) : isNewUser ? (
-                  <>
-                    <i className="fas fa-user-plus" aria-hidden="true" />
-                    ساخت حساب و ورود
-                  </>
                 ) : (
                   <>
                     <i className="fas fa-arrow-left" aria-hidden="true" />
-                    تأیید و ورود
+                    {isNewUser ? 'ادامه ثبت‌نام' : 'تأیید و ورود'}
                   </>
                 )}
               </button>
@@ -485,10 +382,144 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
                   {busyAction === 'resend'
                     ? 'در حال ارسال…'
                     : resendIn > 0
-                      ? `ارسال دوباره تا ${resendIn.toLocaleString('fa-IR')} ثانیه`
+                      ? `ارسال دوباره تا ${toFa(resendIn)} ثانیه`
                       : 'ارسال دوباره کد'}
                 </button>
               </div>
+            </form>
+          )}
+
+          {step === 'username' && (
+            <form onSubmit={submitUsername} className="auth-form" noValidate>
+              <div className="field">
+                <label htmlFor="auth-username">نام کاربری</label>
+                <div className="field-control">
+                  <i className="fas fa-at field-icon" aria-hidden="true" />
+                  <input
+                    id="auth-username"
+                    ref={usernameRef}
+                    type="text"
+                    name="username"
+                    autoComplete="username"
+                    required
+                    value={username}
+                    onChange={e => { setUsername(e.target.value); setError(''); }}
+                    placeholder="username"
+                    dir="ltr"
+                    maxLength={30}
+                    disabled={busy}
+                    aria-invalid={!!error}
+                    aria-describedby={error ? 'auth-error' : 'auth-username-hint'}
+                  />
+                </div>
+                <p className="auth-hint" id="auth-username-hint">
+                  فقط حروف انگلیسی، عدد و _ (۲ تا ۳۰ کاراکتر). بعداً می‌توانی عوضش کنی.
+                </p>
+              </div>
+
+              {error && (
+                <div className="auth-error" id="auth-error" role="alert">
+                  <i className="fas fa-circle-exclamation" aria-hidden="true" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <button className="btn btn-primary auth-submit" type="submit">
+                <i className="fas fa-arrow-left" aria-hidden="true" />
+                ادامه
+              </button>
+
+              <button type="button" className="auth-link auth-switch" onClick={changePhone}>
+                انصراف و تغییر شماره
+              </button>
+            </form>
+          )}
+
+          {step === 'name' && (
+            <form onSubmit={submitName} className="auth-form" noValidate>
+              <div className="auth-preview">
+                <Avatar src={null} name={previewName} size={56} />
+                <div className="auth-preview-text">
+                  <strong>{previewName || 'نام نمایشی تو'}</strong>
+                  <span dir="ltr">@{username.trim()}</span>
+                </div>
+              </div>
+              <p className="auth-hint">
+                تصویر پروفایل تو تا وقتی عکس ندازی، همین حرف اول نامت است.
+              </p>
+
+              <div className="field">
+                <label htmlFor="auth-first-name">نام</label>
+                <div className="field-control">
+                  <i className="fas fa-user field-icon" aria-hidden="true" />
+                  <input
+                    id="auth-first-name"
+                    ref={firstNameRef}
+                    type="text"
+                    name="firstName"
+                    autoComplete="given-name"
+                    required
+                    value={firstName}
+                    onChange={e => { setFirstName(e.target.value); setError(''); }}
+                    placeholder="مثلاً علی"
+                    maxLength={50}
+                    disabled={busy}
+                    aria-invalid={!!error}
+                    aria-describedby={error ? 'auth-error' : undefined}
+                  />
+                </div>
+              </div>
+
+              <div className="field">
+                <label htmlFor="auth-last-name">
+                  نام خانوادگی
+                  <span className="field-optional">اختیاری</span>
+                </label>
+                <div className="field-control">
+                  <i className="fas fa-user field-icon" aria-hidden="true" />
+                  <input
+                    id="auth-last-name"
+                    type="text"
+                    name="lastName"
+                    autoComplete="family-name"
+                    value={lastName}
+                    onChange={e => { setLastName(e.target.value); setError(''); }}
+                    placeholder="مثلاً رضایی"
+                    maxLength={50}
+                    disabled={busy}
+                    aria-invalid={!!error}
+                    aria-describedby={error ? 'auth-error' : 'auth-last-hint'}
+                  />
+                </div>
+                <p className="auth-hint" id="auth-last-hint">
+                  اگر نمی‌خواهی نام خانوادگی نمایش داده شود، خالی بگذار.
+                </p>
+              </div>
+
+              {error && (
+                <div className="auth-error" id="auth-error" role="alert">
+                  <i className="fas fa-circle-exclamation" aria-hidden="true" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <button className="btn btn-primary auth-submit" type="submit" disabled={busy}>
+                {busyAction === 'signup' ? (
+                  <>
+                    <i className="fas fa-circle-notch spin" aria-hidden="true" />
+                    در حال ساخت حساب…
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-user-plus" aria-hidden="true" />
+                    ساخت حساب و ورود
+                  </>
+                )}
+              </button>
+
+              <button type="button" className="auth-link auth-switch" onClick={() => setStep('username')}>
+                بازگشت به نام کاربری
+              </button>
             </form>
           )}
         </div>

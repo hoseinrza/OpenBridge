@@ -11,15 +11,13 @@ const { EICAR } = require('./fixtures');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-least-32-characters-long';
-// Keep the login throttle small enough to exercise it without flooding.
-process.env.AUTH_LOGIN_LIMIT = process.env.AUTH_LOGIN_LIMIT || '3';
-process.env.AUTH_LOGIN_USERNAME_LIMIT = process.env.AUTH_LOGIN_USERNAME_LIMIT || '3';
-process.env.AUTH_REGISTER_LIMIT = process.env.AUTH_REGISTER_LIMIT || '20';
-// The OTP tests deliberately spend several requests; keep the per-phone
-// bucket at its production default so the throttle test still exercises it.
+// The suite opens several sessions and finishes several sign-ups; keep the
+// throttles wide enough not to interfere, except the per-phone bucket, which
+// the throttling test exercises on purpose.
 process.env.AUTH_OTP_REQUEST_LIMIT = process.env.AUTH_OTP_REQUEST_LIMIT || '50';
-process.env.AUTH_OTP_REQUEST_PHONE_LIMIT = process.env.AUTH_OTP_REQUEST_PHONE_LIMIT || '3';
+process.env.AUTH_OTP_REQUEST_PHONE_LIMIT = process.env.AUTH_OTP_REQUEST_PHONE_LIMIT || '6';
 process.env.AUTH_OTP_VERIFY_LIMIT = process.env.AUTH_OTP_VERIFY_LIMIT || '50';
+process.env.AUTH_SIGNUP_LIMIT = process.env.AUTH_SIGNUP_LIMIT || '50';
 
 const { NestFactory } = require('@nestjs/core');
 const { ValidationPipe } = require('@nestjs/common');
@@ -99,20 +97,52 @@ async function api(path, { method = 'GET', token, body, headers = {} } = {}) {
   return { status: response.status, data, headers: response.headers };
 }
 
-async function register(label) {
-  const result = await api('/auth/register', {
+function freshPhone() {
+  // 09 + nine digits, the canonical form the API stores.
+  return `09${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}`;
+}
+
+// Completes the whole sign-up: request a code, verify it, then finish the
+// username and name steps. Returns the session payload.
+async function createUser(label, { username, firstName = 'Security', lastName = label, phone = freshPhone() } = {}) {
+  otpPhones.push(phone);
+  const requested = await api('/auth/otp/request', { method: 'POST', body: { phone } });
+  assert.equal(requested.status, 200, `otp request ${label}`);
+  assert.equal(requested.data.isNewUser, true, `new number for ${label}`);
+
+  const verified = await api('/auth/otp/verify', {
     method: 'POST',
-    body: {
-      username: `obt_${suffix}_${label}`,
-      displayName: `Security ${label}`,
-      password: 'TestPass123!',
+    body:     { phone, code: requested.data.testCode },
+  });
+  assert.equal(verified.status, 200, `otp verify ${label}`);
+  assert.equal(verified.data.requiresSignup, true, `sign-up token for ${label}`);
+
+  const created = await api('/auth/signup', {
+    method: 'POST',
+    body:   {
+      signupToken: verified.data.signupToken,
+      username:    username ?? `obt_${suffix}_${label}`,
+      firstName,
+      lastName,
     },
   });
-  assert.equal(result.status, 201, `register ${label}`);
-  assert.equal(typeof result.data.token, 'string', 'access token');
-  assert.equal(typeof result.data.refreshToken, 'string', 'refresh token');
-  createdUserIds.push(result.data.user.id);
-  return result.data;
+  assert.equal(created.status, 201, `signup ${label}`);
+  createdUserIds.push(created.data.user.id);
+  return created.data;
+}
+
+// Signs an existing account in with a fresh code and returns its new session.
+async function signInByOtp(phone) {
+  const requested = await api('/auth/otp/request', { method: 'POST', body: { phone } });
+  assert.equal(requested.status, 200, 'otp request for an existing account');
+  assert.equal(requested.data.isNewUser, false, 'existing account detected');
+
+  const verified = await api('/auth/otp/verify', {
+    method: 'POST',
+    body:     { phone, code: requested.data.testCode },
+  });
+  assert.equal(verified.status, 200, 'otp verify for an existing account');
+  return verified.data;
 }
 
 function connectSocket(token) {
@@ -189,9 +219,9 @@ before(async () => {
   origin = `http://127.0.0.1:${address.port}`;
   prisma = new PrismaClient();
 
-  const alice = await register('alice');
-  const bob = await register('bob');
-  const eve = await register('eve');
+  const alice = await createUser('alice');
+  const bob = await createUser('bob');
+  const eve = await createUser('eve');
 
   const groupResponse = await api('/messages/groups', {
     method: 'POST',
@@ -315,6 +345,11 @@ test('validates group and pagination inputs', async () => {
     token: alice.token,
     body: { avatar: 'javascript:alert(1)' },
   })).status, 400, 'avatar scheme');
+  assert.equal((await api('/users/me', {
+    method: 'PATCH',
+    token: alice.token,
+    body: { firstName: 'Ali 123' },
+  })).status, 400, 'digits are not a name');
 });
 
 test('non-members cannot read, write, react or type in a group', async () => {
@@ -435,7 +470,6 @@ test('CORS rejects unknown origins and allows configured dev origins', async () 
 
 test('refresh tokens rotate and session revocation is immediate', async () => {
   const { alice, bob } = global.__ctx;
-  const username = `obt_${suffix}_alice`;
 
   const refreshed = await api('/auth/refresh', {
     method: 'POST',
@@ -451,16 +485,9 @@ test('refresh tokens rotate and session revocation is immediate', async () => {
   });
   assert.equal(reused.status, 401, 'rotated token cannot be reused');
 
-  const loginB = await api('/auth/login', {
-    method: 'POST',
-    body: { username, password: 'TestPass123!' },
-  });
-  const loginC = await api('/auth/login', {
-    method: 'POST',
-    body: { username, password: 'TestPass123!' },
-  });
-  assert.equal(loginB.status, 200);
-  assert.equal(loginC.status, 200);
+  // Two more sign-ins for the same account give two more live sessions.
+  const loginB = await signInByOtp(alice.user.phone);
+  const loginC = await signInByOtp(alice.user.phone);
 
   const listed = await api('/auth/sessions', { token: alice.token });
   assert.equal(listed.status, 200);
@@ -475,34 +502,34 @@ test('refresh tokens rotate and session revocation is immediate', async () => {
   });
   assert.equal(crossRevoke.status, 404, 'cannot revoke another user\'s session');
 
-  assert.equal((await api('/auth/logout', { method: 'POST', token: loginB.data.token })).status, 200);
-  assert.equal((await api('/users/me', { token: loginB.data.token })).status, 401, 'logged-out access token');
+  assert.equal((await api('/auth/logout', { method: 'POST', token: loginB.token })).status, 200);
+  assert.equal((await api('/users/me', { token: loginB.token })).status, 401, 'logged-out access token');
   assert.equal((await api('/auth/refresh', {
     method: 'POST',
-    body: { refreshToken: loginB.data.refreshToken },
+    body: { refreshToken: loginB.refreshToken },
   })).status, 401, 'logged-out refresh token');
 
-  const revokedSocket = await connectSocket(loginB.data.token);
+  const revokedSocket = await connectSocket(loginB.token);
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal(revokedSocket.socket.connected, false, 'revoked session cannot open a socket');
   revokedSocket.socket.disconnect();
 
-  const sessionsC = await api('/auth/sessions', { token: loginC.data.token });
+  const sessionsC = await api('/auth/sessions', { token: loginC.token });
   const currentC = sessionsC.data.find(session => session.current);
   assert.ok(currentC, 'current session id');
   assert.equal((await api(`/auth/sessions/${currentC.id}`, {
     method: 'DELETE',
     token: alice.token,
   })).status, 200);
-  assert.equal((await api('/users/me', { token: loginC.data.token })).status, 401, 'revoked access token');
+  assert.equal((await api('/users/me', { token: loginC.token })).status, 401, 'revoked access token');
   assert.equal((await api('/auth/refresh', {
     method: 'POST',
-    body: { refreshToken: loginC.data.refreshToken },
+    body: { refreshToken: loginC.refreshToken },
   })).status, 401, 'revoked refresh token');
 });
 
-test('phone OTP verifies and creates an account with a user-chosen username', async () => {
-  const phone = `0912${String(Date.now()).slice(-7)}`;
+test('a verified new number finishes sign-up in its own steps', async () => {
+  const phone = freshPhone();
   const username = `otp_user_${String(Date.now()).slice(-7)}`;
   otpPhones.push(phone);
 
@@ -529,84 +556,159 @@ test('phone OTP verifies and creates an account with a user-chosen username', as
     body: { phone, code: wrongCode },
   })).status, 401, 'wrong code rejected');
 
+  const verified = await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: requested.data.testCode },
+  });
+  assert.equal(verified.status, 200);
+  assert.equal(verified.data.requiresSignup, true, 'new number goes to sign-up');
+  assert.equal(typeof verified.data.signupToken, 'string', 'sign-up token issued');
+  assert.equal(verified.data.token, undefined, 'no session before the account exists');
+  assert.ok(verified.data.signupExpiresInSeconds > 0, 'sign-up window advertised');
+
   assert.equal((await api('/auth/otp/verify', {
     method: 'POST',
     body: { phone, code: requested.data.testCode },
-  })).status, 400, 'username required for a new account');
-
-  assert.equal((await api('/auth/otp/verify', {
-    method: 'POST',
-    body: { phone, code: requested.data.testCode, displayName: 'OTP User' },
-  })).status, 400, 'display name required for a new account');
-
-  assert.equal((await api('/auth/otp/verify', {
-    method: 'POST',
-    body: { phone, code: requested.data.testCode, username: 'ali.ce', displayName: 'OTP User' },
-  })).status, 400, 'invalid username format rejected');
-
-  assert.equal((await api('/auth/otp/verify', {
-    method: 'POST',
-    body: { phone, code: requested.data.testCode, username: 'alice', displayName: 'OTP User' },
-  })).status, 409, 'duplicate username rejected without consuming the code');
-
-  const verified = await api('/auth/otp/verify', {
-    method: 'POST',
-    body: { phone, code: requested.data.testCode, username, displayName: 'OTP User' },
-  });
-  assert.equal(verified.status, 200);
-  assert.equal(verified.data.user.username, username, 'user-chosen username stored');
-  assert.equal(verified.data.user.displayName, 'OTP User');
-  assert.equal(verified.data.user.phone, phone, 'phone stored on the account');
-  assert.equal(typeof verified.data.token, 'string');
-  assert.equal(typeof verified.data.refreshToken, 'string');
-  createdUserIds.push(verified.data.user.id);
-
-  assert.equal((await api('/auth/otp/verify', {
-    method: 'POST',
-    body: { phone, code: requested.data.testCode, username, displayName: 'OTP User' },
   })).status, 401, 'code is single use');
 
-  const me = await api('/users/me', { token: verified.data.token });
+  const forged = new JwtService({ secret: 'wrong-secret-wrong-secret-wrong-secret' })
+    .sign({ pur: 'signup', phone }, { expiresIn: '5m' });
+  assert.equal((await api('/auth/signup', {
+    method: 'POST',
+    body: { signupToken: forged, username, firstName: 'OTP', lastName: 'User' },
+  })).status, 401, 'token signed with another secret is refused');
+
+  // A sign-up token must not be usable as an access token.
+  assert.equal((await api('/users/me', { token: verified.data.signupToken })).status, 401, 'not an access token');
+
+  assert.equal((await api('/auth/signup', {
+    method: 'POST',
+    body: { signupToken: verified.data.signupToken, username: 'ali.ce', firstName: 'OTP', lastName: 'User' },
+  })).status, 400, 'invalid username format rejected');
+
+  assert.equal((await api('/auth/signup', {
+    method: 'POST',
+    body: { signupToken: verified.data.signupToken, username },
+  })).status, 400, 'given name is required');
+
+  assert.equal((await api('/auth/signup', {
+    method: 'POST',
+    body: { signupToken: verified.data.signupToken, username, firstName: 'علی ۲' },
+  })).status, 400, 'digits are not a name');
+
+  assert.equal((await api('/auth/signup', {
+    method: 'POST',
+    body: {
+      signupToken: verified.data.signupToken,
+      username:    global.__ctx.bob.user.username,
+      firstName:   'OTP',
+      lastName:    'User',
+    },
+  })).status, 409, 'duplicate username rejected');
+
+  // The failed attempts above must not have burned the token.
+  const created = await api('/auth/signup', {
+    method: 'POST',
+    body: {
+      signupToken: verified.data.signupToken,
+      username,
+      firstName:   'OTP',
+      lastName:    'User',
+    },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.user.username, username, 'user-chosen username stored');
+  assert.equal(created.data.user.firstName, 'OTP');
+  assert.equal(created.data.user.lastName, 'User');
+  assert.equal(created.data.user.displayName, 'OTP User', 'display name derived from both parts');
+  assert.equal(created.data.user.phone, phone, 'phone stored on the account');
+  assert.equal(typeof created.data.token, 'string');
+  assert.equal(typeof created.data.refreshToken, 'string');
+  createdUserIds.push(created.data.user.id);
+
+  assert.equal((await api('/auth/signup', {
+    method: 'POST',
+    body: { signupToken: verified.data.signupToken, username: `${username}_second`, firstName: 'OTP' },
+  })).status, 409, 'a spent sign-up token cannot open a second account');
+
+  const me = await api('/users/me', { token: created.data.token });
   assert.equal(me.status, 200);
   assert.equal(me.data.phone, phone, 'own profile includes the phone');
+  assert.equal(me.data.firstName, 'OTP', 'own profile includes the name parts');
 
   // The chosen username stays editable; the phone keeps identifying the account.
   const renamed = await api('/users/me', {
     method: 'PATCH',
-    token: verified.data.token,
+    token: created.data.token,
     body: { username: `${username}_renamed` },
   });
   assert.equal(renamed.status, 200, 'chosen username can be renamed');
   assert.equal(renamed.data.username, `${username}_renamed`);
 
-  const again = await api('/auth/otp/request', {
-    method: 'POST',
-    body: { phone },
+  const relabelled = await api('/users/me', {
+    method: 'PATCH',
+    token: created.data.token,
+    body: { firstName: 'علی', lastName: 'رضایی' },
   });
-  assert.equal(again.status, 200);
-  assert.equal(again.data.isNewUser, false, 'existing account detected');
+  assert.equal(relabelled.status, 200, 'name parts can be edited');
+  assert.equal(relabelled.data.displayName, 'علی رضایی', 'display name follows the parts');
 
-  const verifiedAgain = await api('/auth/otp/verify', {
-    method: 'POST',
-    body: { phone, code: again.data.testCode },
+  const cleared = await api('/users/me', {
+    method: 'PATCH',
+    token: created.data.token,
+    body: { lastName: '' },
   });
-  assert.equal(verifiedAgain.status, 200, 'existing account logs in without display name');
-  assert.equal(verifiedAgain.data.user.id, verified.data.user.id);
-  assert.equal(verifiedAgain.data.user.username, `${username}_renamed`, 'renamed username preserved');
+  assert.equal(cleared.status, 200, 'family name is optional');
+  assert.equal(cleared.data.lastName, null, 'empty family name clears it');
+  assert.equal(cleared.data.displayName, 'علی', 'display name keeps the given name');
+
+  const again = await signInByOtp(phone);
+  assert.equal(again.user.id, created.data.user.id);
+  assert.equal(again.user.username, `${username}_renamed`, 'renamed username preserved');
+  assert.equal(again.requiresSignup, undefined, 'existing account signs straight in');
 
   // Phone numbers are private: directory and search must never expose them.
-  const directory = await api('/users', { token: verified.data.token });
+  const directory = await api('/users', { token: created.data.token });
   assert.equal(directory.status, 200);
   assert.ok(directory.data.every(u => !('phone' in u)), 'user directory hides phone numbers');
-  const search = await api(`/users/search?q=${encodeURIComponent('Security')}`, { token: verified.data.token });
+  const search = await api(`/users/search?q=${encodeURIComponent('Security')}`, { token: created.data.token });
   assert.equal(search.status, 200);
   assert.ok(search.data.length > 0, 'search returns other users');
   assert.ok(search.data.every(u => !('phone' in u)), 'search hides phone numbers');
 });
 
+test('an expired sign-up token is refused', async () => {
+  const phone = freshPhone();
+  otpPhones.push(phone);
+
+  const requested = await api('/auth/otp/request', { method: 'POST', body: { phone } });
+  assert.equal(requested.status, 200);
+  const verified = await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: requested.data.testCode },
+  });
+  assert.equal(verified.status, 200);
+
+  const expired = new JwtService({ secret: process.env.JWT_SECRET })
+    .sign({ pur: 'signup', phone }, { expiresIn: '-1s' });
+  const rejected = await api('/auth/signup', {
+    method: 'POST',
+    body: { signupToken: expired, username: `otp_exp_${String(Date.now()).slice(-7)}`, firstName: 'Expired' },
+  });
+  assert.equal(rejected.status, 401, 'expired token refused');
+  assert.match(rejected.data.message, /مهلت/);
+
+  // Any other purpose in the same signature domain is still refused.
+  const wrongPurpose = new JwtService({ secret: process.env.JWT_SECRET })
+    .sign({ sub: 'someone', phone }, { expiresIn: '5m' });
+  assert.equal((await api('/auth/signup', {
+    method: 'POST',
+    body: { signupToken: wrongPurpose, username: 'otp_any', firstName: 'Any' },
+  })).status, 401, 'access-shaped token is not a sign-up token');
+});
+
 test('expired and over-attempted OTP codes are rejected', async () => {
-  const phone = `0936${String(Date.now()).slice(-7)}`;
-  const username = `otp_exp_${String(Date.now()).slice(-7)}`;
+  const phone = freshPhone();
   otpPhones.push(phone);
 
   const first = await api('/auth/otp/request', { method: 'POST', body: { phone } });
@@ -617,7 +719,7 @@ test('expired and over-attempted OTP codes are rejected', async () => {
   });
   assert.equal((await api('/auth/otp/verify', {
     method: 'POST',
-    body: { phone, code: first.data.testCode, username, displayName: 'Expired User' },
+    body: { phone, code: first.data.testCode },
   })).status, 401, 'expired code rejected');
 
   const fresh = await api('/auth/otp/request', { method: 'POST', body: { phone } });
@@ -632,29 +734,35 @@ test('expired and over-attempted OTP codes are rejected', async () => {
 
   assert.equal((await api('/auth/otp/verify', {
     method: 'POST',
-    body: { phone, code: fresh.data.testCode, username, displayName: 'Expired User' },
+    body: { phone, code: fresh.data.testCode },
   })).status, 401, 'correct code refused after too many attempts');
 
   const reset = await api('/auth/otp/request', { method: 'POST', body: { phone } });
   assert.equal(reset.status, 200, 'a new request resets the attempt budget');
   const verified = await api('/auth/otp/verify', {
     method: 'POST',
-    body: { phone, code: reset.data.testCode, username, displayName: 'Expired User' },
+    body: { phone, code: reset.data.testCode },
   });
-  assert.equal(verified.status, 200);
-  createdUserIds.push(verified.data.user.id);
+  assert.equal(verified.status, 200, 'the next code is accepted again');
+  assert.equal(verified.data.requiresSignup, true, 'a new number still has to sign up');
 });
 
 test('legacy accounts whose username is their phone still sign in by OTP', async () => {
-  const phone = `0913${String(Date.now()).slice(-7)}`;
+  const phone = freshPhone();
   otpPhones.push(phone);
 
-  const legacy = await api('/auth/register', {
-    method: 'POST',
-    body: { username: phone, displayName: 'Legacy Phone User', password: 'legacy-password-123' },
+  // Rows created before the `phone` column existed used the number as username.
+  const legacy = await prisma.user.create({
+    data: {
+      username:    phone,
+      displayName: 'Legacy Phone User',
+      firstName:   'Legacy',
+      lastName:    'Phone User',
+      password:    'legacy-password-123',
+    },
+    select: { id: true, username: true },
   });
-  assert.equal(legacy.status, 201);
-  createdUserIds.push(legacy.data.user.id);
+  createdUserIds.push(legacy.id);
 
   const requested = await api('/auth/otp/request', { method: 'POST', body: { phone } });
   assert.equal(requested.status, 200);
@@ -665,46 +773,44 @@ test('legacy accounts whose username is their phone still sign in by OTP', async
     body: { phone, code: requested.data.testCode },
   });
   assert.equal(verified.status, 200);
-  assert.equal(verified.data.user.id, legacy.data.user.id, 'same account, not a duplicate');
+  assert.equal(verified.data.user.id, legacy.id, 'same account, not a duplicate');
   assert.equal(verified.data.user.username, phone, 'legacy username preserved');
   assert.equal(verified.data.user.phone, phone, 'phone linked to the legacy account');
+
+  // An old row can fill in its name parts from the profile afterwards.
+  const renamed = await api('/users/me', {
+    method: 'PATCH',
+    token: verified.data.token,
+    body: { username: 'legacy_handle', firstName: 'نام', lastName: 'خانوادگی' },
+  });
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.data.displayName, 'نام خانوادگی', 'display name derived from the parts');
 });
 
 test('OTP requests are throttled per phone number', async () => {
-  const phone = `0935${String(Date.now()).slice(-7)}`;
+  const phone = freshPhone();
+  const limit = Number(process.env.AUTH_OTP_REQUEST_PHONE_LIMIT);
   otpPhones.push(phone);
 
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= limit; attempt += 1) {
     const result = await api('/auth/otp/request', { method: 'POST', body: { phone } });
     assert.equal(result.status, 200, `request ${attempt} allowed`);
   }
 
   const blocked = await api('/auth/otp/request', { method: 'POST', body: { phone } });
-  assert.equal(blocked.status, 429, 'fourth request for the same phone is rate limited');
+  assert.equal(blocked.status, 429, `request ${limit + 1} for the same phone is rate limited`);
   assert.equal(blocked.data.message, 'تلاش‌های بیش از حد؛ لطفاً بعداً دوباره تلاش کنید');
   assert.ok(Number(blocked.headers.get('retry-after')) > 0, 'Retry-After header');
 });
 
-test('login is throttled per IP and username', async () => {
-  // A fresh username and client IP keep this test independent of earlier logins.
-  const victim = `obt_${suffix}_throttle`;
-  // A dedicated client IP keeps this test independent of earlier logins.
-  const headers = { 'X-Forwarded-For': '198.51.100.23' };
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    const result = await api('/auth/login', {
+test('the removed password endpoints are gone', async () => {
+  const headers = { 'X-Forwarded-For': '198.51.100.24' };
+  for (const path of ['/auth/login', '/auth/register']) {
+    const result = await api(path, {
       method: 'POST',
       headers,
-      body: { username: victim, password: 'WrongPass123!' },
+      body: { username: 'anyone', password: 'anything', displayName: 'Anyone' },
     });
-    assert.equal(result.status, 401, `attempt ${attempt} still reaches password check`);
+    assert.equal(result.status, 404, `${path} is no longer routed`);
   }
-
-  const blocked = await api('/auth/login', {
-    method: 'POST',
-    headers,
-    body: { username: victim, password: 'WrongPass123!' },
-  });
-  assert.equal(blocked.status, 429, 'fourth attempt is rate limited');
-  assert.equal(blocked.data.message, 'تلاش‌های بیش از حد؛ لطفاً بعداً دوباره تلاش کنید');
-  assert.ok(Number(blocked.headers.get('retry-after')) > 0, 'Retry-After header');
 });

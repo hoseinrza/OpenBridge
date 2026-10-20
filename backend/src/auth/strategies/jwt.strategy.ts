@@ -31,7 +31,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       select: {
         id:   true,
         user: {
-          select: { id: true, username: true, displayName: true, phone: true, avatar: true, bio: true, status: true, createdAt: true },
+          select: { id: true, username: true, firstName: true, lastName: true, displayName: true, phone: true, avatar: true, bio: true, status: true, createdAt: true },
         },
       },
     });

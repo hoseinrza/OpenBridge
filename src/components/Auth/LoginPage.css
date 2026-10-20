@@ -126,7 +126,44 @@
 .auth-card-head p {
   color: var(--text-2);
   font-size: var(--text-sm);
+  margin-bottom: var(--sp-4);
+}
+
+/* ── Step tracker ────────────────────────────────────────────── */
+.auth-tracker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
   margin-bottom: var(--sp-5);
+}
+
+.auth-tracker-dots {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.auth-tracker-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+
+.auth-tracker-dot.is-done { background: var(--accent); opacity: 0.45; }
+
+.auth-tracker-dot.is-current {
+  background: var(--accent);
+  opacity: 1;
+  transform: scale(1.35);
+}
+
+.auth-tracker-label {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  white-space: nowrap;
 }
 
 /* ── Phone / code flow ───────────────────────────────────────── */
@@ -221,6 +258,38 @@
   justify-content: center;
 }
 
+/* ── Identity preview ────────────────────────────────────────── */
+.auth-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.auth-preview-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.auth-preview-text strong {
+  color: var(--text-1);
+  font-size: var(--text-base);
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.auth-preview-text span {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
 /* ── Fields ──────────────────────────────────────────────────── */
 .auth-form {
   display: flex;
@@ -276,21 +345,6 @@
 }
 
 .field-control input::placeholder { color: var(--text-3); }
-
-.password-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--text-3);
-  font-size: 13px;
-  flex-shrink: 0;
-}
-.password-toggle:hover { background: var(--surface-3); color: var(--text-1); }
 
 /* ── Error ───────────────────────────────────────────────────── */
 .auth-error {

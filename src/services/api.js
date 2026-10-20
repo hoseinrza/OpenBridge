@@ -28,7 +28,8 @@ export function normalizeUser(u) {
     id:        u.id,
     name:      u.displayName || u.username,
     username:  u.username,
-    avatar:    u.avatar || '/images/user.png',
+    // No avatar means the UI renders the user's initials instead of a stock image.
+    avatar:    u.avatar || null,
     bio:       u.bio ?? '',
     status:    u.online ? 'online' : 'offline',
     createdAt: u.createdAt,
@@ -45,7 +46,7 @@ export function normalizeGroup(group) {
     return {
       id:     user.id,
       name:   user.displayName || user.username,
-      avatar: user.avatar || '/images/user.png',
+      avatar: user.avatar || null,
     };
   });
   return {
@@ -122,7 +123,11 @@ async function request(method, path, body, retry = true) {
     }
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`);
+  if (!res.ok) {
+    const error = new Error(data.message ?? `HTTP ${res.status}`);
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
 
@@ -131,22 +136,28 @@ export function requestOtp(phone) {
   return request('POST', '/auth/otp/request', { phone });
 }
 
-export async function verifyOtp(phone, code, username, displayName) {
-  const data = await request('POST', '/auth/otp/verify', { phone, code, username, displayName });
+// A verified number either signs an existing account in or hands back a
+// short-lived token for the remaining sign-up steps.
+export async function verifyOtp(phone, code) {
+  const data = await request('POST', '/auth/otp/verify', { phone, code });
+  if (data.requiresSignup) {
+    return {
+      requiresSignup: true,
+      signupToken: data.signupToken,
+      signupExpiresInSeconds: data.signupExpiresInSeconds,
+    };
+  }
   storeSession(data);
-  return data.user;
+  return { user: data.user };
 }
 
-// Legacy username/password login for accounts created before phone sign-in.
-export async function login(username, password) {
-  const data = await request('POST', '/auth/login', { username, password });
-  storeSession(data);
-  return data.user;
-}
-
-// No longer used by the UI; kept for API compatibility and tests.
-export async function register(username, displayName, password) {
-  const data = await request('POST', '/auth/register', { username, displayName, password });
+export async function completeSignup(signupToken, { username, firstName, lastName }) {
+  const data = await request('POST', '/auth/signup', {
+    signupToken,
+    username,
+    firstName,
+    lastName: lastName || undefined,
+  });
   storeSession(data);
   return data.user;
 }

@@ -1,5 +1,5 @@
 import {
-  BadRequestException, Injectable, UnauthorizedException, ConflictException,
+  Injectable, UnauthorizedException, ConflictException,
   NotFoundException, ServiceUnavailableException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -8,23 +8,23 @@ import {
   createHash, createHmac, randomBytes, randomInt, timingSafeEqual,
 } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { SignupDto } from './dto/signup.dto';
+import { displayNameOf } from '../common/names';
 import { signedFileUrl } from '../uploads/file-urls';
 import {
   IS_PRODUCTION, JWT_SECRET, OTP_MAX_ATTEMPTS, OTP_TEST_MODE, OTP_TTL_SECONDS,
-  REFRESH_TOKEN_TTL_DAYS,
+  REFRESH_TOKEN_TTL_DAYS, SIGNUP_TOKEN_TTL_SECONDS,
 } from '../config/env';
 
-const SAFE = { id: true, username: true, displayName: true, phone: true, avatar: true, status: true, createdAt: true };
+const SAFE = {
+  id: true, username: true, firstName: true, lastName: true, displayName: true,
+  phone: true, avatar: true, status: true, createdAt: true,
+};
 const REFRESH_TOKEN_BYTES = 48;
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-// Compared against when the username does not exist so response timing does
-// not reveal which usernames are registered.
-const DUMMY_PASSWORD_HASH = bcrypt.hashSync('openbridge-timing-equalizer', 10);
+const IRAN_MOBILE = /^09\d{9}$/;
 
 export interface SessionMeta {
   ip?: string;
@@ -56,31 +56,6 @@ function hashesMatch(storedHex: string, candidateHex: string) {
 @Injectable()
 export class AuthService {
   constructor(private prisma: PrismaService, private jwt: JwtService) {}
-
-  async register(dto: RegisterDto, meta: SessionMeta = {}) {
-    const exists = await this.prisma.user.findUnique({ where: { username: dto.username } });
-    if (exists) throw new ConflictException('این نام کاربری قبلاً ثبت شده');
-
-    const user = await this.prisma.user.create({
-      data: {
-        username:    dto.username,
-        displayName: dto.displayName,
-        password:    await bcrypt.hash(dto.password, 10),
-      },
-      select: SAFE,
-    });
-    return this.withSession(this.withSignedAvatar(user), user.id, meta);
-  }
-
-  async login(dto: LoginDto, meta: SessionMeta = {}) {
-    const user = await this.prisma.user.findUnique({ where: { username: dto.username } });
-    const passwordMatches = await bcrypt.compare(dto.password, user?.password ?? DUMMY_PASSWORD_HASH);
-    if (!user || !passwordMatches)
-      throw new UnauthorizedException('نام کاربری یا رمز اشتباه است');
-
-    const { password, ...safe } = user;
-    return this.withSession(this.withSignedAvatar(safe), user.id, meta);
-  }
 
   async refresh(rawRefreshToken: string, meta: SessionMeta = {}) {
     const currentHash = hashRefreshToken(rawRefreshToken);
@@ -176,23 +151,10 @@ export class AuthService {
       throw new UnauthorizedException('کد تأیید نادرست است');
     }
 
-    let user = await this.prisma.user.findFirst({
+    const user = await this.prisma.user.findFirst({
       where:  { OR: [{ phone }, { phone: null, username: phone }] },
       select: SAFE,
     });
-    if (!user) {
-      // Validate the signup payload before consuming the code so a typo does
-      // not burn the user's only working code.
-      if (!dto.username)
-        throw new BadRequestException('برای ساخت حساب، نام کاربری الزامی است');
-      if (!dto.displayName || dto.displayName.trim().length < 2)
-        throw new BadRequestException('برای ساخت حساب، نام نمایشی را وارد کنید');
-      const taken = await this.prisma.user.findUnique({
-        where:  { username: dto.username },
-        select: { id: true },
-      });
-      if (taken) throw new ConflictException('این نام کاربری قبلاً ثبت شده');
-    }
 
     // Conditional consumption makes a code single-use even if two verifies
     // race with the same code.
@@ -204,28 +166,80 @@ export class AuthService {
       throw new UnauthorizedException('این کد قبلاً استفاده شده است');
 
     if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          username:    dto.username!,
-          displayName: dto.displayName!.trim(),
-          phone,
-          // Phone accounts never use password login; store an unguessable hash
-          // so the legacy password endpoint cannot be used for this account.
-          password:    await bcrypt.hash(randomBytes(32).toString('base64url'), 10),
-        },
-        select: SAFE,
-      });
-    } else if (!user.phone) {
-      // Legacy account whose username was the phone number: link the verified
-      // number so the next sign-in finds it directly.
-      user = await this.prisma.user.update({
-        where:  { id: user.id },
-        data:   { phone },
-        select: SAFE,
-      });
+      // The number is verified but no account exists yet. Hand back a
+      // short-lived token so the remaining sign-up steps can each get their
+      // own screen without re-asking for the code.
+      return {
+        requiresSignup:         true,
+        phone,
+        signupToken:            this.jwt.sign(
+          { pur: 'signup', phone },
+          { expiresIn: SIGNUP_TOKEN_TTL_SECONDS },
+        ),
+        signupExpiresInSeconds: SIGNUP_TOKEN_TTL_SECONDS,
+      };
     }
 
+    if (user.phone) return this.withSession(this.withSignedAvatar(user), user.id, meta);
+
+    // Legacy account whose username was the phone number: link the verified
+    // number so the next sign-in finds it directly.
+    const linked = await this.prisma.user.update({
+      where:  { id: user.id },
+      data:   { phone },
+      select: SAFE,
+    });
+    return this.withSession(this.withSignedAvatar(linked), user.id, meta);
+  }
+
+  async completeSignup(dto: SignupDto, meta: SessionMeta = {}) {
+    const phone = this.verifySignupToken(dto.signupToken);
+
+    const existing = await this.prisma.user.findFirst({
+      where:  { OR: [{ phone }, { phone: null, username: phone }] },
+      select: { id: true },
+    });
+    if (existing) throw new ConflictException('برای این شماره حسابی ساخته شده؛ با همان کد وارد شوید');
+
+    // Checked before creating anything so a taken handle leaves the signup
+    // token reusable and the user can simply pick another one.
+    const taken = await this.prisma.user.findUnique({
+      where:  { username: dto.username },
+      select: { id: true },
+    });
+    if (taken) throw new ConflictException('این نام کاربری قبلاً ثبت شده');
+
+    const user = await this.prisma.user.create({
+      data: {
+        username:    dto.username,
+        firstName:   dto.firstName,
+        lastName:    dto.lastName ?? null,
+        displayName: displayNameOf(dto.firstName, dto.lastName),
+        phone,
+        // These accounts never sign in with a password; the column keeps an
+        // unguessable value so nothing can authenticate through it.
+        password: await bcrypt.hash(randomBytes(32).toString('base64url'), 10),
+      },
+      select: SAFE,
+    });
     return this.withSession(this.withSignedAvatar(user), user.id, meta);
+  }
+
+  private verifySignupToken(token: string): string {
+    let payload: { pur?: string; phone?: string };
+    try {
+      payload = this.jwt.verify(token, { algorithms: ['HS256'] });
+    } catch (error) {
+      throw new UnauthorizedException(
+        (error as Error).name === 'TokenExpiredError'
+          ? 'مهلت ثبت‌نام تمام شد؛ دوباره کد بگیرید'
+          : 'کد تأیید معتبر نیست',
+      );
+    }
+    if (payload?.pur !== 'signup' || typeof payload.phone !== 'string' || !IRAN_MOBILE.test(payload.phone))
+      throw new UnauthorizedException('کد تأیید معتبر نیست');
+
+    return payload.phone;
   }
 
   async logout(userId: string, sessionId: string) {

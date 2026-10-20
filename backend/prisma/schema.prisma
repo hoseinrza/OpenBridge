@@ -30,6 +30,11 @@ enum ParticipantRole {
 model User {
   id          String     @id @default(uuid())
   username    String     @unique
+  // Name parts collected at sign-up. `displayName` is always kept in sync with
+  // them (see UsersService.updateProfile / AuthService.completeSignup) because
+  // the rest of the app reads a single display name.
+  firstName   String?
+  lastName    String?
   displayName String?
   password    String
   // Verified mobile number for OTP sign-in. Unique per account; nullable for

@@ -18,7 +18,7 @@ function normalize(msg, myId) {
     receiverId:   msg.receiverId,
     conversationId: msg.conversationId,
     sender:       msg.sender?.displayName ?? msg.sender?.username,
-    avatar:       msg.sender?.avatar ? resolveUrl(msg.sender.avatar) : '/images/user.png',
+    avatar:       msg.sender?.avatar ? resolveUrl(msg.sender.avatar) : null,
     time:         new Date(msg.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
     createdAt:    new Date(msg.createdAt).getTime(),
     read:         msg.read,
@@ -161,7 +161,7 @@ export function useChat(targetUser, currentUser, onIncoming) {
       if (isGroup(target)) {
         if (conversationId !== target.id || fromId === currentUserRef.current?.id) return;
         const participant = target.participants?.find(p => p.id === fromId);
-        setTypingPeer(participant ?? { name: 'یکی از اعضا', avatar: '/images/user.png' });
+        setTypingPeer(participant ?? { name: 'یکی از اعضا', avatar: null });
       } else if (fromId === target.id) {
         setTypingPeer(target);
       }

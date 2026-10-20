@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useVideo } from '../../hooks/useVideo.js';
 import Sidebar from '../Sidebar/Sidebar.jsx';
+import Avatar from '../ui/Avatar.jsx';
 import './VideoCall.css';
 
 export default function VideoCallPage({ currentUser, onLogout }) {
@@ -39,7 +40,7 @@ export default function VideoCallPage({ currentUser, onLogout }) {
           <div className="video-tile self-tile">
             <video ref={videoRef} autoPlay muted playsInline />
             <div className="video-placeholder active" ref={placeholderRef}>
-              <img src={currentUser.avatar} alt="" />
+              <Avatar src={currentUser.avatar} name={currentUser.name} size={64} />
               <span>دوربین خاموش است</span>
             </div>
             <div className="video-name-tag">{currentUser.name} (شما)</div>

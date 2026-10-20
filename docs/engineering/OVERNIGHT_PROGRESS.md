@@ -78,7 +78,9 @@ Known gaps for this sprint:
 
 The primary login flow is now an Iranian mobile number plus a one-time code.
 Legacy username/password login is kept for existing accounts, but registration
-UI is gone — new accounts are created by verifying an OTP.
+UI is gone — new accounts are created by verifying an OTP. (The password
+endpoint and its UI were removed in the follow-up below: the phone number is
+now the only way in.)
 
 - **Normalization** (`backend/src/common/phone.ts`, mirrored in
   `src/utils/phone.js` and `mobile/src/utils/phone.js`): accepts
@@ -108,7 +110,8 @@ UI is gone — new accounts are created by verifying an OTP.
 - **Web** (`src/components/Auth/LoginPage.jsx`): two-step form (phone → code),
   Persian-digit input handling, `autocomplete="one-time-code"`, 30 s resend
   countdown, «تغییر شماره» link, required display-name field for new users,
-  and a legacy «ورود با نام کاربری و رمز» mode for old accounts.
+  and a legacy «ورود با نام کاربری و رمز» mode for old accounts (since
+  removed — see the second follow-up below).
 - **Mobile** (`mobile/src/screens/LoginScreen.js`): the same two-step flow with
   `phone-pad`/`number-pad` keyboards, `textContentType`/`autoComplete="sms-otp"`
   hints, live-region test-code box, and the same legacy password mode.
@@ -177,6 +180,99 @@ Signup-step screenshots/audits at 1440×900 and 375×812 (light + dark) and
 `web` lint + build clean; `mobile` `expo export --platform android` bundled.
 All QA users (`qa_otp_*`, `qa_web_*`) and `09990000xx` OTP rows were deleted
 afterwards; the 11 real accounts were untouched.
+
+### Multi-step sign-up, no more password login (2026-10-20, second follow-up)
+
+`POST /auth/login` and `POST /auth/register` are **deleted**, together with
+their DTOs and the `AUTH_LOGIN_*` / `AUTH_REGISTER_*` limits. The phone number
+plus an OTP is the only way to authenticate, so the login screen is a wizard
+that asks for one thing per step instead of everything at once.
+
+- **Flow**: `phone → code → username → name`. `POST /auth/otp/verify` now
+  takes only `phone` and `code`. When the verified number has no account it
+  returns `{ requiresSignup: true, signupToken, signupExpiresInSeconds }`
+  instead of a session; the remaining two screens collect a username and the
+  name parts and post them with the token to `POST /auth/signup`, which creates
+  the account and returns the normal `withSession` payload.
+- **`signupToken`** is a stateless HS256 JWT (`{ pur: 'signup', phone }`,
+  pinned algorithm list, `SIGNUP_TOKEN_TTL_SECONDS` default 900 s, throttled by
+  `AUTH_SIGNUP_LIMIT`). It is not an access token — `JwtStrategy` requires
+  `sub` + `sid` — and an access token cannot be replayed to `/auth/signup`
+  because `pur !== 'signup'`. Reusing a token after the account exists is a
+  409, because `users.phone` is unique and the conflict is checked before the
+  insert. An expired token is a 401 and the clients send the user back to the
+  phone step.
+- **Name parts**: `users.firstName` / `users.lastName` (nullable) were added and
+  `displayName` became a derived column kept in sync by `AuthService.completeSignup`
+  and `UsersService.updateProfile` via `displayNameOf()`
+  (`backend/src/common/names.ts`), so message/group/search/socket code that
+  reads a single display name did not change. First name is required, family
+  name optional (an empty string clears it). Both are validated by
+  `/^[\p{L}][\p{L}\p{M}\u200c'’ .-]{1,49}$/u` — any script, Persian ZWNJ,
+  spaces, apostrophes, hyphens.
+- **Initials avatars**: `avatar: null` now means "draw the initials", and the
+  stock `/images/user.png` fallback (and the file itself) is gone. Web
+  `src/components/ui/Avatar.jsx` renders 1–2 letters (first letter of the first
+  and last word, astral-safe) on one of eight deterministic gradients keyed by a
+  name hash; `mobile/src/components/Avatar.js` mirrors the same initials and
+  picks the matching flat tint because RN has no CSS gradient.
+- **Clients**: the web wizard (`LoginPage.jsx`) has a step tracker
+  («مرحله X از Y · نام مرحله»), auto-focus per step, a live identity preview on
+  the last step (initials avatar + `@username`), and `Avatar` replaced the raw
+  `<img>` in the video-call placeholder. The profile modal edits نام /
+  نام خانوادگی separately and shows the «اختیاری» badge. `mobile/src/screens/LoginScreen.js`
+  was rewritten to the same four steps with the password mode, the password
+  inputs, and the mode switch deleted; `AuthContext` exposes
+  `verifyOtp`/`completeSignup` (no `login`) and persists `firstName`/`lastName`.
+- **Migration**: `prisma db push` added the two columns. Existing rows were
+  backfilled locally (`firstName` = first word of `displayName`, `lastName` =
+  the rest, and the stock `/images/user.png` avatar nulled). The local database
+  now has name parts on 10 of its 14 users and no stock-avatar row left.
+  The same statement for production, run on the VPS:
+
+  ```sql
+  UPDATE "users" SET
+    "firstName" = split_part("displayName", ' ', 1),
+    "lastName"  = NULLIF(trim(substring("displayName" from position(' ' in "displayName") + 1)), ''),
+    "avatar"    = NULL
+  WHERE "firstName" IS NULL AND "displayName" IS NOT NULL;
+  UPDATE "users" SET "avatar" = NULL WHERE "avatar" = '/images/user.png';
+  ```
+
+  Accounts whose `username` is a phone number still sign in (the OTP lookup
+  matches `{ phone }` or `{ phone: null, username: phone }` and backfills
+  `phone`). Accounts with a username that is **not** a phone number and no
+  `phone` column value can no longer sign in at all — there is no password
+  endpoint any more. On the local database that was 10 of the pre-existing
+  accounts; none of them had ever logged in with a phone. Any real deployment
+  needs the same audit (`SELECT username FROM users WHERE phone IS NULL`) and,
+  if needed, a one-time claim flow before the schema is pushed.
+
+Verification for this batch:
+
+- `backend`: `npm run build` passed and `npm run test:e2e` is now **16/16**,
+  with the suite rebuilt around the new flow: a verified new number finishes
+  sign-up in its own steps, an expired sign-up token is refused, OTP expiry and
+  attempt lockout still work, a legacy username-as-phone account still signs in,
+  per-phone OTP throttling is limit-driven, and the removed password endpoints
+  now answer 404.
+- `web`: `npm run lint` clean (0 warnings) and `npm run build` succeeded (Vite,
+  79 modules). `mobile`: `npx expo export --platform android` bundled
+  successfully with the rewritten login screen.
+- Live browser walk-through of the wizard with a brand-new number: 201 from
+  `POST /auth/signup`, session + `firstName`/`lastName`/`avatar: null` in
+  storage, the initials avatar «عر» rendered in the sign-up preview and in the
+  profile modal, then a profile edit that cleared the family name and live
+  collapsed the preview to «ع» before saving. `displayName` came back as «علی»
+  (verified in the database, not just on screen).
+- Narrow-width checks were DOM measurements inside hidden same-origin iframes
+  (375 and 320, light and dark): horizontal overflow 0, tracker label fits.
+  **No screenshots** — the in-app browser had no visible surface for this run
+  (`NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`), and the mobile app was not run on a
+  device or emulator.
+- QA rows created for these checks (`qa_wizard_1` / `09198765432`, its session,
+  and the empty direct conversation it lazily opened with `dave`) are deleted
+  after the run; pre-existing accounts were untouched.
 
 
 ## Validation actually run

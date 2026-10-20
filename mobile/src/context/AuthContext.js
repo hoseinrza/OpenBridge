@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { storage } from '../services/storage';
 import {
-  login as apiLogin, logout as apiLogout, requestOtp as apiRequestOtp,
-  verifyOtp as apiVerifyOtp, resolveUrl, setUnauthorizedHandler,
+  logout as apiLogout, requestOtp as apiRequestOtp,
+  verifyOtp as apiVerifyOtp, completeSignup as apiCompleteSignup, resolveUrl, setUnauthorizedHandler,
 } from '../services/api';
 
 const AuthContext = createContext(null);
@@ -23,7 +23,9 @@ export function AuthProvider({ children }) {
   const persistUser = useCallback(async (user) => {
     const normalized = {
       id: user.id, name: user.displayName || user.username, username: user.username,
+      firstName: user.firstName ?? null, lastName: user.lastName ?? null,
       phone: user.phone ?? null,
+      // No avatar means the UI renders the user's initials.
       avatar: resolveUrl(user.avatar), bio: user.bio ?? '', status: 'online',
     };
     await storage.setUser(normalized);
@@ -32,14 +34,17 @@ export function AuthProvider({ children }) {
 
   const requestOtp = useCallback((phone) => apiRequestOtp(phone), []);
 
-  const verifyOtp = useCallback(async (phone, code, username, displayName) => {
-    const user = await apiVerifyOtp(phone, code, username, displayName);
-    await persistUser(user);
+  const verifyOtp = useCallback(async (phone, code) => {
+    const result = await apiVerifyOtp(phone, code);
+    if (result.requiresSignup) return result;
+    await persistUser(result.user);
+    return result;
   }, [persistUser]);
 
-  const login = useCallback(async (username, password) => {
-    const user = await apiLogin(username, password);
+  const completeSignup = useCallback(async (signupToken, profile) => {
+    const user = await apiCompleteSignup(signupToken, profile);
     await persistUser(user);
+    return user;
   }, [persistUser]);
 
   const logout = useCallback(async () => {
@@ -56,7 +61,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ currentUser, loading, requestOtp, verifyOtp, login, logout, updateProfile }}>
+    <AuthContext.Provider value={{ currentUser, loading, requestOtp, verifyOtp, completeSignup, logout, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

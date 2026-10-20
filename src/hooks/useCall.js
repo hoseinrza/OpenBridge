@@ -198,7 +198,7 @@ export function useCall(currentUser) {
 
       socket.on('call:incoming', ({ fromId, callType: kind, caller }) => {
         if (phase !== 'idle') { socket.emit('call:reject', { toId: fromId }); return; }
-        activePeer = caller ?? { id: fromId, name: 'کاربر', avatar: '/images/user.png' };
+        activePeer = caller ?? { id: fromId, name: 'کاربر', avatar: null };
         activeType = kind;
         setError('');
         setPeer(activePeer); setCallType(kind);

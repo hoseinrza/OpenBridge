@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './components/Auth/LoginPage.jsx';
 import ChatPage  from './components/Chat/ChatPage.jsx';
-import { login, logout } from './services/api.js';
+import { logout } from './services/api.js';
 
 function loadUser() {
   try { return JSON.parse(localStorage.getItem('chatapp_user')) || null; }
@@ -14,8 +14,11 @@ function storeUser(user, setCurrentUser) {
     id: user.id,
     name: user.displayName || user.username,
     username: user.username,
+    firstName: user.firstName ?? null,
+    lastName: user.lastName ?? null,
     phone: user.phone ?? null,
-    avatar: user.avatar ?? '/images/user.png',
+    // No avatar means the UI draws the user's initials instead of a stock image.
+    avatar: user.avatar ?? null,
     bio: user.bio ?? '',
     status: 'online',
     createdAt: user.createdAt ?? null,
@@ -26,10 +29,6 @@ function storeUser(user, setCurrentUser) {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(loadUser);
-
-  async function handleLogin(username, password) {
-    storeUser(await login(username, password), setCurrentUser);
-  }
 
   function handleAuthenticated(user) {
     storeUser(user, setCurrentUser);
@@ -48,7 +47,7 @@ export default function App() {
     });
   }
 
-  if (!currentUser) return <LoginPage onLogin={handleLogin} onAuthenticated={handleAuthenticated} />;
+  if (!currentUser) return <LoginPage onAuthenticated={handleAuthenticated} />;
 
   return (
     <BrowserRouter>

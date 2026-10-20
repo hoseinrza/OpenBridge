@@ -45,13 +45,6 @@ export const TRUST_PROXY: number | false = (() => {
   return hops;
 })();
 
-// Auth throttling: per-IP and per-username fixed windows, reset on restart.
-export const AUTH_LOGIN_LIMIT = positiveInt('AUTH_LOGIN_LIMIT', 10);
-export const AUTH_LOGIN_USERNAME_LIMIT = positiveInt('AUTH_LOGIN_USERNAME_LIMIT', 5);
-export const AUTH_LOGIN_WINDOW_SECONDS = positiveInt('AUTH_LOGIN_WINDOW_SECONDS', 900);
-export const AUTH_REGISTER_LIMIT = positiveInt('AUTH_REGISTER_LIMIT', 5);
-export const AUTH_REGISTER_WINDOW_SECONDS = positiveInt('AUTH_REGISTER_WINDOW_SECONDS', 3600);
-
 // Phone OTP auth. There is no SMS provider yet, so outside production the
 // code is returned in the response for local testing and requestOtp refuses
 // to issue codes at all in production. Once a provider is wired up, remove
@@ -59,10 +52,16 @@ export const AUTH_REGISTER_WINDOW_SECONDS = positiveInt('AUTH_REGISTER_WINDOW_SE
 export const OTP_TEST_MODE = !IS_PRODUCTION;
 export const OTP_TTL_SECONDS = positiveInt('OTP_TTL_SECONDS', 300);
 export const OTP_MAX_ATTEMPTS = positiveInt('OTP_MAX_ATTEMPTS', 5);
+
+// Auth throttling: per-IP and per-phone fixed windows, reset on restart.
 export const AUTH_OTP_REQUEST_LIMIT = positiveInt('AUTH_OTP_REQUEST_LIMIT', 5);
 export const AUTH_OTP_REQUEST_PHONE_LIMIT = positiveInt('AUTH_OTP_REQUEST_PHONE_LIMIT', 3);
 export const AUTH_OTP_VERIFY_LIMIT = positiveInt('AUTH_OTP_VERIFY_LIMIT', 10);
+export const AUTH_SIGNUP_LIMIT = positiveInt('AUTH_SIGNUP_LIMIT', 10);
 export const AUTH_OTP_WINDOW_SECONDS = positiveInt('AUTH_OTP_WINDOW_SECONDS', 600);
+
+// A verified phone number gets this much time to finish the sign-up steps.
+export const SIGNUP_TOKEN_TTL_SECONDS = positiveInt('SIGNUP_TOKEN_TTL_SECONDS', 900);
 
 // Refresh tokens are opaque and rotate on every use. Sessions expire after
 // this many days regardless of activity.

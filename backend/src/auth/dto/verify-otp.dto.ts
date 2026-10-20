@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
-  IsOptional, IsString, Matches, MaxLength, MinLength,
+  IsOptional, IsString, Matches, MaxLength,
 } from 'class-validator';
 import { normalizeIranMobile } from '../../common/phone';
 
@@ -16,20 +16,4 @@ export class VerifyOtpDto {
   @IsString()
   @Matches(/^\d{6}$/, { message: 'کد تأیید باید ۶ رقم باشد' })
   code: string;
-
-  // Required only when the phone number does not have an account yet.
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MinLength(2)
-  @MaxLength(50)
-  displayName?: string;
-
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MinLength(2)
-  @MaxLength(30)
-  @Matches(/^[a-zA-Z0-9_]+$/, { message: 'نام کاربری فقط می‌تواند شامل حروف انگلیسی، عدد و _ باشد' })
-  username?: string;
 }

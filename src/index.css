@@ -295,6 +295,18 @@ img { max-width: 100%; }
   color: var(--text-2);
 }
 
+/* Marks a field that may be left empty. */
+.field-optional {
+  margin-inline-start: var(--sp-2);
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 400;
+  vertical-align: 1px;
+}
+
 .field-input {
   width: 100%;
   min-height: 42px;

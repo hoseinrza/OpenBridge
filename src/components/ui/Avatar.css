@@ -35,6 +35,12 @@
   overflow: hidden;
 }
 
+.avatar-initials {
+  color: #FFFFFF;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
 .avatar-group .avatar-fallback {
   background: var(--accent-soft);
   color: var(--accent-text);

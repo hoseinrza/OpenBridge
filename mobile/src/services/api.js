@@ -114,7 +114,7 @@ async function request(method, path, body, retry = true) {
     }
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(data.message ?? `HTTP ${res.status}`), { status: res.status });
   return data;
 }
 
@@ -123,22 +123,19 @@ export function requestOtp(phone) {
   return request('POST', '/auth/otp/request', { phone });
 }
 
-export async function verifyOtp(phone, code, username, displayName) {
-  const data = await request('POST', '/auth/otp/verify', { phone, code, username, displayName });
+// A verified number that has no account yet returns signup credentials instead
+// of a session; the remaining sign-up steps run against POST /auth/signup.
+export async function verifyOtp(phone, code) {
+  const data = await request('POST', '/auth/otp/verify', { phone, code });
+  if (data.requiresSignup) {
+    return { requiresSignup: true, signupToken: data.signupToken, signupExpiresInSeconds: data.signupExpiresInSeconds };
+  }
   await storeSession(data);
-  return data.user;
+  return { user: data.user };
 }
 
-// Legacy username/password login for accounts created before phone sign-in.
-export async function login(username, password) {
-  const data = await request('POST', '/auth/login', { username, password });
-  await storeSession(data);
-  return data.user;
-}
-
-// No longer used by the UI; kept for API compatibility.
-export async function register(username, displayName, password) {
-  const data = await request('POST', '/auth/register', { username, displayName, password });
+export async function completeSignup(signupToken, { username, firstName, lastName }) {
+  const data = await request('POST', '/auth/signup', { signupToken, username, firstName, lastName });
   await storeSession(data);
   return data.user;
 }
