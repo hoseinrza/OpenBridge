@@ -1,0 +1,75 @@
+name: Deploy
+
+# Deploys the commit that CI just proved green. Runs only when the repository
+# variable DEPLOY_ENABLED is "true" and the SSH secrets are set; until then the
+# job is skipped and nothing is attempted against the server.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit SHA to deploy (defaults to the newest commit on main)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# One deploy at a time, and never cancel one that already started on the box.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  vps:
+    name: Redeploy the VPS stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >-
+      vars.DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main'))
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+      SSH_KEY: ${{ secrets.SSH_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      APP_DIR: ${{ vars.APP_DIR || '/opt/openbridge' }}
+      TARGET_SHA: ${{ inputs.sha || github.event.workflow_run.head_sha }}
+    steps:
+      - name: Resolve what to deploy
+        id: plan
+        run: |
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$SSH_KEY" ]; then
+            echo "::error::Set the SSH_HOST, SSH_USER and SSH_KEY secrets before enabling deploys."
+            exit 1
+          fi
+          echo "target=${TARGET_SHA:-latest main}" >> "$GITHUB_OUTPUT"
+          echo "Deploying \`${TARGET_SHA:-the newest commit on main}\` to \`$SSH_USER@$SSH_HOST:$APP_DIR\`." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "$SSH_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$SSH_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+            echo "strict=yes" >> "$GITHUB_ENV"
+          else
+            # Trust-on-first-use: install SSH_KNOWN_HOSTS to pin the key instead.
+            ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
+            echo "strict=accept-new" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run the staged redeploy on the server
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" \
+            -o "StrictHostKeyChecking=$strict" -o BatchMode=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "cd $APP_DIR && bash deploy.sh --redeploy${TARGET_SHA:+ --ref $TARGET_SHA}"
