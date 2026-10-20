@@ -238,7 +238,6 @@ export default function LoginScreen() {
                   onSubmitEditing={() => issueCode(false)}
                   autoFocus
                 />
-                <Text style={styles.hint}>مثلاً ۰۹۱۲۳۴۵۶۷۸۹ یا +۹۸۹۱۲۳۴۵۶۷۸۹</Text>
               </View>
 
               {!!error && (

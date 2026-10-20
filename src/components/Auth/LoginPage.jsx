@@ -270,12 +270,9 @@ export default function LoginPage({ onAuthenticated }) {
                     maxLength={20}
                     disabled={busy}
                     aria-invalid={!!error}
-                    aria-describedby={error ? 'auth-error' : 'auth-phone-hint'}
+                    aria-describedby={error ? 'auth-error' : undefined}
                   />
                 </div>
-                <p className="auth-hint" id="auth-phone-hint">
-                  با هر قالب رایج؛ مثلاً ۰۹۱۲۳۴۵۶۷۸۹ یا +۹۸۹۱۲۳۴۵۶۷۸۹.
-                </p>
               </div>
 
               {error && (
