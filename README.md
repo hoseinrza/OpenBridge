@@ -19,11 +19,13 @@
 - 😀 Message reactions
 - 📎 Private file & image uploads behind signed, expiring URLs (optional ClamAV scan)
 - 🔎 User search by name/username, plus an in-conversation message filter
+- 📇 **Contact matching**: check which of your phone's contacts already have an
+  account — device address book on mobile, Contact Picker or pasted numbers on web
 - 👤 Profiles: a unique username, a first name, an optional last name and a bio
 - 🔤 Initials avatar whenever a user has no photo — the colour is derived from their name
 - 🌗 Light and dark themes, RTL Persian UI, layouts checked down to 320 px
 - 🔄 Revocable login sessions with rotating refresh tokens
-- 📱 Expo React Native app: login, chat list, chat, new group
+- 📱 Expo React Native app: login, chat list, chat, contacts, new group
 
 ### What is deliberately not here
 
@@ -67,12 +69,43 @@ find you.
   `SELECT username, "displayName" FROM users WHERE phone IS NULL;` and either
   backfill the numbers or have those users register through OTP.
 
+## 📇 Contacts
+
+The point of the contacts feature is to answer one question — *which of these
+numbers already has an account?* — without turning the server into a phone book.
+
+- **Endpoint:** `POST /api/users/contacts/match` (session required) accepts
+  `{ "phones": string[] }` in any of the sign-in formats, normalizes them with
+  the same `normalizeIranMobile` used at login, ignores anything that is not an
+  Iranian mobile number, and drops the caller's own number.
+- **Response:** `{ checked, matches: [{ index, user }] }`. Only the *input
+  position* comes back together with the profile that `/users/search` already
+  exposes (`id`, `username`, names, avatar, bio, presence). No phone number is
+  stored by the match, echoed in the response, or written to any table — the
+  client maps index → its own contact. Verified by the e2e case that greps the
+  whole payload for `09\d{9}`.
+- **Mobile** (`expo-contacts`, permission asked only when the button is pressed):
+  reads `fullName`/`givenName`/`familyName`/`phones` through
+  `Contact.getAllDetails`, deduplicates numbers locally, and sends them in
+  chunks of `CONTACT_MATCH_MAX_PHONES`. The screen lists the contacts that have
+  an account (tap → chat) and, on demand, those that do not.
+- **Web**: browsers cannot read the OS address book, so the new-chat modal uses
+  the Contact Picker API where it exists (Chromium on Android — the button is
+  hidden otherwise) and always offers a paste box, one number per line or comma.
+- **Trade-off to know about:** any "does this number exist" endpoint lets a
+  logged-in user test numbers, so the list length is capped at
+  `CONTACT_MATCH_MAX_PHONES` (500) and the route is throttled to
+  `CONTACT_MATCH_LIMIT` (20) requests per `CONTACT_MATCH_WINDOW_SECONDS` (900)
+  per client. That slows abuse; it does not make enumeration impossible. Hashing
+  the numbers first would not help either — the `09xxxxxxxxx` space is small
+  enough to brute force.
+
 ## 🧱 Tech stack
 
 | Layer      | Stack                                                          |
 |------------|----------------------------------------------------------------|
 | Web        | React 19, Vite, React Router, Socket.IO client                 |
-| Mobile     | Expo SDK 57, React Native, React Navigation, SecureStore       |
+| Mobile     | Expo SDK 57, React Native, React Navigation, SecureStore, expo-contacts |
 | Backend    | NestJS 10, Socket.IO, Prisma, JWT + Passport                   |
 | Data       | PostgreSQL 16 (Prisma)                                         |
 | Infra      | Docker Compose, nginx (SPA + API/WebSocket proxy), ClamAV (opt)|
@@ -94,10 +127,15 @@ in production; set `CORS_ORIGINS` to a comma-separated allowlist when the web
 app and API are on different origins. Native apps send no `Origin` header and are
 always allowed.
 
+Contact matching is the one endpoint that receives phone numbers, and it is the
+one place where enumeration is a real concern — see
+[📇 Contacts](#-contacts) for the caps, the throttle and why the response carries
+no numbers. `users.phone` remains excluded from every other user response.
+
 ## 🧪 Tests & checks
 
 ```bash
-cd backend && npm run test:e2e     # 16 tests: OTP signup, sessions, uploads, CORS, socket
+cd backend && npm run test:e2e     # 19 tests: OTP signup, sessions, uploads, CORS, socket, contacts
 npm run lint                       # web ESLint
 npm run build                      # web production build
 cd mobile && npx expo export --platform android
@@ -115,7 +153,7 @@ the stage before it, so the slow jobs never start on code the fast jobs reject:
 | Stage | Job | What it proves |
 |-------|-----|----------------|
 | 1 · static | `web-lint`, `backend-check` | ESLint clean · Prisma schema valid · TypeScript compiles |
-| 2 · tests | `backend-e2e` | The 16 security tests pass against real PostgreSQL |
+| 2 · tests | `backend-e2e` | The 19 security tests pass against real PostgreSQL |
 | 2b | `dependencies` | `npm audit` findings (reports, never blocks) |
 | 3 · artefacts | `web-build`, `mobile-bundle` | The Vite bundle builds · the Expo Hermes bundle builds |
 | 4 · ship path | `deploy-dry-run` | Both Docker images build, `docker compose up` serves the SPA, `/api/health` answers **through nginx**, and Socket.IO handshakes |
@@ -241,6 +279,7 @@ cross-origin calls in production. Remember that production OTP requests return
 
 ## 📚 Docs
 
+- [CHANGELOG.md](CHANGELOG.md) — release history; every shipped change bumps the product version here
 - [docs/SECURITY.md](docs/SECURITY.md) — confidentiality model, controls, threat model
 - [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md) — protocol evaluation and rollout design
 - [docs/engineering/UI_UX_REDESIGN.md](docs/engineering/UI_UX_REDESIGN.md) — design tokens, screens, verified QA

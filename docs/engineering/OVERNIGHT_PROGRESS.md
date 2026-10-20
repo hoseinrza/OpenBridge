@@ -344,6 +344,85 @@ Verification actually run for this batch:
   OK and `npm run test:e2e` **16/16** after the health-route change. `mobile`:
   `npx expo export --platform android` (the exact CI command, `dist-ci`) bundled.
 
+## Contacts: which of my contacts have an account (2026-10-20)
+
+Requested as «میخوام دسترسی از مخاطبین بگیره و چک کنه اونا اکانت دارن یا نه».
+
+**Backend — `POST /api/users/contacts/match`** (`users.controller.ts`,
+`users.service.ts:matchContacts`, `dto/match-contacts.dto.ts`):
+
+- Session-guarded, and the `users` controller now also runs `RateLimitGuard`
+  (JWT first, so a missing token is still 401 rather than 429).
+- Accepts `{ phones: string[] }`, each entry run through the existing
+  `normalizeIranMobile`. Invalid entries are ignored rather than rejecting the
+  request — a real address book is full of landlines.
+- Returns `{ checked, matches: [{ index, user }] }`. `index` is the position in
+  the client's own array, so the response never carries a phone number; the
+  `user` object is exactly the `SAFE` projection `/users/search` already uses,
+  plus presence. The caller's own number is excluded, and duplicates (two
+  contacts sharing a number) collapse to one entry per account.
+- Caps: `CONTACT_MATCH_MAX_PHONES` (500) per request, `CONTACT_MATCH_LIMIT` (20)
+  per `CONTACT_MATCH_WINDOW_SECONDS` (900) per client. Numbers are matched in
+  the query and never written anywhere.
+
+**Mobile** (`expo-contacts` ~57.0.8, `src/services/contacts.js`,
+`screens/ContactsScreen.js`, registered in `App.js`, entry points from
+`ChatListScreen` header and its empty state):
+
+- Permission is asked only when the user presses «دریافت مخاطبین», and a denial
+  shows a distinct state with a retry plus a link to system settings.
+- ⚠️ SDK 57 detail: the top-level `Contacts.getContactsAsync` **throws** at
+  runtime (deprecated legacy shim). The supported bulk read is
+  `Contacts.Contact.getAllDetails([FULL_NAME, GIVEN_NAME, FAMILY_NAME, PHONES])`
+  — verified against the shipped Kotlin (`next/ContactsNextModule.kt`
+  `StaticAsyncFunction("getAllDetails")`) and the JS source of the installed
+  package.
+- Numbers are deduplicated on the device and sent in chunks of 500; the index
+  map converts the reply back into contact rows. Nothing is persisted — no
+  AsyncStorage cache of numbers.
+- `app.json` registers the `expo-contacts` plugin with a Persian
+  `contactsPermission` string for iOS. Note the official plugin also adds
+  `WRITE_CONTACTS` on Android even though the app only reads; trimming it would
+  mean a custom config plugin, so it is documented instead.
+
+**Web** (`src/components/NewChat/ContactsPanel.jsx`, wired into `NewChatModal`
+as a «جستجوی نام / مخاطبین» source toggle so it works for both direct chats and
+group member picking):
+
+- Browsers cannot read the OS address book, so the Contact Picker API
+  (`navigator.contacts.select`) is feature-detected; on desktop Chromium,
+  Firefox and Safari the picker button is simply not rendered.
+- A paste box (one number per line or comma) is always available and is the
+  path that works everywhere. Unmatched numbers are listed back to the user,
+  matched ones open a chat or toggle group membership.
+- Found and fixed during live QA: splitting the pasted text on whitespace
+  shredded readable numbers like `0912 345 6789` into invalid fragments; the
+  split is now on newlines/commas/semicolons only.
+
+**Verification actually run**
+
+- `backend`: `npm run build` OK; `npm run test:e2e` **19/19**, including three
+  new cases — matching across formats with a payload grep proving no
+  `09\d{9}` ever appears in the response, validation (`401` anonymous, `400`
+  for empty/oversized/non-string/missing input), and the per-client `429` with
+  `Retry-After`.
+- Live API probe against the dev server (real OTP session, three dev accounts):
+  `checked: 3` from a 6-number list (self, landline and a duplicate dropped),
+  `+98…` and Persian-digit forms matched, response contained no number.
+- Live web check in the in-app browser via DOM reads (pointer actions and
+  screenshots are unavailable in this surface): the contacts tab renders,
+  pasted numbers produced «۳ شماره بررسی شد؛ ۲ حساب پیدا شد», the unmatched
+  number was listed, and group-mode selection synced chips ⇄ rows both ways.
+- `web`: `npm run lint` clean, `npm run build` OK.
+- `mobile`: `npx expo export --platform android` bundles with `expo-contacts`
+  included. **Not** run on a device or emulator, so the native permission
+  prompt and `getAllDetails` behaviour are unverified at runtime.
+
+**Release housekeeping**
+
+- Added `CHANGELOG.md` and gave the three manifests one shared product version
+  (`1.1.0`); the web manifest had been the Vite placeholder `0.0.0`.
+
 ## Validation actually run
 
 - `backend`: `npm run build` — passed after every batch.
@@ -422,6 +501,19 @@ Verification actually run for this batch:
   store or drop the container; leaving it invites the false belief that presence
   is distributed.
 
+- Contact matching ships but has never executed on hardware: the Expo bundle
+  builds and the endpoint is covered by tests, but the native permission prompt
+  and `Contact.getAllDetails` are unverified at runtime. Nothing was tested in
+  Expo Go or an emulator.
+- `POST /users/contacts/match` is still an enumeration oracle for any logged-in
+  user — the length cap and per-client throttle slow it down, they do not stop
+  it. Re-check this before opening registration to the public.
+- The official `expo-contacts` Android plugin also requests `WRITE_CONTACTS`
+  although the app only reads; removing it needs a custom config plugin.
+- Contacts without an account are listed but there is no invite flow, and on
+  desktop browsers the OS address book is unreachable, so web users get the
+  paste box only.
+
 ## Next priorities
 
 1. Integrate a real SMS provider behind the existing OTP service boundary and
@@ -438,7 +530,7 @@ Verification actually run for this batch:
 6. Add a web security review pass (CSP, token storage trade-off) and cover the
    signed-URL download path with a cross-user authorization test.
 7. Run the mobile app on a native emulator or device (RTL header, safe areas,
-   keyboard avoidance) and add automated visual-regression coverage for the
-   documented viewport matrix.
+   keyboard avoidance, the contacts permission prompt and address-book read) and
+   add automated visual-regression coverage for the documented viewport matrix.
 8. Self-host Font Awesome so the web client can run without a CDN and under a
    strict CSP.
