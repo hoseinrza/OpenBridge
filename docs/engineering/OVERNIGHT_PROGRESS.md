@@ -28,6 +28,52 @@ Session date: 2026-10-19
 | `4b3fa60` | Optional ClamAV malware scanning for uploads over clamd INSTREAM, fail-closed on scanner errors, infected files deleted; documented as opt-in |
 | `d22840a` | Web lint baseline fixed (hooks/state/ref rules) and ESLint scoped to the web app; CI now runs lint before the production build |
 | `0ce88a0` | E2EE design proposal: Signal Protocol vs MLS evaluation, recommendation and decision gate, key management, multi-device, migration, threat model, open questions. No crypto implemented |
+| `fd25292` | Web UI redesign: local Vazirmatn, design tokens, light/dark themes, RTL, rebuilt login/sidebar/chat/composer/modals, accessible controls, message ack and history retry |
+| `04c5719` | Mobile redesign: aligned tokens and dark theme, rebuilt login/list/chat, group creation parity, safe areas, brand assets, navigation theming; unused video-call placeholder removed |
+
+## UI/UX redesign (2026-10-20)
+
+Full detail, token tables, and limitations: `docs/engineering/UI_UX_REDESIGN.md`.
+
+- Web now declares `lang="fa" dir="rtl"` and uses a token system in
+  `src/index.css` for a warm light theme and an AA-checked dark theme. Theme is
+  applied before first paint and persisted in `openbridge_theme`.
+- Sidebar, chat header, message list, composer, emoji picker, login, profile,
+  new-chat, and confirmation modals were rebuilt around those tokens. Icon-only
+  controls have accessible names; tabs implement keyboard navigation; focus is
+  visible; errors are announced.
+- Web chat send now waits for the server ack and shows upload/send errors;
+  history loading failures show a retry action instead of an empty transcript.
+- Mobile mirrors the palette in `mobile/src/theme.js`, follows system light/dark,
+  and rebuilds login, chat list, and chat with safe-area handling, RTL bubbles,
+  history retry, typing/read states, and a 44 px target baseline. A new-group
+  screen searches users and creates real groups through the existing API.
+- Brand icon, splash, favicon, and Android adaptive layers were replaced with
+  the bridge glyph; the splash and navigation colors match both themes.
+
+Verification for this sprint:
+
+- Web QA at 320×720, 375×812, 430×932, 768×1024, 1024×768, 1440×900, and
+  1920×1080 in light and dark: horizontal overflow 0, console errors 0,
+  unlabeled buttons 0, missing image alts 0, contrast audit empty. Live socket
+  send, search, theme toggle, logout confirmation, and login tab keyboard
+  navigation were exercised.
+- Mobile UI was rendered with react-native-web in headless Chrome at 390×844
+  (login, list, chat, new group; light and dark): overflow 0, console errors 0,
+  0 unlabeled buttons, no labeled chat control below 44 px. Real messages and
+  session restoration worked. `expo export --platform android` succeeded.
+- `web`: lint clean; production build 78 modules. `backend`: 11/11 e2e tests.
+- QA users, group, messages, sessions, and scratch scripts/screenshots were
+  deleted after the run. No seed/demo data was added.
+
+Known gaps for this sprint:
+
+- Mobile was not run on a native emulator/device; react-native-web is close but
+  not identical (native header RTL placement and safe areas remain unverified).
+- No visual-regression suite is committed; viewport audits were manual.
+- Font Awesome still loads from a CDN (blocks a strict CSP/offline PWA).
+- E2EE is still not implemented and video calls remain absent.
+
 
 ## Validation actually run
 
@@ -62,6 +108,9 @@ Session date: 2026-10-19
     conversation, send a message, and see it rendered in the chat
 - `web`: `npm run lint` — clean (0 errors, 0 warnings); `npm run build` —
   passed (Vite, 74 modules).
+- UI/UX sprint re-run: `web` lint clean and production build 78 modules;
+  `backend` `npm run test:e2e` 11/11; mobile `expo export --platform android`
+  bundled successfully. Details and caveats in `UI_UX_REDESIGN.md`.
 - Test users, sessions, conversations, and messages created for verification
   were deleted afterwards; existing user-created accounts and groups were left
   untouched.
@@ -84,9 +133,11 @@ Session date: 2026-10-19
   content (future E2EE) cannot be scanned server-side.
 - No message edit/delete, account deletion, or device-based E2EE key management.
 - Database rows and attachment files are unencrypted at rest.
-- Video calling UI remains hidden; signaling code is present but unused.
-- Mobile receives auth/session improvements and 401 refresh, but has no session
-  list UI and still cannot create or display groups.
+- Video calling UI remains hidden on web and was removed from mobile navigation;
+  signaling code is present but unused.
+- Mobile now lists, reads, sends in, and creates groups, but group
+  administration (add/remove members, rename, group avatar) is not exposed in
+  either client.
 
 ## Next priorities
 
@@ -101,3 +152,8 @@ Session date: 2026-10-19
    E2EE design before any cryptographic implementation.
 5. Add a web security review pass (CSP, token storage trade-off) and cover the
    signed-URL download path with a cross-user authorization test.
+6. Run the mobile app on a native emulator or device (RTL header, safe areas,
+   keyboard avoidance) and add automated visual-regression coverage for the
+   documented viewport matrix.
+7. Self-host Font Awesome so the web client can run without a CDN and under a
+   strict CSP.

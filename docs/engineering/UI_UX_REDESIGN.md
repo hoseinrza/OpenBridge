@@ -1,0 +1,204 @@
+# OpenBridge — UI/UX Redesign
+
+Session: 2026-10-19 → 2026-10-20
+
+This document records the design system and the redesign of the web and mobile
+clients. It covers what was changed, the accessibility and RTL rules that were
+applied, and exactly what was verified. It is not a marketing description:
+limitations are listed at the end.
+
+## Goals and constraints
+
+- Keep every existing behavior: authentication, refresh, sockets, acks,
+  conversations, groups, uploads, reactions, typing, receipts, search.
+- No mock/demo data and no static arrays presented as server data.
+- One visual language across web and mobile: brand red `#C5161D`, warm yellow
+  `#FFC928`, warm neutral surfaces, Vazirmatn, Persian RTL.
+- A real dark theme with AA contrast, not an inverted filter.
+- Accessible names and roles for interactive controls; visible keyboard focus;
+  reduced-motion support; 44 px touch targets on mobile.
+- No glassmorphism stacks, decorative gradients, glows, heavy animation, or
+  icon-only controls without a label.
+
+## Design tokens
+
+Web tokens live in `src/index.css` as CSS custom properties on `:root` and
+`html[data-theme='dark']`. Mobile mirrors them in `mobile/src/theme.js`; the
+token names are intentionally aligned so both clients stay one product.
+
+| Token | Light | Dark |
+|-------|-------|------|
+| `accent` | `#C5161D` | `#C5161D` |
+| `accent-text` | `#A91118` | `#FF8A85` |
+| `on-accent` | `#FFFFFF` | `#FFFFFF` |
+| `bg` | `#F6F3EE` | `#121110` |
+| `surface` | `#FFFFFF` | `#1B1917` |
+| `surface-2` | `#F1EDE6` | `#24211D` |
+| `surface-3` | `#E8E2D9` | `#2F2A25` |
+| `chat-bg` | `#FAF8F4` | `#141210` |
+| `bubble-in` | `#FFFFFF` | `#24211D` |
+| `bubble-out` | `#C5161D` | `#B3161C` |
+| `text-1` | `#211E1A` | `#F2EEE6` |
+| `text-2` | `#5D574E` | `#B9B1A5` |
+| `text-3` | `#6E675C` | `#938B7E` |
+| `border` | `rgba(33,30,26,.10)` | `rgba(255,255,255,.08)` |
+| `focus` | `#C5161D` | `#FF8A85` |
+
+Also shared: a 4→48 px spacing scale (`--sp-1…--sp-9`), radii
+(`--r-xs…--r-pill`), a 11→28 px type scale, and motion durations with a single
+easing curve. Mobile uses the same spacing, radius, and type values.
+
+Accent handling: the filled accent stays the brand red in both themes so white
+labels remain AA. On dark surfaces, red text/icons use `accent-text`
+(`#FF8A85`), not the fill color. Yellow is an accent for highlights and
+attention, never a background behind white text.
+
+## Typography and RTL
+
+- Vazirmatn 400/500/600/700 is served locally from `public/fonts/` with
+  `@font-face` and `font-display: swap`; the regular and semibold weights are
+  preloaded. Mobile bundles the same family from `mobile/assets/fonts/`.
+- `index.html` declares `lang="fa" dir="rtl"`; layout uses logical CSS
+  properties where direction matters, so RTL is structural rather than
+  mirrored text inside an LTR layout.
+- Persian copy and Persian digits are used consistently. Numeric values such as
+  unread counts are formatted with `toLocaleString('fa-IR')`.
+- Font Awesome remains loaded from the existing CDN. All icons are
+  `aria-hidden` and paired with visible text or an `aria-label`.
+
+## Web changes
+
+- **App shell**: `#root` fills `100dvh`; sidebar and chat use a flex split with
+  a single scrolling region per surface. Breakpoints at 900 px and 768 px
+  collapse the sidebar behind an explicit back button.
+- **Theme**: a tiny inline script applies the saved theme before first paint
+  (`openbridge_theme`, falling back to `prefers-color-scheme`) to avoid a flash.
+  `useTheme` persists changes, updates `html[data-theme]`, and updates
+  `theme-color`. The toggle is available on the login screen and in the sidebar
+  with a visible label.
+- **Sidebar**: search field with clear button and result count, conversation
+  rows with avatar/name/last-message/time/unread badge, empty and error states,
+  profile and logout actions, dark-mode-aware skeleton loading.
+- **Chat header**: peer or group identity, member count for groups, message
+  search toggle with labeled controls, and a back action on narrow viewports.
+  The video-call control remains hidden because no video infrastructure exists.
+- **Messages**: day separators, grouped sender runs, sender names in groups,
+  image and file bubbles, reactions with labels, read receipts, search
+  highlighting, history error state with retry, jump-to-latest button.
+- **Composer**: multiline auto-growing input, Enter-to-send with Shift+Enter
+  for a newline, attachment button with an accessible label, emoji picker
+  anchored above the trigger, send disabled state, upload and send errors shown
+  as dismissible `role="alert"` notes instead of failing silently.
+- **Login**: split brand panel and form panel, segmented login/register tabs
+  with proper `tablist` keyboard handling (arrow keys, Home/End), labelled
+  fields, password visibility switch, inline errors with `role="alert"`,
+  loading state with a spinner and disabled controls.
+- **Modals and new chat**: shared focus-trapping modal with labelled headings;
+  new-chat/group creation exposes search, multi-select, validation, and errors.
+- **Shared UI**: `Avatar`, `Modal`, and `ThemeToggle` live in
+  `src/components/ui/`; time formatting lives in `src/utils/time.js`.
+
+## Mobile changes
+
+- **Theme**: `mobile/src/theme.js` mirrors the web palette, including a
+  dedicated `accentText` for text/icons on dark surfaces and fixed
+  `onBubbleOut` for white text on red bubbles. Navigation and status bar follow
+  the active theme.
+- **Login**: brand icon and wordmark, tagline, login/register tabs with
+  `tablist`/`tab` roles and selected state, labelled inputs, password visibility
+  switch, inline alert, safe-area scrolling, and Persian validation.
+- **Chat list**: safe-area-aware shell, search with clear action, rows with
+  avatars and group badges, unread counts, pull-to-refresh, retry banner,
+  distinct empty/search-empty states, and a footer with the signed-in user and
+  logout.
+- **Chat**: group and direct conversations, RTL bubbles (incoming right,
+  outgoing left), sender identity in groups, day separators and 5-minute sender
+  grouping, reversed `FlatList` with correct footer/empty inversion, history
+  loading/error/retry, offline banner, typing indicator, read receipts, image
+  and file messages, and a safe-area composer with send disabled until the
+  socket is connected.
+- **New group**: name field, debounced user search (350 ms), multi-select chips,
+  validation (name ≥ 2 characters, at least one member), accessible disabled
+  state, and creation that replaces the screen with the new group chat.
+- **Navigation**: Login, ChatList, Chat, NewGroup; stack header follows the
+  theme. The unused `VideoCallScreen` placeholder was deleted because there is
+  no video infrastructure and the control is intentionally absent.
+- **Brand assets**: icon, splash, favicon, and Android adaptive foreground /
+  monochrome layers were regenerated from the OpenBridge bridge glyph; the
+  splash and background colors match the light and dark palettes.
+
+## Accessibility
+
+- Every icon-only control has an `aria-label`/`accessibilityLabel`; decorative
+  icons are hidden from assistive tech.
+- Tabs implement `tablist`, `tab`, `aria-selected`/`accessibilityState`, and
+  keyboard navigation; the login panel is a labelled `tabpanel`.
+- Focus uses a visible `:focus-visible` ring (2 px, theme-aware). Focus order
+  follows the RTL visual order.
+- Errors use `role="alert"`/`accessibilityRole="alert"`; connection and typing
+  status use status roles where appropriate.
+- Contrast: the web QA audit parses rendered colors and checks text/icon pairs
+  against WCAG AA; it returned no failures in light or dark. Disabled labels use
+  `text-2`/`text-3` on `surface-3`, which was confirmed legible in rendered
+  screenshots.
+- Motion respects `prefers-reduced-motion: reduce` on web; mobile avoids
+  decorative animation.
+- Touch targets on mobile are at least 44 px high, or reach 44 px effective
+  area with hit slop for icon-only controls (for example the 28 px chip remove
+  button with 8 px slop on each side). The chat-screen audit found no labeled
+  control below 44×44 px.
+
+## Verification actually performed
+
+Web (Vite on `:5173`, API on `:3000`, local PostgreSQL), light and dark:
+
+- Viewports: 320×720, 375×812, 430×932, 768×1024, 1024×768, 1440×900,
+  1920×1080. In every run: horizontal overflow 0, console errors 0, unlabeled
+  buttons 0, images without alt 0, contrast audit empty.
+- Screens reviewed: login at 1440 and 375, chat at 768 and 375, group chat at
+  375, conversation list at 1440, dark chat at 1440 and 375, emoji popover
+  anchoring.
+- Keyboard: login tabs respond to arrow keys and Home/End; focus moves to the
+  register tab and back.
+- Live behavior: sending a real message over the socket incremented the
+  conversation and rendered the message; theme toggle and logout confirmation
+  worked; sidebar and header message search returned results.
+
+Mobile (Expo app rendered through react-native-web in headless Chrome at
+390×844; light and dark):
+
+- Screens reviewed: login, chat list, chat, and new group, in both themes.
+  Overflow 0 on every screen, no unlabeled buttons, no labeled targets below
+  44 px, console errors none.
+- The composer showed the connected placeholder and the socket-backed chat
+  rendered real messages; session restoration across reloads worked.
+- `npx expo export --platform android` completed and produced an Android Hermes
+  bundle, confirming the app bundles with the new assets and screens.
+
+Web checks: `npm run lint` clean; `npm run build` succeeded (Vite 8, 78 modules,
+~330 KB JS / ~44 KB CSS before gzip). Backend: `npm run test:e2e` 11/11 passing
+against real PostgreSQL.
+
+## Limitations and honest caveats
+
+- Mobile was **not** run on a native Android/iOS emulator or physical device.
+  Visual QA used react-native-web, which can differ from native layout, safe
+  areas, and RTL back-button placement; the native-stack web header back button
+  appears on the left as a web artifact. Android bundling was verified, native
+  rendering was not.
+- react-native-web support was used only for QA; no web-specific mobile code
+  remains (SecureStore is used for tokens as before).
+- There is no automated visual-regression suite in the repository. The viewport
+  and screen audits were run manually with scratch scripts, which were removed
+  after the session.
+- Font Awesome still comes from a CDN. Self-hosting icons is a prerequisite for
+  a strict CSP/offline-first PWA.
+- Web tokens remain in `localStorage` (existing trade-off, XSS-exposed); mobile
+  tokens use SecureStore.
+- E2EE is not implemented; the server stores plaintext messages. See
+  `docs/engineering/E2EE_DESIGN.md`.
+- Video calls are intentionally absent: no signaling/media infrastructure is
+  wired in either client.
+- Mobile group participation parity was added (list, read, send, create). Group
+  administration (add/remove members, rename, avatar) is still web-only/absent
+  at the API level.
