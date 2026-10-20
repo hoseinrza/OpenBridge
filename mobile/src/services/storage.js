@@ -3,8 +3,9 @@ import * as SecureStore from 'expo-secure-store';
 
 // Same key names as the web app (localStorage) for conceptual parity —
 // these are two separate storage backends, not shared state.
-const USER_KEY  = 'chatapp_user';
-const TOKEN_KEY = 'chatapp_token';
+const USER_KEY    = 'chatapp_user';
+const TOKEN_KEY   = 'chatapp_token';
+const REFRESH_KEY = 'chatapp_refresh';
 
 export const storage = {
   async getUser() {
@@ -27,5 +28,14 @@ export const storage = {
   },
   async removeToken() {
     await SecureStore.deleteItemAsync(TOKEN_KEY);
+  },
+  async getRefreshToken() {
+    return (await SecureStore.getItemAsync(REFRESH_KEY)) ?? '';
+  },
+  async setRefreshToken(token) {
+    await SecureStore.setItemAsync(REFRESH_KEY, token);
+  },
+  async removeRefreshToken() {
+    await SecureStore.deleteItemAsync(REFRESH_KEY);
   },
 };

@@ -15,13 +15,28 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub?: string }) {
+  async validate(payload: { sub?: string; sid?: string }) {
     if (!payload?.sub || typeof payload.sub !== 'string') throw new UnauthorizedException();
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: { id: true, username: true, displayName: true, avatar: true, bio: true, status: true, createdAt: true },
+    if (!payload.sid || typeof payload.sid !== 'string') throw new UnauthorizedException();
+
+    // A valid signature is not enough: the session must still be active, so
+    // logout and "revoke session" invalidate access tokens immediately.
+    const session = await this.prisma.session.findFirst({
+      where: {
+        id:        payload.sid,
+        userId:    payload.sub,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        id:   true,
+        user: {
+          select: { id: true, username: true, displayName: true, avatar: true, bio: true, status: true, createdAt: true },
+        },
+      },
     });
-    if (!user) throw new UnauthorizedException();
-    return { ...user, avatar: signedFileUrl(user.avatar) };
+    if (!session) throw new UnauthorizedException();
+
+    return { ...session.user, avatar: signedFileUrl(session.user.avatar), sessionId: session.id };
   }
 }

@@ -52,6 +52,10 @@ export const AUTH_LOGIN_WINDOW_SECONDS = positiveInt('AUTH_LOGIN_WINDOW_SECONDS'
 export const AUTH_REGISTER_LIMIT = positiveInt('AUTH_REGISTER_LIMIT', 5);
 export const AUTH_REGISTER_WINDOW_SECONDS = positiveInt('AUTH_REGISTER_WINDOW_SECONDS', 3600);
 
+// Refresh tokens are opaque and rotate on every use. Sessions expire after
+// this many days regardless of activity.
+export const REFRESH_TOKEN_TTL_DAYS = positiveInt('REFRESH_TOKEN_TTL_DAYS', 30);
+
 // Comma-separated list of browser origins allowed to call the HTTP API and
 // the Socket.IO endpoint. Native apps and same-origin requests send no Origin
 // header and are always allowed. When unset in development we allow only

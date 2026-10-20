@@ -15,7 +15,10 @@ export class UsersController {
   }
 
   @Get('me')
-  me(@Request() req) { return req.user; }
+  me(@Request() req) {
+    const { sessionId, ...user } = req.user;
+    return user;
+  }
 
   @Patch('me')
   updateMe(@Request() req, @Body() dto: UpdateProfileDto) {

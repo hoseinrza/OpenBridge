@@ -27,7 +27,9 @@ export function SocketProvider({ children }) {
       if (cancelled || !token) return;
 
       sock = io(SOCKET_URL, {
-        auth:    { token },
+        // Re-read SecureStore on every (re)connect so rotated access tokens
+        // are used instead of the one captured at mount.
+        auth:    (cb) => { storage.getToken().then(current => cb({ token: current })); },
         timeout: 10000,
         // Fall back to HTTP polling if the network/proxy blocks WebSocket.
       });

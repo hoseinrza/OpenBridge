@@ -41,8 +41,28 @@ model User {
   reactions      Reaction[]
   participations ConversationParticipant[]
   reads          MessageRead[]
+  sessions       Session[]
 
   @@map("users")
+}
+
+// One row per login. Access JWTs carry the session id, so revoking a row
+// invalidates its access token immediately (the strategy checks it on every
+// request). The refresh token is stored only as a SHA-256 hash.
+model Session {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshHash String    @unique
+  userAgent   String?
+  ip          String?
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime  @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime?
+
+  @@index([userId])
+  @@map("sessions")
 }
 
 // A conversation is either a 1-to-1 direct chat (isGroup = false, always

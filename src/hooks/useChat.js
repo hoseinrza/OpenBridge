@@ -81,7 +81,9 @@ export function useChat(targetUser, currentUser, onIncoming) {
     if (!token || !currentUser) return undefined;
 
     const socket = io(SOCKET_URL, {
-      auth:    { token },
+      // Read the current token on every (re)connect so a refreshed access
+      // token is picked up instead of the one captured at mount.
+      auth:    (cb) => cb({ token: localStorage.getItem('chatapp_token') ?? '' }),
       timeout: 10000,
       // Let Socket.IO fall back to HTTP polling when WebSocket is blocked
       // (some mobile networks / outer proxies do that).

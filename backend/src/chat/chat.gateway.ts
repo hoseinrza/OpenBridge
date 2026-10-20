@@ -37,13 +37,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private prisma: PrismaService,
   ) {}
 
-  private parseUser(socket: Socket): { sub: string } | null {
+  private parseUser(socket: Socket): { sub: string; sid: string } | null {
     try {
       const token = socket.handshake.auth?.token;
       if (typeof token !== 'string' || !token) return null;
-      const payload = this.jwt.verify(token, { secret: JWT_SECRET, algorithms: ['HS256'] }) as { sub?: unknown };
+      const payload = this.jwt.verify(token, { secret: JWT_SECRET, algorithms: ['HS256'] }) as {
+        sub?: unknown;
+        sid?: unknown;
+      };
       if (typeof payload?.sub !== 'string' || !payload.sub) return null;
-      return { sub: payload.sub };
+      if (typeof payload.sid !== 'string' || !payload.sid) return null;
+      return { sub: payload.sub, sid: payload.sid };
     } catch { return null; }
   }
 
@@ -56,12 +60,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
-      const user = await this.prisma.user.findUnique({
-        where:  { id: payload.sub },
+      const session = await this.prisma.session.findFirst({
+        where: {
+          id:        payload.sid,
+          userId:    payload.sub,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
         select: { id: true },
       });
-      if (!user) {
-        console.log(`[socket] rejected (unknown user) socket=${socket.id}`);
+      if (!session) {
+        console.log(`[socket] rejected (unknown user or revoked session) socket=${socket.id}`);
         socket.disconnect();
         return;
       }
@@ -72,6 +81,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     socket.data.userId = payload.sub;
+    socket.data.sessionId = payload.sid;
     socket.join(payload.sub);
     console.log(`[socket] connected user=${payload.sub} socket=${socket.id}`);
 

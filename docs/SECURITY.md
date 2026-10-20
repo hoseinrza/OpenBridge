@@ -41,8 +41,15 @@ name, avatar, bio, status, and creation date to any authenticated user.
   (defaults: 10 logins/15 min per IP, 5 per username, 5 registrations/hour per
   IP). `TRUST_PROXY` must be set when behind a reverse proxy so the real client
   IP is used.
-- Logout is client-side token deletion. There is no server-side session or
-  refresh-token revocation yet (see limitations).
+- Every login creates a server-side `Session` row. Access JWTs carry its id
+  and are rejected as soon as the row is revoked, so logout invalidates the
+  token immediately instead of waiting for JWT expiry.
+- Refresh tokens are 48 random bytes, stored only as SHA-256 hashes, rotate on
+  every use, and expire after `REFRESH_TOKEN_TTL_DAYS` (default 30). Clients
+  refresh transparently on a 401.
+- `GET /api/auth/sessions` lists active sessions; `DELETE
+  /api/auth/sessions/:id` revokes one (own sessions only); `POST
+  /api/auth/logout` revokes the current one.
 
 ## Authorization
 
@@ -99,14 +106,17 @@ name, avatar, bio, status, and creation date to any authenticated user.
 | Passive network observer          | Cannot read traffic if TLS is enabled. |
 | Malicious authenticated client    | Cannot read/join conversations they are not part of; cannot forge senders or roles; cannot upload active content; cannot react to foreign messages. |
 | Compromised server / DB           | Can read all message content and attachments. E2EE does not exist. |
-| Stolen unlocked device            | Has the active session until the JWT expires; server-side revocation is not implemented. |
+| Stolen unlocked device            | Has the active session until it is revoked or expires; the owner can list and revoke sessions from another signed-in device. |
 | XSS or malicious same-origin JS   | Can read plaintext and the token from localStorage and act as the user. This is a fundamental limitation of web E2EE as well. |
 | Removed group member             | Loses access to future messages and API events; previously issued signed attachment URLs remain valid until they expire. |
 
 ## Known limitations
 
 - No E2EE; the server can read message content.
-- No refresh tokens, session listing, or server-side revocation.
+- Refresh-token reuse detection is not implemented: a replayed old refresh
+  token is rejected but does not automatically revoke its session. Web stores
+  both tokens in `localStorage`, so XSS can exfiltrate them; mobile keeps them
+  in SecureStore.
 - HTTP auth throttling is in-memory and per-process (10 logins/15 min per IP,
   5 per username, 5 registrations/hour per IP by default), so multi-instance
   deployments would need a shared store such as Redis.

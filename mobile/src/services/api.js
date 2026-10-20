@@ -48,16 +48,54 @@ async function authHeaders() {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 }
 
-async function request(method, path, body) {
+async function storeSession(data) {
+  const accessToken = data.token ?? data.accessToken;
+  if (accessToken) await storage.setToken(accessToken);
+  if (data.refreshToken) await storage.setRefreshToken(data.refreshToken);
+}
+
+async function clearSession() {
+  await storage.removeToken();
+  await storage.removeRefreshToken();
+  await storage.removeUser();
+}
+
+let refreshPromise = null;
+
+// Concurrent 401s must share one rotation; otherwise the second request
+// presents a refresh token that was already replaced.
+function refreshSession() {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    const current = await storage.getRefreshToken();
+    if (!current) throw new Error('no refresh token');
+    const res = await fetch(`${BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: current }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message ?? 'نشست منقضی شده');
+    await storeSession(data);
+    return data;
+  })().finally(() => { refreshPromise = null; });
+  return refreshPromise;
+}
+
+async function request(method, path, body, retry = true) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: await authHeaders(),
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401 && !path.startsWith('/auth/')) {
-    await storage.removeToken();
-    await storage.removeUser();
-    unauthorizedHandler?.();
+  if (res.status === 401 && retry && !path.startsWith('/auth/')) {
+    try {
+      await refreshSession();
+      return request(method, path, body, false);
+    } catch {
+      await clearSession();
+      unauthorizedHandler?.();
+    }
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`);
@@ -66,20 +104,27 @@ async function request(method, path, body) {
 
 // ── Auth ─────────────────────────────────────────────
 export async function register(username, displayName, password) {
-  const { user, token } = await request('POST', '/auth/register', { username, displayName, password });
-  await storage.setToken(token);
-  return user;
+  const data = await request('POST', '/auth/register', { username, displayName, password });
+  await storeSession(data);
+  return data.user;
 }
 
 export async function login(username, password) {
-  const { user, token } = await request('POST', '/auth/login', { username, password });
-  await storage.setToken(token);
-  return user;
+  const data = await request('POST', '/auth/login', { username, password });
+  await storeSession(data);
+  return data.user;
 }
 
 export async function logout() {
-  await storage.removeToken();
-  await storage.removeUser();
+  // Revoke server-side with the current access token, then clear locally even
+  // if the network call fails.
+  const token = await storage.getToken();
+  await clearSession();
+  if (!token) return;
+  await fetch(`${BASE}/auth/logout`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => {});
 }
 
 // ── Users ─────────────────────────────────────────────
@@ -115,16 +160,21 @@ export async function uploadFile(file) {
   // file: { uri, name, type } — the shape expo-image-picker/document-picker return.
   const form = new FormData();
   form.append('file', file);
-  const token = await storage.getToken();
-  const res = await fetch(`${BASE}/uploads`, {
+  const send = async () => fetch(`${BASE}/uploads`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${await storage.getToken()}` },
     body: form,
   });
+
+  let res = await send();
   if (res.status === 401) {
-    await storage.removeToken();
-    await storage.removeUser();
-    unauthorizedHandler?.();
+    try {
+      await refreshSession();
+      res = await send();
+    } catch {
+      await clearSession();
+      unauthorizedHandler?.();
+    }
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message ?? 'آپلود ناموفق');

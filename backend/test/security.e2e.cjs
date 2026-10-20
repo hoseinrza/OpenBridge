@@ -39,11 +39,12 @@ let origin;
 let group;
 let messageId;
 
-async function api(path, { method = 'GET', token, body } = {}) {
+async function api(path, { method = 'GET', token, body, headers = {} } = {}) {
   const response = await fetch(`${origin}${API_PREFIX}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
+      ...headers,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -62,6 +63,8 @@ async function register(label) {
     },
   });
   assert.equal(result.status, 201, `register ${label}`);
+  assert.equal(typeof result.data.token, 'string', 'access token');
+  assert.equal(typeof result.data.refreshToken, 'string', 'refresh token');
   createdUserIds.push(result.data.user.id);
   return result.data;
 }
@@ -121,6 +124,8 @@ async function upload(token, buffer, type, filename) {
 
 before(async () => {
   app = await NestFactory.create(AppModule, { logger: false });
+  // Tests send X-Forwarded-For in the throttling case, so trust one proxy hop.
+  app.set('trust proxy', 1);
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.enableCors({
@@ -222,6 +227,13 @@ test('rejects unauthenticated and forged HTTP requests', async () => {
   const token = forged.sign({ sub: global.__ctx.alice.user.id }, { expiresIn: '1h' });
   const response = await api('/users/me', { token });
   assert.equal(response.status, 401);
+
+  // Correctly signed tokens still need an active server-side session.
+  const genuine = new JwtService({ secret: process.env.JWT_SECRET });
+  const noSession = genuine.sign({ sub: global.__ctx.alice.user.id, sid: '00000000-0000-4000-8000-000000000000' });
+  assert.equal((await api('/users/me', { token: noSession })).status, 401, 'unknown session id');
+  const noSid = genuine.sign({ sub: global.__ctx.alice.user.id });
+  assert.equal((await api('/users/me', { token: noSid })).status, 401, 'missing session id');
 });
 
 test('validates group and pagination inputs', async () => {
@@ -359,11 +371,83 @@ test('CORS rejects unknown origins and allows configured dev origins', async () 
   assert.equal(local.headers.get('access-control-allow-origin'), 'http://localhost:5173');
 });
 
+test('refresh tokens rotate and session revocation is immediate', async () => {
+  const { alice, bob } = global.__ctx;
+  const username = `obt_${suffix}_alice`;
+
+  const refreshed = await api('/auth/refresh', {
+    method: 'POST',
+    body: { refreshToken: alice.refreshToken },
+  });
+  assert.equal(refreshed.status, 200, 'refresh succeeds');
+  assert.notEqual(refreshed.data.refreshToken, alice.refreshToken, 'refresh token rotated');
+  assert.equal((await api('/users/me', { token: refreshed.data.token })).status, 200, 'new access token works');
+
+  const reused = await api('/auth/refresh', {
+    method: 'POST',
+    body: { refreshToken: alice.refreshToken },
+  });
+  assert.equal(reused.status, 401, 'rotated token cannot be reused');
+
+  const loginB = await api('/auth/login', {
+    method: 'POST',
+    body: { username, password: 'TestPass123!' },
+  });
+  const loginC = await api('/auth/login', {
+    method: 'POST',
+    body: { username, password: 'TestPass123!' },
+  });
+  assert.equal(loginB.status, 200);
+  assert.equal(loginC.status, 200);
+
+  const listed = await api('/auth/sessions', { token: alice.token });
+  assert.equal(listed.status, 200);
+  assert.equal(listed.data.filter(session => session.current).length, 1, 'exactly one current session');
+  assert.ok(listed.data.length >= 3, 'all active sessions listed');
+
+  const crossUser = await api('/auth/sessions', { token: bob.token });
+  const bobCurrent = crossUser.data.find(session => session.current);
+  const crossRevoke = await api(`/auth/sessions/${bobCurrent.id}`, {
+    method: 'DELETE',
+    token: alice.token,
+  });
+  assert.equal(crossRevoke.status, 404, 'cannot revoke another user\'s session');
+
+  assert.equal((await api('/auth/logout', { method: 'POST', token: loginB.data.token })).status, 200);
+  assert.equal((await api('/users/me', { token: loginB.data.token })).status, 401, 'logged-out access token');
+  assert.equal((await api('/auth/refresh', {
+    method: 'POST',
+    body: { refreshToken: loginB.data.refreshToken },
+  })).status, 401, 'logged-out refresh token');
+
+  const revokedSocket = await connectSocket(loginB.data.token);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(revokedSocket.socket.connected, false, 'revoked session cannot open a socket');
+  revokedSocket.socket.disconnect();
+
+  const sessionsC = await api('/auth/sessions', { token: loginC.data.token });
+  const currentC = sessionsC.data.find(session => session.current);
+  assert.ok(currentC, 'current session id');
+  assert.equal((await api(`/auth/sessions/${currentC.id}`, {
+    method: 'DELETE',
+    token: alice.token,
+  })).status, 200);
+  assert.equal((await api('/users/me', { token: loginC.data.token })).status, 401, 'revoked access token');
+  assert.equal((await api('/auth/refresh', {
+    method: 'POST',
+    body: { refreshToken: loginC.data.refreshToken },
+  })).status, 401, 'revoked refresh token');
+});
+
 test('login is throttled per IP and username', async () => {
-  const victim = `obt_${suffix}_alice`;
+  // A fresh username and client IP keep this test independent of earlier logins.
+  const victim = `obt_${suffix}_throttle`;
+  // A dedicated client IP keeps this test independent of earlier logins.
+  const headers = { 'X-Forwarded-For': '198.51.100.23' };
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const result = await api('/auth/login', {
       method: 'POST',
+      headers,
       body: { username: victim, password: 'WrongPass123!' },
     });
     assert.equal(result.status, 401, `attempt ${attempt} still reaches password check`);
@@ -371,6 +455,7 @@ test('login is throttled per IP and username', async () => {
 
   const blocked = await api('/auth/login', {
     method: 'POST',
+    headers,
     body: { username: victim, password: 'WrongPass123!' },
   });
   assert.equal(blocked.status, 429, 'fourth attempt is rate limited');

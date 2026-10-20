@@ -97,7 +97,7 @@ export class RateLimitGuard implements CanActivate {
   }
 }
 
-function clientIp(request: Request): string {
+export function clientIp(request: Request): string {
   const ip = request.ip || request.socket?.remoteAddress || 'unknown';
   return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
 }

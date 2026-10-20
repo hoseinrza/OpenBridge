@@ -189,7 +189,10 @@ export function useCall(currentUser) {
 
     import('socket.io-client').then(({ io }) => {
       if (cancelled) return;
-      socket = io(SOCKET_URL, { auth: { token }, timeout: 10000 });
+      socket = io(SOCKET_URL, {
+        auth: (cb) => cb({ token: localStorage.getItem('chatapp_token') ?? token }),
+        timeout: 10000,
+      });
 
       socket.on('call:incoming', ({ fromId, callType: kind, caller }) => {
         if (phase !== 'idle') { socket.emit('call:reject', { toId: fromId }); return; }

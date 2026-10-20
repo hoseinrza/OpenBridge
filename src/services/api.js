@@ -61,25 +61,66 @@ export function normalizeGroup(group) {
 }
 
 function token() { return localStorage.getItem('chatapp_token') ?? ''; }
+function refreshToken() { return localStorage.getItem('chatapp_refresh') ?? ''; }
 
 function auth() {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` };
 }
 
+function storeSession(data) {
+  const accessToken = data.token ?? data.accessToken;
+  if (accessToken) localStorage.setItem('chatapp_token', accessToken);
+  if (data.refreshToken) localStorage.setItem('chatapp_refresh', data.refreshToken);
+}
+
+function clearSession() {
+  localStorage.removeItem('chatapp_token');
+  localStorage.removeItem('chatapp_refresh');
+  localStorage.removeItem('chatapp_user');
+}
+
 function handleUnauthorized(path) {
   if (path.startsWith('/auth/')) return;
-  localStorage.removeItem('chatapp_token');
-  localStorage.removeItem('chatapp_user');
+  clearSession();
   window.location.reload();
 }
 
-async function request(method, path, body) {
+let refreshPromise = null;
+
+// Single-flight refresh: concurrent 401s share one rotation, otherwise the
+// second request would present a token that was already rotated.
+function refreshSession() {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    const current = refreshToken();
+    if (!current) throw new Error('no refresh token');
+    const res = await fetch(`${BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: current }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message ?? 'نشست منقضی شده');
+    storeSession(data);
+    return data;
+  })().finally(() => { refreshPromise = null; });
+  return refreshPromise;
+}
+
+async function request(method, path, body, retry = true) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: auth(),
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401) handleUnauthorized(path);
+  if (res.status === 401 && retry && !path.startsWith('/auth/')) {
+    try {
+      await refreshSession();
+      return request(method, path, body, false);
+    } catch {
+      handleUnauthorized(path);
+    }
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`);
   return data;
@@ -87,20 +128,23 @@ async function request(method, path, body) {
 
 // ── Auth ─────────────────────────────────────────────
 export async function register(username, displayName, password) {
-  const { user, token: t } = await request('POST', '/auth/register', { username, displayName, password });
-  localStorage.setItem('chatapp_token', t);
-  return user;
+  const data = await request('POST', '/auth/register', { username, displayName, password });
+  storeSession(data);
+  return data.user;
 }
 
 export async function login(username, password) {
-  const { user, token: t } = await request('POST', '/auth/login', { username, password });
-  localStorage.setItem('chatapp_token', t);
-  return user;
+  const data = await request('POST', '/auth/login', { username, password });
+  storeSession(data);
+  return data.user;
 }
 
 export function logout() {
-  localStorage.removeItem('chatapp_token');
-  localStorage.removeItem('chatapp_user');
+  // Capture the bearer before clearing storage, then revoke the session
+  // server-side. The local session is cleared even if the request fails.
+  const headers = auth();
+  clearSession();
+  fetch(`${BASE}/auth/logout`, { method: 'POST', headers }).catch(() => {});
 }
 
 // ── Users ─────────────────────────────────────────────
@@ -148,12 +192,21 @@ export function fetchGroupMessages(conversationId, skip = 0) {
 export async function uploadFile(file) {
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${BASE}/uploads`, {
+  const send = () => fetch(`${BASE}/uploads`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token()}` },
     body: form,
   });
-  if (res.status === 401) handleUnauthorized('/uploads');
+
+  let res = await send();
+  if (res.status === 401) {
+    try {
+      await refreshSession();
+      res = await send();
+    } catch {
+      handleUnauthorized('/uploads');
+    }
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message ?? 'آپلود ناموفق');
   return data; // { url, name, size, type }
