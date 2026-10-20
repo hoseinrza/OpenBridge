@@ -27,18 +27,29 @@ export default function ChatListScreen({ navigation }) {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <Pressable
-          onPress={() => navigation.navigate('NewGroup')}
-          hitSlop={10}
-          style={styles.headerBtn}
-          accessibilityRole="button"
-          accessibilityLabel="ساخت گروه جدید"
-        >
-          <FontAwesome6 name="users" size={17} color={colors.text1} />
-          <View style={styles.headerPlus}>
-            <FontAwesome6 name="plus" size={8} color={colors.onAccent} />
-          </View>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => navigation.navigate('Contacts')}
+            hitSlop={10}
+            style={styles.headerBtn}
+            accessibilityRole="button"
+            accessibilityLabel="مخاطبین"
+          >
+            <FontAwesome6 name="address-book" size={17} color={colors.text1} />
+          </Pressable>
+          <Pressable
+            onPress={() => navigation.navigate('NewGroup')}
+            hitSlop={10}
+            style={styles.headerBtn}
+            accessibilityRole="button"
+            accessibilityLabel="ساخت گروه جدید"
+          >
+            <FontAwesome6 name="users" size={17} color={colors.text1} />
+            <View style={styles.headerPlus}>
+              <FontAwesome6 name="plus" size={8} color={colors.onAccent} />
+            </View>
+          </Pressable>
+        </View>
       ),
     });
   }, [navigation, colors, styles]);
@@ -188,21 +199,31 @@ export default function ChatListScreen({ navigation }) {
           <Text style={styles.stateText}>
             {query
               ? 'عبارت دیگری را جستجو کن.'
-              : 'گفتگوها پس از رد و بدل شدن پیام اینجا نمایش داده می‌شوند. با دکمهٔ بالای صفحه یک گروه بساز.'}
+              : 'گفتگوها پس از رد و بدل شدن پیام اینجا نمایش داده می‌شوند. مخاطبینت را بررسی کن یا یک گروه بساز.'}
           </Text>
           {query ? (
             <Pressable style={styles.stateBtn} onPress={() => setQuery('')} accessibilityRole="button">
               <Text style={styles.stateBtnText}>پاک‌کردن جستجو</Text>
             </Pressable>
           ) : (
-            <Pressable
-              style={styles.stateBtn}
-              onPress={() => navigation.navigate('NewGroup')}
-              accessibilityRole="button"
-            >
-              <FontAwesome6 name="users" size={13} color={colors.onAccent} />
-              <Text style={styles.stateBtnText}>ساخت گروه جدید</Text>
-            </Pressable>
+            <>
+              <Pressable
+                style={styles.stateBtn}
+                onPress={() => navigation.navigate('Contacts')}
+                accessibilityRole="button"
+              >
+                <FontAwesome6 name="address-book" size={13} color={colors.onAccent} />
+                <Text style={styles.stateBtnText}>بررسی مخاطبین</Text>
+              </Pressable>
+              <Pressable
+                style={styles.stateBtnGhost}
+                onPress={() => navigation.navigate('NewGroup')}
+                accessibilityRole="button"
+              >
+                <FontAwesome6 name="users" size={13} color={colors.accentText} />
+                <Text style={styles.stateBtnGhostText}>ساخت گروه جدید</Text>
+              </Pressable>
+            </>
           )}
         </View>
       ) : (
@@ -349,6 +370,18 @@ function makeStyles(colors) {
       backgroundColor: colors.accent,
     },
     stateBtnText: { color: colors.onAccent, fontFamily: fonts.semibold, fontSize: type.base },
+    stateBtnGhost: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: spacing.sm,
+      minHeight: 44,
+      paddingHorizontal: spacing.lg,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      backgroundColor: colors.surface,
+    },
+    stateBtnGhostText: { color: colors.accentText, fontFamily: fonts.semibold, fontSize: type.base },
 
     errorBanner: {
       flexDirection: 'row-reverse',
@@ -394,6 +427,10 @@ function makeStyles(colors) {
     headerBtn: {
       width: 40, height: 40,
       alignItems: 'center', justifyContent: 'center',
+    },
+    headerActions: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
       marginHorizontal: spacing.xs,
     },
     headerPlus: {

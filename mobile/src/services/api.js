@@ -165,6 +165,12 @@ export function searchUsers(query) {
   return request('GET', `/users/search?q=${encodeURIComponent(query)}`);
 }
 
+// Contact sync. The numbers are ones the device already holds; the reply only
+// maps input positions to accounts, so no phone number ever comes back.
+export function matchContacts(phones) {
+  return request('POST', '/users/contacts/match', { phones });
+}
+
 export function updateProfile(data) {
   return request('PATCH', '/users/me', data);
 }

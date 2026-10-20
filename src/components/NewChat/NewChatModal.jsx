@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { searchUsers, createGroup, normalizeUser } from '../../services/api.js';
 import Avatar from '../ui/Avatar.jsx';
 import Modal from '../ui/Modal.jsx';
+import ContactsPanel from './ContactsPanel.jsx';
 import './NewChatModal.css';
 
 export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
   const [mode,     setMode]     = useState('direct');
+  const [source,   setSource]   = useState('search');
   const [query,    setQuery]    = useState('');
   const [results,  setResults]  = useState([]);
   const [loading,  setLoading]  = useState(false);
@@ -19,7 +21,7 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
 
   useEffect(() => {
     inputRef.current?.focus();
-  }, [mode]);
+  }, [mode, source]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -158,6 +160,37 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
           </div>
         )}
 
+        <div className="newchat-sources" role="group" aria-label="نحوهٔ پیدا کردن فرد">
+          <button
+            type="button"
+            aria-pressed={source === 'search'}
+            className={source === 'search' ? 'active' : ''}
+            onClick={() => setSource('search')}
+          >
+            <i className="fas fa-magnifying-glass" aria-hidden="true" />
+            جستجوی نام
+          </button>
+          <button
+            type="button"
+            aria-pressed={source === 'contacts'}
+            className={source === 'contacts' ? 'active' : ''}
+            onClick={() => setSource('contacts')}
+          >
+            <i className="fas fa-address-book" aria-hidden="true" />
+            مخاطبین
+          </button>
+        </div>
+
+        {source === 'contacts' && (
+          <ContactsPanel
+            mode={mode}
+            selected={selected}
+            onToggle={toggleMember}
+            onSelect={onSelect}
+          />
+        )}
+
+        {source === 'search' && (
         <div className="newchat-search">
           <i className="fas fa-magnifying-glass" aria-hidden="true" />
           <input
@@ -170,7 +203,9 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
             autoComplete="off"
           />
         </div>
+        )}
 
+        {source === 'search' && (
         <div className="newchat-results">
           {loading && (
             <div className="newchat-state" role="status">
@@ -227,6 +262,7 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
             );
           })}
         </div>
+        )}
       </div>
 
       {mode === 'group' && (

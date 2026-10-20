@@ -13,6 +13,7 @@ import LoginScreen from './src/screens/LoginScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import NewGroupScreen from './src/screens/NewGroupScreen';
+import ContactsScreen from './src/screens/ContactsScreen';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -53,6 +54,7 @@ function RootNavigator() {
             options={({ route }) => ({ title: route.params?.peer?.name ?? 'گفتگو' })}
           />
           <Stack.Screen name="NewGroup" component={NewGroupScreen} options={{ title: 'گروه جدید' }} />
+          <Stack.Screen name="Contacts" component={ContactsScreen} options={{ title: 'مخاطبین' }} />
         </>
       )}
     </Stack.Navigator>
