@@ -14,7 +14,8 @@
 - 🧭 Step-by-step sign-up: number → code → username → name (family name optional)
 - 💬 Real-time 1:1 messaging over Socket.IO, with delivery acks and paged history
 - 👥 Group chats with owner/member roles and membership management — on web **and** mobile
-- 🟢 Presence, ⌨️ typing indicators and read receipts (Redis-backed socket registry)
+- 🟢 Presence, ⌨️ typing indicators and read receipts (presence is tracked in
+  process, so a single API instance is assumed)
 - 😀 Message reactions
 - 📎 Private file & image uploads behind signed, expiring URLs (optional ClamAV scan)
 - 🔎 User search by name/username, plus an in-conversation message filter
@@ -73,8 +74,13 @@ find you.
 | Web        | React 19, Vite, React Router, Socket.IO client                 |
 | Mobile     | Expo SDK 57, React Native, React Navigation, SecureStore       |
 | Backend    | NestJS 10, Socket.IO, Prisma, JWT + Passport                   |
-| Data       | PostgreSQL 16 (Prisma), Redis 7 (presence)                     |
+| Data       | PostgreSQL 16 (Prisma)                                         |
 | Infra      | Docker Compose, nginx (SPA + API/WebSocket proxy), ClamAV (opt)|
+
+> `backend/src/redis/redis.service.ts` is an in-process presence map despite its
+> name: no code reads `REDIS_URL` and no Redis client is installed, so the
+> `redis` container in `docker-compose.yml` is currently dead weight and presence
+> does not survive a second API instance.
 
 ## 🔒 Security
 
@@ -100,6 +106,45 @@ cd mobile && npx expo export --platform android
 The e2e suite boots the Nest app against the configured PostgreSQL database,
 creates temporary users and conversations, and cleans them up afterwards. Note
 that mobile has no automated test suite — screen QA is manual.
+
+## 🔁 CI & CD
+
+[`ci.yml`](.github/workflows/ci.yml) runs in ordered stages, each one gated on
+the stage before it, so the slow jobs never start on code the fast jobs reject:
+
+| Stage | Job | What it proves |
+|-------|-----|----------------|
+| 1 · static | `web-lint`, `backend-check` | ESLint clean · Prisma schema valid · TypeScript compiles |
+| 2 · tests | `backend-e2e` | The 16 security tests pass against real PostgreSQL |
+| 2b | `dependencies` | `npm audit` findings (reports, never blocks) |
+| 3 · artefacts | `web-build`, `mobile-bundle` | The Vite bundle builds · the Expo Hermes bundle builds |
+| 4 · ship path | `deploy-dry-run` | Both Docker images build, `docker compose up` serves the SPA, `/api/health` answers **through nginx**, and Socket.IO handshakes |
+| — | `ci-gate` | One required check for branch protection |
+
+Make `CI gate` the required status check rather than listing every job, so the
+job list can change without breaking protection.
+
+[`deploy.yml`](.github/workflows/deploy.yml) then deploys **the exact commit CI
+just proved green**, over SSH, by running `deploy.sh --redeploy` on the server.
+It stays inert until you opt in:
+
+1. Set the repository variable `DEPLOY_ENABLED = true`.
+2. Set the secrets `SSH_HOST`, `SSH_USER`, `SSH_KEY` (and optionally `SSH_PORT`,
+   `SSH_KNOWN_HOSTS`, plus the `APP_DIR` variable, default `/opt/openbridge`).
+3. Without them the job is skipped, and the server keeps redeploying from its
+   own 5-minute cron entry.
+
+On the server, every redeploy runs the same seven stages: fetch → refuse the
+commit if CI is not green → check out the tested SHA → `pg_dump` into
+`backups/` (last 5 kept) → build images while the old containers keep serving →
+swap → wait for `/api/health` through nginx. If health never arrives, it checks
+out the previous commit, rebuilds, and records the bad SHA in
+`.deploy-failed-sha` so the cron cannot crash-loop on it. Tune the wait with
+`HEALTH_DEADLINE` on very slow boxes.
+
+> The CI/CD pipelines themselves have not run on GitHub Actions yet — the
+> redeploy logic was verified against stubbed `docker`/`curl` in a throwaway
+> clone. Expect to tune the first few real runs.
 
 ## 🚀 Local development
 
@@ -161,9 +206,10 @@ curl -fsSL https://raw.githubusercontent.com/hoseinrza/OpenBridge/main/deploy.sh
 [`deploy.sh`](deploy.sh) installs Docker if needed, creates 2 GB of swap, clones
 the repo to `/opt/openbridge`, generates `.env` with random database password and
 JWT secret (first run only), builds and starts the stack, then installs a cron
-job that pulls and rebuilds every 5 minutes when a new commit lands.
-[`DEPLOY.md`](DEPLOY.md) (Persian) covers status, logs, manual updates,
-restarts, domain/HTTPS and common problems such as a busy `WEB_PORT`.
+entry that runs `bash deploy.sh --redeploy` every 5 minutes — the same staged
+path the Deploy workflow uses (CI gate, backup, build, swap, health check,
+rollback). [`DEPLOY.md`](DEPLOY.md) (Persian) covers status, logs, manual
+updates, restarts, domain/HTTPS and common problems such as a busy `WEB_PORT`.
 
 ### Alternative: Vercel + Render
 
@@ -185,8 +231,10 @@ cross-origin calls in production. Remember that production OTP requests return
 │   ├── prisma/
 │   └── test/           # security e2e suite
 ├── docs/               # SECURITY.md + engineering notes
+├── .github/workflows/  # ci.yml (staged) + deploy.yml (CI-gated SSH deploy)
 ├── docker-compose.yml  # Postgres + Redis + API + nginx
-├── deploy.sh           # one-command VPS deploy
+├── .dockerignore       # keeps the web image context small
+├── deploy.sh           # VPS bootstrap + staged --redeploy
 ├── render.yaml         # Render blueprint (alternative)
 └── vercel.json         # Vercel config (alternative)
 ```

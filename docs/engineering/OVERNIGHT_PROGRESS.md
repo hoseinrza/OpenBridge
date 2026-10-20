@@ -275,6 +275,75 @@ Verification for this batch:
   after the run; pre-existing accounts were untouched.
 
 
+## CI/CD review and staged pipeline (2026-10-20)
+
+Reviewed the whole delivery path (`ci.yml`, `deploy.sh`, `docker-compose.yml`,
+both Dockerfiles, `nginx.conf`) and rebuilt it as explicit stages. Findings that
+drove the changes:
+
+- **No root `.dockerignore`.** The web image does `COPY . .`, so every
+  `node_modules` tree, `.git`, `backend/`, `mobile/` and the local logs were sent
+  as build context on a 1 vCPU / 1 GB box. Added one that keeps only what
+  `vite build` needs.
+- **CI did not test the thing that ships.** It linted and built from source, but
+  the deploy is `docker compose up -d --build`; a broken Dockerfile or a bad
+  nginx→API route only surfaced on the VPS. Added a stage that builds both
+  images and brings the compose stack up, then asserts the SPA serves,
+  `/api/health` answers **through nginx**, and the Socket.IO handshake returns a
+  `sid`.
+- **No health path existed.** `GET /api` (the root health route) never reaches
+  Nest through nginx, because nginx only proxies `location ^~ /api/` — the SPA
+  fallback answers it with `index.html`. The route is now `GET /api/health`
+  (`backend/src/app.controller.ts`), which is what the new `api` container
+  healthcheck polls and what the redeploy waits on. Nothing else called the old
+  root route.
+- **CD had no gate, no backup, no verification and no rollback.** The installed
+  cron pulled whatever landed on `main` and rebuilt it. `deploy.sh --redeploy`
+  now runs seven stages: fetch → refuse unless CI reports green for that SHA
+  (best-effort through the public workflow-runs API; `--skip-ci-check` to force)
+  → checkout the tested SHA → `pg_dump` into `backups/` (5 kept) → build images
+  while the old containers keep serving → swap → wait for health. On failure it
+  restores the previous SHA, rebuilds, and records the bad SHA in
+  `.deploy-failed-sha` so the cron cannot crash-loop on it. `HEALTH_DEADLINE`
+  and `BACKUP_KEEP` are overridable.
+- **`.env.example` and the compose file advertise Redis that nothing uses.**
+  `backend/src/redis/redis.service.ts` is an in-process `Map`; no code reads
+  `REDIS_URL` and no Redis client is a dependency. Presence therefore does not
+  survive a second API instance, and the `redis` container is dead weight. Left
+  in place (removing a running service is not a docs fix) but documented in
+  README, and CI notes that it needs no Redis.
+- **One required check instead of six.** Added a `ci-gate` job that depends on
+  every stage and fails unless all are `success`, so branch protection can pin a
+  single name. Also added `concurrency` cancel-in-progress, per-job
+  `timeout-minutes`, npm caching for all three lockfiles, artefact uploads, and
+  a non-blocking `npm audit` job.
+- **`deploy.yml` (CD) deploys the commit CI proved**, via `workflow_run` on CI
+  success plus manual dispatch, over SSH, running
+  `deploy.sh --redeploy --ref <sha>` on the server. It is inert until
+  `DEPLOY_ENABLED=true` and `SSH_HOST`/`SSH_USER`/`SSH_KEY` exist; without them
+  the job skips rather than failing. Serialized with a `deploy-production`
+  concurrency group that never cancels mid-deploy.
+
+Verification actually run for this batch:
+
+- `bash -n deploy.sh`, `deploy.sh --help`, and an unknown-flag run.
+- The redeploy path exercised end-to-end against **stubbed `docker` and `curl`**
+  in a throwaway `git clone` (`/tmp`, deleted afterwards): green CI deploys all
+  seven stages and writes a backup; `conclusion:"failure"` and
+  `total_count:0` both refuse to move HEAD; an unreachable API proceeds with a
+  warning; a commit that never becomes healthy rolls back to the previous SHA,
+  writes `.deploy-failed-sha` and exits 1; the next cron-style run skips that
+  SHA; a failing image build restores the previous SHA without swapping
+  containers; re-running on the already-deployed SHA reports "nothing to do".
+  `BACKUP_KEEP=2` rotation was observed with real files.
+- All three YAML files parsed with `js-yaml` (job and service keys checked).
+  `docker compose config` and the image builds **could not** run locally: no
+  Docker on this machine. The workflows have not executed on GitHub Actions
+  either, so stage 4 and the SSH deploy are unproven until their first real run.
+- `web`: `npm run lint` clean, `npm run build` OK. `backend`: `npm run build`
+  OK and `npm run test:e2e` **16/16** after the health-route change. `mobile`:
+  `npx expo export --platform android` (the exact CI command, `dist-ci`) bundled.
+
 ## Validation actually run
 
 - `backend`: `npm run build` — passed after every batch.
@@ -342,6 +411,16 @@ Verification for this batch:
   the API response (test mode); in production the request endpoint returns 503
   until a provider (e.g. Kavenegar/SMS.ir) is integrated. OTP throttling is
   in-memory like the rest of the auth limits.
+- The staged CI/CD pipeline has not executed on GitHub Actions yet: the redeploy
+  logic was tested against stubbed `docker`/`curl`, but stage 4 (image builds +
+  compose smoke test) and the SSH deploy job are unproven until their first real
+  run. `deploy.yml` also stays inert until `DEPLOY_ENABLED` and the `SSH_*`
+  secrets are configured, so the VPS currently relies on its own cron.
+- The `redis` service is declared in `docker-compose.yml` and `REDIS_URL` is in
+  both `.env.example` files, but no code reads it and no Redis client is a
+  dependency (`RedisService` is an in-process Map). Either wire a real shared
+  store or drop the container; leaving it invites the false belief that presence
+  is distributed.
 
 ## Next priorities
 
