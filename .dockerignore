@@ -1,0 +1,39 @@
+# The root Dockerfile builds the web image from this context. Without these
+# exclusions the whole repo — every node_modules tree, .git, backend/, mobile/
+# and the logs — is uploaded as build context, which is slow and OOM-prone on
+# the 1 vCPU / 1 GB VPS and shadows what `npm ci` installs inside the image.
+node_modules
+**/node_modules
+.git
+.gitignore
+.github
+
+# Other deployables have their own contexts and images.
+backend
+mobile
+docs
+
+# Build output and runtime state never belong in an image.
+dist
+dist-ci
+uploads
+backups
+coverage
+*.log
+
+# Secrets and local config must not reach the image; VITE_API_URL is passed
+# in as a build ARG.
+.env
+.env.*
+!.env.example
+
+# Not used by `vite build`.
+capacitor.config.json
+docker-compose.yml
+render.yaml
+vercel.json
+android-studio.bat
+README.md
+DEPLOY.md
+LICENSE
+.DS_Store

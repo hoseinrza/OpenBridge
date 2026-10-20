@@ -55,6 +55,14 @@ services:
       PORT: 3000
     volumes:
       - uploads:/app/uploads
+    # The CMD runs `prisma db push` before booting, so the first check has to
+    # wait for a schema sync on a 1 vCPU box.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 120s
 
   web:
     build:
@@ -68,6 +76,12 @@ services:
       - api
     ports:
       - "${WEB_PORT:-80}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
 
 volumes:
   pgdata:
