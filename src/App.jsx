@@ -10,7 +10,16 @@ function loadUser() {
 }
 
 function storeUser(user, setCurrentUser) {
-  const normalized = { id: user.id, name: user.displayName || user.username, username: user.username, avatar: user.avatar ?? '/images/user.png', bio: user.bio ?? '', status: 'online' };
+  const normalized = {
+    id: user.id,
+    name: user.displayName || user.username,
+    username: user.username,
+    phone: user.phone ?? null,
+    avatar: user.avatar ?? '/images/user.png',
+    bio: user.bio ?? '',
+    status: 'online',
+    createdAt: user.createdAt ?? null,
+  };
   localStorage.setItem('chatapp_user', JSON.stringify(normalized));
   setCurrentUser(normalized);
 }

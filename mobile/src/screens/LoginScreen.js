@@ -32,6 +32,7 @@ export default function LoginScreen() {
   const [step,        setStep]        = useState('phone');  // 'phone' | 'code'
   const [phone,       setPhone]       = useState('');
   const [code,        setCode]        = useState('');
+  const [newUsername, setNewUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [isNewUser,   setIsNewUser]   = useState(false);
   const [testCode,    setTestCode]    = useState('');
@@ -46,6 +47,7 @@ export default function LoginScreen() {
   const busy = busyAction !== null;
 
   const codeRef     = useRef(null);
+  const nameRef     = useRef(null);
   const passwordRef = useRef(null);
 
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -63,6 +65,7 @@ export default function LoginScreen() {
     setStep('phone');
     setCode('');
     setTestCode('');
+    setNewUsername('');
     setDisplayName('');
     setIsNewUser(false);
     setResendIn(0);
@@ -98,15 +101,27 @@ export default function LoginScreen() {
   async function submitCode() {
     if (busy) return;
     if (code.length !== 6) { setError('کد تأیید باید ۶ رقم باشد'); return; }
-    if (isNewUser && displayName.trim().length < 2) {
-      setError('نام نمایشی باید حداقل ۲ کاراکتر باشد');
-      return;
+    if (isNewUser) {
+      const u = newUsername.trim();
+      if (u.length < 2 || !/^[a-zA-Z0-9_]+$/.test(u)) {
+        setError('نام کاربری باید فقط شامل حروف انگلیسی، عدد و _ باشد (حداقل ۲ کاراکتر)');
+        return;
+      }
+      if (displayName.trim().length < 2) {
+        setError('نام نمایشی باید حداقل ۲ کاراکتر باشد');
+        return;
+      }
     }
 
     setBusyAction('verify');
     setError('');
     try {
-      await verifyOtp(phone, code, isNewUser ? displayName.trim() : undefined);
+      await verifyOtp(
+        phone,
+        code,
+        isNewUser ? newUsername.trim() : undefined,
+        isNewUser ? displayName.trim() : undefined,
+      );
     } catch (err) {
       setError(err.message ?? 'خطا در اتصال به سرور');
     } finally {
@@ -119,6 +134,7 @@ export default function LoginScreen() {
     setStep('phone');
     setCode('');
     setTestCode('');
+    setNewUsername('');
     setDisplayName('');
     setIsNewUser(false);
     setResendIn(0);
@@ -151,7 +167,7 @@ export default function LoginScreen() {
   const footNote = mode === 'password'
     ? 'اگر شماره موبایلات را به حساب وصل کرده‌ای، از ورود با کد تأیید استفاده کن.'
     : step === 'phone'
-      ? 'با تأیید شماره، اگر حسابی نداشته باشی یک حساب تازه ساخته می‌شود.'
+      ? 'با تأیید شماره، اگر حسابی نداشته باشی در مرحله بعد نام کاربری و نام نمایشی انتخاب می‌کنی.'
       : 'اگر شماره را اشتباه وارد کردی، گزینه «تغییر شماره» را بزن.';
 
   return (
@@ -349,23 +365,47 @@ export default function LoginScreen() {
               </View>
 
               {isNewUser && (
-                <View style={styles.field}>
-                  <Text style={styles.label}>نام نمایشی</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={displayName}
-                    onChangeText={(value) => { setDisplayName(value); setError(''); }}
-                    placeholder="مثلاً علی رضایی"
-                    placeholderTextColor={colors.text3}
-                    autoComplete="name"
-                    maxLength={50}
-                    editable={!busy}
-                    accessibilityLabel="نام نمایشی"
-                    returnKeyType="next"
-                    onSubmitEditing={() => codeRef.current?.focus()}
-                  />
-                  <Text style={styles.hint}>این نام برای بقیه کاربران نمایش داده می‌شود.</Text>
-                </View>
+                <>
+                  <View style={styles.field}>
+                    <Text style={styles.label}>نام کاربری</Text>
+                    <TextInput
+                      style={[styles.input, styles.inputLtr]}
+                      value={newUsername}
+                      onChangeText={(value) => { setNewUsername(value); setError(''); }}
+                      placeholder="username"
+                      placeholderTextColor={colors.text3}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      autoComplete="username"
+                      maxLength={30}
+                      editable={!busy}
+                      accessibilityLabel="نام کاربری"
+                      returnKeyType="next"
+                      onSubmitEditing={() => nameRef.current?.focus()}
+                      autoFocus
+                    />
+                    <Text style={styles.hint}>هر نام کاربری یکتاست؛ فقط حروف انگلیسی، عدد و _</Text>
+                  </View>
+
+                  <View style={styles.field}>
+                    <Text style={styles.label}>نام نمایشی</Text>
+                    <TextInput
+                      ref={nameRef}
+                      style={styles.input}
+                      value={displayName}
+                      onChangeText={(value) => { setDisplayName(value); setError(''); }}
+                      placeholder="مثلاً علی رضایی"
+                      placeholderTextColor={colors.text3}
+                      autoComplete="name"
+                      maxLength={50}
+                      editable={!busy}
+                      accessibilityLabel="نام نمایشی"
+                      returnKeyType="next"
+                      onSubmitEditing={() => codeRef.current?.focus()}
+                    />
+                    <Text style={styles.hint}>این نام برای بقیه کاربران نمایش داده می‌شود.</Text>
+                  </View>
+                </>
               )}
 
               <View style={styles.field}>
@@ -385,7 +425,7 @@ export default function LoginScreen() {
                   accessibilityLabel="کد تأیید ۶ رقمی"
                   returnKeyType="done"
                   onSubmitEditing={submitCode}
-                  autoFocus
+                  autoFocus={!isNewUser}
                 />
               </View>
 

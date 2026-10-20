@@ -24,4 +24,12 @@ export class VerifyOtpDto {
   @MinLength(2)
   @MaxLength(50)
   displayName?: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MinLength(2)
+  @MaxLength(30)
+  @Matches(/^[a-zA-Z0-9_]+$/, { message: 'نام کاربری فقط می‌تواند شامل حروف انگلیسی، عدد و _ باشد' })
+  username?: string;
 }

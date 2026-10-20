@@ -23,6 +23,7 @@ export function AuthProvider({ children }) {
   const persistUser = useCallback(async (user) => {
     const normalized = {
       id: user.id, name: user.displayName || user.username, username: user.username,
+      phone: user.phone ?? null,
       avatar: resolveUrl(user.avatar), bio: user.bio ?? '', status: 'online',
     };
     await storage.setUser(normalized);
@@ -31,8 +32,8 @@ export function AuthProvider({ children }) {
 
   const requestOtp = useCallback((phone) => apiRequestOtp(phone), []);
 
-  const verifyOtp = useCallback(async (phone, code, displayName) => {
-    const user = await apiVerifyOtp(phone, code, displayName);
+  const verifyOtp = useCallback(async (phone, code, username, displayName) => {
+    const user = await apiVerifyOtp(phone, code, username, displayName);
     await persistUser(user);
   }, [persistUser]);
 

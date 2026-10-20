@@ -19,6 +19,7 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
   const [step,        setStep]        = useState('phone');   // 'phone' | 'code'
   const [phone,       setPhone]       = useState('');
   const [code,        setCode]        = useState('');
+  const [newUsername, setNewUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [isNewUser,   setIsNewUser]   = useState(false);
   const [testCode,    setTestCode]    = useState('');
@@ -35,12 +36,16 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
   const phoneRef    = useRef(null);
   const codeRef     = useRef(null);
   const usernameRef = useRef(null);
+  const newUsernameRef = useRef(null);
 
   useEffect(() => {
     if (flow === 'password') usernameRef.current?.focus();
-    else if (step === 'code') codeRef.current?.focus();
+    else if (step === 'code') {
+      if (isNewUser) newUsernameRef.current?.focus();
+      else codeRef.current?.focus();
+    }
     else phoneRef.current?.focus();
-  }, [flow, step]);
+  }, [flow, step, isNewUser]);
 
   useEffect(() => {
     if (resendIn <= 0) return undefined;
@@ -91,15 +96,27 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
   async function submitCode(e) {
     e.preventDefault();
     if (code.length !== 6) { setError('کد تأیید باید ۶ رقم باشد'); return; }
-    if (isNewUser && displayName.trim().length < 2) {
-      setError('نام نمایشی باید حداقل ۲ کاراکتر باشد');
-      return;
+    if (isNewUser) {
+      const u = newUsername.trim();
+      if (u.length < 2 || !/^[a-zA-Z0-9_]+$/.test(u)) {
+        setError('نام کاربری باید فقط شامل حروف انگلیسی، عدد و _ باشد (حداقل ۲ کاراکتر)');
+        return;
+      }
+      if (displayName.trim().length < 2) {
+        setError('نام نمایشی باید حداقل ۲ کاراکتر باشد');
+        return;
+      }
     }
 
     setBusyAction('verify');
     setError('');
     try {
-      const user = await verifyOtp(phone, code, isNewUser ? displayName.trim() : undefined);
+      const user = await verifyOtp(
+        phone,
+        code,
+        isNewUser ? newUsername.trim() : undefined,
+        isNewUser ? displayName.trim() : undefined,
+      );
       onAuthenticated(user);
     } catch (err) {
       setError(err.message ?? 'خطا در اتصال به سرور');
@@ -113,6 +130,7 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
     setStep('phone');
     setCode('');
     setTestCode('');
+    setNewUsername('');
     setDisplayName('');
     setIsNewUser(false);
     setResendIn(0);
@@ -320,7 +338,7 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
               </button>
 
               <p className="auth-note">
-                با تأیید شماره، اگر حسابی نداشته باشی یک حساب تازه ساخته می‌شود.
+                با تأیید شماره، اگر حسابی نداشته باشی در مرحله بعد نام کاربری و نام نمایشی انتخاب می‌کنی.
               </p>
 
               <button
@@ -344,29 +362,57 @@ export default function LoginPage({ onLogin, onAuthenticated }) {
               </div>
 
               {isNewUser && (
-                <div className="field">
-                  <label htmlFor="auth-display-name">نام نمایشی</label>
-                  <div className="field-control">
-                    <i className="fas fa-user field-icon" aria-hidden="true" />
-                    <input
-                      id="auth-display-name"
-                      type="text"
-                      name="displayName"
-                      autoComplete="nickname"
-                      required
-                      value={displayName}
-                      onChange={e => { setDisplayName(e.target.value); setError(''); }}
-                      placeholder="مثلاً علی رضایی"
-                      maxLength={50}
-                      disabled={busy}
-                      aria-invalid={!!error}
-                      aria-describedby={error ? 'auth-error' : 'auth-display-hint'}
-                    />
+                <>
+                  <div className="field">
+                    <label htmlFor="auth-new-username">نام کاربری</label>
+                    <div className="field-control">
+                      <i className="fas fa-at field-icon" aria-hidden="true" />
+                      <input
+                        id="auth-new-username"
+                        ref={newUsernameRef}
+                        type="text"
+                        name="username"
+                        autoComplete="username"
+                        required
+                        value={newUsername}
+                        onChange={e => { setNewUsername(e.target.value); setError(''); }}
+                        placeholder="username"
+                        dir="ltr"
+                        maxLength={30}
+                        disabled={busy}
+                        aria-invalid={!!error}
+                        aria-describedby={error ? 'auth-error' : 'auth-username-hint'}
+                      />
+                    </div>
+                    <p className="auth-hint" id="auth-username-hint">
+                      هر نام کاربری یکتاست؛ فقط حروف انگلیسی، عدد و _ (حداقل ۲ کاراکتر).
+                    </p>
                   </div>
-                  <p className="auth-hint" id="auth-display-hint">
-                    این نام برای بقیه کاربران نمایش داده می‌شود.
-                  </p>
-                </div>
+
+                  <div className="field">
+                    <label htmlFor="auth-display-name">نام نمایشی</label>
+                    <div className="field-control">
+                      <i className="fas fa-user field-icon" aria-hidden="true" />
+                      <input
+                        id="auth-display-name"
+                        type="text"
+                        name="displayName"
+                        autoComplete="nickname"
+                        required
+                        value={displayName}
+                        onChange={e => { setDisplayName(e.target.value); setError(''); }}
+                        placeholder="مثلاً علی رضایی"
+                        maxLength={50}
+                        disabled={busy}
+                        aria-invalid={!!error}
+                        aria-describedby={error ? 'auth-error' : 'auth-display-hint'}
+                      />
+                    </div>
+                    <p className="auth-hint" id="auth-display-hint">
+                      این نام برای بقیه کاربران نمایش داده می‌شود.
+                    </p>
+                  </div>
+                </>
               )}
 
               <div className="field">

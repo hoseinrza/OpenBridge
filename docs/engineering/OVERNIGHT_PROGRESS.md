@@ -93,10 +93,10 @@ UI is gone — new accounts are created by verifying an OTP.
   single-use under races. Requests are throttled per IP
   (`AUTH_OTP_REQUEST_LIMIT`) and per phone number
   (`AUTH_OTP_REQUEST_PHONE_LIMIT`) with 429 + `Retry-After`.
-- **Accounts**: the normalized phone is stored in the existing unique
-  `username` column; `PATCH /users/me` rejects username changes for phone
-  accounts. Phone accounts get a random 32-byte password so the legacy
-  password endpoint cannot be used to take them over. `isNewUser` verification
+- The normalized phone is stored in a dedicated unique `users.phone` column
+  (usernames are user-chosen at signup since the follow-up section below);
+  phone accounts get a random 32-byte password so the legacy password endpoint
+  cannot be used to take them over. `isNewUser` verification
   requires a display name (2–50 chars) and creates the account with a normal
   `withSession` response (session row + access JWT + rotating refresh token).
 - **Test mode**: until an SMS provider is integrated, the code is generated
@@ -137,6 +137,46 @@ Verification for this batch:
 - QA users (`09990000001`, `09990000002`), their sessions/conversations, and
   all `09990000xx` OTP rows were deleted from the local database afterwards;
   pre-existing accounts were untouched.
+
+### User-chosen usernames (2026-10-20, follow-up)
+
+Signup no longer stores the phone number as the username. New users pick a
+mandatory unique username during the code step; the verified phone moves to a
+dedicated nullable unique `users.phone` column.
+
+- `POST /auth/otp/verify` accepts `username` (2–30 chars, `[a-zA-Z0-9_]`,
+  uniqueness-checked) alongside `displayName`, both required for new accounts.
+  Validation happens **before** the OTP is consumed, so a bad username or a
+  duplicate (409) does not burn the code.
+- Account lookup for OTP is `{ phone } OR { phone: null, username: phone }`:
+  accounts created when the phone *was* the username are still found on first
+  login, keep their legacy username, and get `phone` backfilled at that point —
+  no duplicate accounts are created.
+- `phone` is returned only in self-scoped responses (`/auth/otp/verify`,
+  `/auth/refresh`, `/users/me`, profile updates). The user directory, search,
+  and peer lookups never include it. The rename lock on phone-created accounts
+  was removed: usernames are editable again because the phone, not the
+  username, now identifies the account for OTP.
+- Web/mobile signup shows the username field above the display-name field with
+  an inline hint; focus lands on the username field for new users. The web
+  profile modal shows the username as editable plus the phone as a read-only
+  field («شماره موبایل برای ورود ثابت می‌ماند»).
+
+Verification: backend `npm run build` passed and `test:e2e` is now **15/15**
+(new/updated tests: username required 400, duplicate 409 without consuming the
+code, invalid format 400, user-chosen username + phone stored, rename allowed,
+re-login preserves the renamed username, directory/search never expose `phone`,
+and a legacy username-as-phone account signs in by OTP as the same user). A
+live API run against the local stack confirmed the same behavior end-to-end,
+including rename and re-login. Web signup was exercised in the browser
+(client-side format error, then successful account creation storing both
+`username` and `phone`), and the profile modal was verified in both view and
+edit states, including a duplicate-username 409 and a successful rename.
+Signup-step screenshots/audits at 1440×900 and 375×812 (light + dark) and
+320×720: overflow 0, unlabeled buttons/inputs 0, focus on the username field.
+`web` lint + build clean; `mobile` `expo export --platform android` bundled.
+All QA users (`qa_otp_*`, `qa_web_*`) and `09990000xx` OTP rows were deleted
+afterwards; the 11 real accounts were untouched.
 
 
 ## Validation actually run

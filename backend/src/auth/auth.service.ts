@@ -18,7 +18,7 @@ import {
   REFRESH_TOKEN_TTL_DAYS,
 } from '../config/env';
 
-const SAFE = { id: true, username: true, displayName: true, avatar: true, status: true, createdAt: true };
+const SAFE = { id: true, username: true, displayName: true, phone: true, avatar: true, status: true, createdAt: true };
 const REFRESH_TOKEN_BYTES = 48;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -126,8 +126,10 @@ export class AuthService {
     }
 
     const phone = dto.phone;
-    const existing = await this.prisma.user.findUnique({
-      where:  { username: phone },
+    // Accounts created before the `phone` column existed may still use the
+    // phone number as their username, so treat those as the same account.
+    const existing = await this.prisma.user.findFirst({
+      where:  { OR: [{ phone }, { phone: null, username: phone }] },
       select: { id: true },
     });
 
@@ -174,12 +176,23 @@ export class AuthService {
       throw new UnauthorizedException('کد تأیید نادرست است');
     }
 
-    let user = await this.prisma.user.findUnique({
-      where:  { username: phone },
+    let user = await this.prisma.user.findFirst({
+      where:  { OR: [{ phone }, { phone: null, username: phone }] },
       select: SAFE,
     });
-    if (!user && (!dto.displayName || dto.displayName.trim().length < 2))
-      throw new BadRequestException('برای ساخت حساب، نام نمایشی را وارد کنید');
+    if (!user) {
+      // Validate the signup payload before consuming the code so a typo does
+      // not burn the user's only working code.
+      if (!dto.username)
+        throw new BadRequestException('برای ساخت حساب، نام کاربری الزامی است');
+      if (!dto.displayName || dto.displayName.trim().length < 2)
+        throw new BadRequestException('برای ساخت حساب، نام نمایشی را وارد کنید');
+      const taken = await this.prisma.user.findUnique({
+        where:  { username: dto.username },
+        select: { id: true },
+      });
+      if (taken) throw new ConflictException('این نام کاربری قبلاً ثبت شده');
+    }
 
     // Conditional consumption makes a code single-use even if two verifies
     // race with the same code.
@@ -193,12 +206,21 @@ export class AuthService {
     if (!user) {
       user = await this.prisma.user.create({
         data: {
-          username:    phone,
+          username:    dto.username!,
           displayName: dto.displayName!.trim(),
+          phone,
           // Phone accounts never use password login; store an unguessable hash
           // so the legacy password endpoint cannot be used for this account.
           password:    await bcrypt.hash(randomBytes(32).toString('base64url'), 10),
         },
+        select: SAFE,
+      });
+    } else if (!user.phone) {
+      // Legacy account whose username was the phone number: link the verified
+      // number so the next sign-in finds it directly.
+      user = await this.prisma.user.update({
+        where:  { id: user.id },
+        data:   { phone },
         select: SAFE,
       });
     }

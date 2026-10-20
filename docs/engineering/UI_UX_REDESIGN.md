@@ -90,12 +90,13 @@ attention, never a background behind white text.
   anchored above the trigger, send disabled state, upload and send errors shown
   as dismissible `role="alert"` notes instead of failing silently.
 - **Login**: split brand panel and form panel. Since the OTP rework (see
-  `OVERNIGHT_PROGRESS.md`), the primary flow is a two-step phone → code form
-  with a required display-name field for new users, a 30 s resend countdown,
-  a «تغییر شماره» link, a clearly labelled test-code box, and a link to a
-  legacy username/password mode for existing accounts. Labelled fields,
-  inline errors with `role="alert"`, loading state with a spinner and disabled
-  controls are unchanged.
+  `OVERNIGHT_PROGRESS.md`), the primary flow is a two-step phone → code form.
+  New users must pick a unique username plus a display name in the code step
+  (username field first, focus managed accordingly), with a 30 s resend
+  countdown, a «تغییر شماره» link, a clearly labelled test-code box, and a
+  link to a legacy username/password mode for existing accounts. Labelled
+  fields, inline errors with `role="alert"`, loading state with a spinner and
+  disabled controls are unchanged.
 - **Modals and new chat**: shared focus-trapping modal with labelled headings;
   new-chat/group creation exposes search, multi-select, validation, and errors.
 - **Shared UI**: `Avatar`, `Modal`, and `ThemeToggle` live in

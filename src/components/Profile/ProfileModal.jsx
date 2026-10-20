@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { updateProfile, uploadFile, resolveUrl, uploadPath } from '../../services/api.js';
-import { isIranMobile } from '../../utils/phone.js';
 import Avatar from '../ui/Avatar.jsx';
 import Modal from '../ui/Modal.jsx';
 import './ProfileModal.css';
@@ -23,7 +22,7 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
   const [error,        setError]        = useState('');
   const fileInputRef = useRef(null);
   const nameInputRef = useRef(null);
-  const phoneAccount = isIranMobile(user.username ?? '');
+  const phone = user.phone ?? null;
 
   useEffect(() => {
     if (editing) nameInputRef.current?.focus();
@@ -51,7 +50,7 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
     const trimmedName     = name.trim();
     const trimmedUsername = username.trim();
     if (!trimmedName) { setError('نام نمایشی نمی‌تواند خالی باشد'); return; }
-    if (!phoneAccount && (trimmedUsername.length < 2 || !/^[a-zA-Z0-9_]+$/.test(trimmedUsername))) {
+    if (trimmedUsername.length < 2 || !/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
       setError('نام کاربری باید فقط شامل حروف انگلیسی، عدد و _ باشد');
       return;
     }
@@ -65,7 +64,7 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
       if (avatarUpload?.startsWith('/uploads/')) body.avatar = avatarUpload;
       // Legacy accounts may still have a non-English username; only send it
       // when the user actually changes it so the new rule doesn't block them.
-      if (!phoneAccount && trimmedUsername !== user.username) body.username = trimmedUsername;
+      if (trimmedUsername !== user.username) body.username = trimmedUsername;
       await updateProfile(body);
       onSaved?.({ name: trimmedName, username: trimmedUsername, bio: bio.trim(), avatar });
       setEditing(false);
@@ -134,38 +133,35 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
             </div>
 
             <div className="field">
-              <label className="field-label" htmlFor={phoneAccount ? 'profile-phone' : 'profile-username'}>
-                {phoneAccount ? 'شماره موبایل' : 'نام کاربری'}
-              </label>
-              {phoneAccount ? (
-                <>
-                  <input
-                    id="profile-phone"
-                    className="field-input"
-                    value={username}
-                    dir="ltr"
-                    readOnly
-                    aria-describedby="profile-phone-hint"
-                  />
-                  <span className="field-hint" id="profile-phone-hint">
-                    شماره موبایل حساب قابل تغییر نیست.
-                  </span>
-                </>
-              ) : (
-                <>
-                  <input
-                    id="profile-username"
-                    className="field-input"
-                    value={username}
-                    maxLength={30}
-                    onChange={e => setUsername(e.target.value)}
-                    dir="ltr"
-                    autoComplete="username"
-                  />
-                  <span className="field-hint">فقط حروف انگلیسی، عدد و _</span>
-                </>
-              )}
+              <label className="field-label" htmlFor="profile-username">نام کاربری</label>
+              <input
+                id="profile-username"
+                className="field-input"
+                value={username}
+                maxLength={30}
+                onChange={e => setUsername(e.target.value)}
+                dir="ltr"
+                autoComplete="username"
+              />
+              <span className="field-hint">فقط حروف انگلیسی، عدد و _</span>
             </div>
+
+            {phone && (
+              <div className="field">
+                <label className="field-label" htmlFor="profile-phone">شماره موبایل</label>
+                <input
+                  id="profile-phone"
+                  className="field-input"
+                  value={phone}
+                  dir="ltr"
+                  readOnly
+                  aria-describedby="profile-phone-hint"
+                />
+                <span className="field-hint" id="profile-phone-hint">
+                  شماره موبایل برای ورود ثابت می‌ماند و قابل تغییر نیست.
+                </span>
+              </div>
+            )}
 
             <div className="field">
               <label className="field-label" htmlFor="profile-bio">درباره من</label>
@@ -199,6 +195,12 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
           <>
             <div className="profile-name">{user.name}</div>
             {user.username && <div className="profile-username" dir="ltr">@{user.username}</div>}
+            {phone && (
+              <div className="profile-username" dir="ltr">
+                <i className="fas fa-mobile-screen" aria-hidden="true" style={{ marginInlineEnd: 6 }} />
+                {phone}
+              </div>
+            )}
 
             <div className={`profile-status status-${user.status ?? 'offline'}`}>
               <span className="profile-status-dot" aria-hidden="true" />

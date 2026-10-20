@@ -32,6 +32,9 @@ model User {
   username    String     @unique
   displayName String?
   password    String
+  // Verified mobile number for OTP sign-in. Unique per account; nullable for
+  // legacy accounts created before phone login existed.
+  phone       String?    @unique
   avatar      String?
   bio         String?
   status    UserStatus @default(OFFLINE)

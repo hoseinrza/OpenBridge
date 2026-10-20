@@ -123,8 +123,8 @@ export function requestOtp(phone) {
   return request('POST', '/auth/otp/request', { phone });
 }
 
-export async function verifyOtp(phone, code, displayName) {
-  const data = await request('POST', '/auth/otp/verify', { phone, code, displayName });
+export async function verifyOtp(phone, code, username, displayName) {
+  const data = await request('POST', '/auth/otp/verify', { phone, code, username, displayName });
   await storeSession(data);
   return data.user;
 }

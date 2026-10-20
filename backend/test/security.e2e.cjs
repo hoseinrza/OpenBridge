@@ -501,8 +501,9 @@ test('refresh tokens rotate and session revocation is immediate', async () => {
   })).status, 401, 'revoked refresh token');
 });
 
-test('phone OTP verifies, creates an account, and locks the phone username', async () => {
+test('phone OTP verifies and creates an account with a user-chosen username', async () => {
   const phone = `0912${String(Date.now()).slice(-7)}`;
+  const username = `otp_user_${String(Date.now()).slice(-7)}`;
   otpPhones.push(phone);
 
   const invalid = await api('/auth/otp/request', {
@@ -531,30 +532,52 @@ test('phone OTP verifies, creates an account, and locks the phone username', asy
   assert.equal((await api('/auth/otp/verify', {
     method: 'POST',
     body: { phone, code: requested.data.testCode },
+  })).status, 400, 'username required for a new account');
+
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: requested.data.testCode, displayName: 'OTP User' },
   })).status, 400, 'display name required for a new account');
+
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: requested.data.testCode, username: 'ali.ce', displayName: 'OTP User' },
+  })).status, 400, 'invalid username format rejected');
+
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: requested.data.testCode, username: 'alice', displayName: 'OTP User' },
+  })).status, 409, 'duplicate username rejected without consuming the code');
 
   const verified = await api('/auth/otp/verify', {
     method: 'POST',
-    body: { phone, code: requested.data.testCode, displayName: 'OTP User' },
+    body: { phone, code: requested.data.testCode, username, displayName: 'OTP User' },
   });
   assert.equal(verified.status, 200);
-  assert.equal(verified.data.user.username, phone);
+  assert.equal(verified.data.user.username, username, 'user-chosen username stored');
   assert.equal(verified.data.user.displayName, 'OTP User');
+  assert.equal(verified.data.user.phone, phone, 'phone stored on the account');
   assert.equal(typeof verified.data.token, 'string');
   assert.equal(typeof verified.data.refreshToken, 'string');
   createdUserIds.push(verified.data.user.id);
 
   assert.equal((await api('/auth/otp/verify', {
     method: 'POST',
-    body: { phone, code: requested.data.testCode, displayName: 'OTP User' },
+    body: { phone, code: requested.data.testCode, username, displayName: 'OTP User' },
   })).status, 401, 'code is single use');
 
-  assert.equal((await api('/users/me', { token: verified.data.token })).status, 200);
-  assert.equal((await api('/users/me', {
+  const me = await api('/users/me', { token: verified.data.token });
+  assert.equal(me.status, 200);
+  assert.equal(me.data.phone, phone, 'own profile includes the phone');
+
+  // The chosen username stays editable; the phone keeps identifying the account.
+  const renamed = await api('/users/me', {
     method: 'PATCH',
     token: verified.data.token,
-    body: { username: 'renamed_phone_user' },
-  })).status, 400, 'phone cannot be changed through profile');
+    body: { username: `${username}_renamed` },
+  });
+  assert.equal(renamed.status, 200, 'chosen username can be renamed');
+  assert.equal(renamed.data.username, `${username}_renamed`);
 
   const again = await api('/auth/otp/request', {
     method: 'POST',
@@ -569,10 +592,21 @@ test('phone OTP verifies, creates an account, and locks the phone username', asy
   });
   assert.equal(verifiedAgain.status, 200, 'existing account logs in without display name');
   assert.equal(verifiedAgain.data.user.id, verified.data.user.id);
+  assert.equal(verifiedAgain.data.user.username, `${username}_renamed`, 'renamed username preserved');
+
+  // Phone numbers are private: directory and search must never expose them.
+  const directory = await api('/users', { token: verified.data.token });
+  assert.equal(directory.status, 200);
+  assert.ok(directory.data.every(u => !('phone' in u)), 'user directory hides phone numbers');
+  const search = await api(`/users/search?q=${encodeURIComponent('Security')}`, { token: verified.data.token });
+  assert.equal(search.status, 200);
+  assert.ok(search.data.length > 0, 'search returns other users');
+  assert.ok(search.data.every(u => !('phone' in u)), 'search hides phone numbers');
 });
 
 test('expired and over-attempted OTP codes are rejected', async () => {
   const phone = `0936${String(Date.now()).slice(-7)}`;
+  const username = `otp_exp_${String(Date.now()).slice(-7)}`;
   otpPhones.push(phone);
 
   const first = await api('/auth/otp/request', { method: 'POST', body: { phone } });
@@ -583,7 +617,7 @@ test('expired and over-attempted OTP codes are rejected', async () => {
   });
   assert.equal((await api('/auth/otp/verify', {
     method: 'POST',
-    body: { phone, code: first.data.testCode, displayName: 'Expired User' },
+    body: { phone, code: first.data.testCode, username, displayName: 'Expired User' },
   })).status, 401, 'expired code rejected');
 
   const fresh = await api('/auth/otp/request', { method: 'POST', body: { phone } });
@@ -598,17 +632,42 @@ test('expired and over-attempted OTP codes are rejected', async () => {
 
   assert.equal((await api('/auth/otp/verify', {
     method: 'POST',
-    body: { phone, code: fresh.data.testCode, displayName: 'Expired User' },
+    body: { phone, code: fresh.data.testCode, username, displayName: 'Expired User' },
   })).status, 401, 'correct code refused after too many attempts');
 
   const reset = await api('/auth/otp/request', { method: 'POST', body: { phone } });
   assert.equal(reset.status, 200, 'a new request resets the attempt budget');
   const verified = await api('/auth/otp/verify', {
     method: 'POST',
-    body: { phone, code: reset.data.testCode, displayName: 'Expired User' },
+    body: { phone, code: reset.data.testCode, username, displayName: 'Expired User' },
   });
   assert.equal(verified.status, 200);
   createdUserIds.push(verified.data.user.id);
+});
+
+test('legacy accounts whose username is their phone still sign in by OTP', async () => {
+  const phone = `0913${String(Date.now()).slice(-7)}`;
+  otpPhones.push(phone);
+
+  const legacy = await api('/auth/register', {
+    method: 'POST',
+    body: { username: phone, displayName: 'Legacy Phone User', password: 'legacy-password-123' },
+  });
+  assert.equal(legacy.status, 201);
+  createdUserIds.push(legacy.data.user.id);
+
+  const requested = await api('/auth/otp/request', { method: 'POST', body: { phone } });
+  assert.equal(requested.status, 200);
+  assert.equal(requested.data.isNewUser, false, 'legacy username-as-phone account detected');
+
+  const verified = await api('/auth/otp/verify', {
+    method: 'POST',
+    body: { phone, code: requested.data.testCode },
+  });
+  assert.equal(verified.status, 200);
+  assert.equal(verified.data.user.id, legacy.data.user.id, 'same account, not a duplicate');
+  assert.equal(verified.data.user.username, phone, 'legacy username preserved');
+  assert.equal(verified.data.user.phone, phone, 'phone linked to the legacy account');
 });
 
 test('OTP requests are throttled per phone number', async () => {
