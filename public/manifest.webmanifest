@@ -1,12 +1,12 @@
 {
   "name": "OpenBridge",
   "short_name": "OpenBridge",
-  "description": "Real-time chat that connects people.",
+  "description": "پیام‌رسان سریع برای گفتگوهای خصوصی و گروهی",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#FFFFFF",
+  "background_color": "#FAF8F4",
   "theme_color": "#C5161D",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },

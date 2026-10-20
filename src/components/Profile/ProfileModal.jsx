@@ -1,6 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { updateProfile, uploadFile, resolveUrl, uploadPath } from '../../services/api.js';
+import Avatar from '../ui/Avatar.jsx';
+import Modal from '../ui/Modal.jsx';
 import './ProfileModal.css';
+
+const STATUS_TEXT = { online: 'آنلاین', idle: 'غیرفعال', dnd: 'مشغول', offline: 'آفلاین' };
 
 function joinedAt(dateStr) {
   if (!dateStr) return null;
@@ -13,9 +17,15 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
   const [username, setUsername] = useState(user.username ?? '');
   const [bio,      setBio]      = useState(user.bio ?? '');
   const [avatar,   setAvatar]   = useState(user.avatar);
-  const [saving,  setSaving]    = useState(false);
-  const [error,   setError]     = useState('');
+  const [saving,       setSaving]       = useState(false);
+  const [uploading,    setUploading]    = useState(false);
+  const [error,        setError]        = useState('');
   const fileInputRef = useRef(null);
+  const nameInputRef = useRef(null);
+
+  useEffect(() => {
+    if (editing) nameInputRef.current?.focus();
+  }, [editing]);
 
   async function handleAvatarPick(e) {
     const file = e.target.files?.[0];
@@ -23,15 +33,19 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
     if (!file) return;
 
     setError('');
+    setUploading(true);
     try {
       const uploaded = await uploadFile(file);
       setAvatar(resolveUrl(uploaded.url));
-    } catch {
-      setError('آپلود تصویر ناموفق بود');
+    } catch (err) {
+      setError(err.message || 'آپلود تصویر ناموفق بود');
+    } finally {
+      setUploading(false);
     }
   }
 
-  async function handleSave() {
+  async function handleSave(e) {
+    e?.preventDefault();
     const trimmedName     = name.trim();
     const trimmedUsername = username.trim();
     if (!trimmedName) { setError('نام نمایشی نمی‌تواند خالی باشد'); return; }
@@ -70,87 +84,130 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
   }
 
   return (
-    <div className="profile-overlay" onClick={onClose}>
-      <div className="profile-modal" onClick={e => e.stopPropagation()}>
-        <button className="profile-close" onClick={onClose}>
-          <i className="fas fa-xmark" />
+    <Modal onClose={onClose} labelledBy="profile-title" className="profile-modal">
+      <header className="profile-head">
+        <h2 id="profile-title">{editing ? 'ویرایش پروفایل' : 'پروفایل'}</h2>
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="بستن پروفایل">
+          <i className="fas fa-xmark" aria-hidden="true" />
         </button>
+      </header>
 
+      <div className="profile-scroll">
         <div className="profile-avatar-wrap">
-          <img src={avatar} alt={name} className="profile-avatar" />
-          <span className={`status ${user.status}`} />
+          <Avatar src={avatar} name={name || user.name} size={88} />
           {editing && (
             <>
-              <button className="profile-avatar-edit" onClick={() => fileInputRef.current?.click()} title="تغییر تصویر">
-                <i className="fas fa-camera" />
+              <button
+                type="button"
+                className="profile-avatar-edit"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="تغییر تصویر پروفایل"
+                disabled={uploading}
+              >
+                <i className={uploading ? 'fas fa-spinner fa-spin' : 'fas fa-camera'} aria-hidden="true" />
               </button>
-              <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleAvatarPick} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={handleAvatarPick}
+              />
             </>
           )}
         </div>
 
         {editing ? (
-          <div className="profile-form">
-            <label className="profile-label">نام نمایشی</label>
-            <input
-              className="profile-input"
-              value={name}
-              maxLength={50}
-              onChange={e => setName(e.target.value)}
-            />
+          <form className="profile-form" onSubmit={handleSave}>
+            <div className="field">
+              <label className="field-label" htmlFor="profile-name">نام نمایشی</label>
+              <input
+                id="profile-name"
+                ref={nameInputRef}
+                className="field-input"
+                value={name}
+                maxLength={50}
+                onChange={e => setName(e.target.value)}
+              />
+            </div>
 
-            <label className="profile-label">نام کاربری (فقط انگلیسی، عدد و _)</label>
-            <input
-              className="profile-input ltr"
-              value={username}
-              maxLength={30}
-              onChange={e => setUsername(e.target.value)}
-              dir="ltr"
-            />
+            <div className="field">
+              <label className="field-label" htmlFor="profile-username">نام کاربری</label>
+              <input
+                id="profile-username"
+                className="field-input"
+                value={username}
+                maxLength={30}
+                onChange={e => setUsername(e.target.value)}
+                dir="ltr"
+                autoComplete="username"
+              />
+              <span className="field-hint">فقط حروف انگلیسی، عدد و _</span>
+            </div>
 
-            <label className="profile-label">درباره من</label>
-            <textarea
-              className="profile-input profile-textarea"
-              value={bio}
-              maxLength={150}
-              placeholder="چند کلمه درباره خودت بنویس..."
-              onChange={e => setBio(e.target.value)}
-            />
+            <div className="field">
+              <label className="field-label" htmlFor="profile-bio">درباره من</label>
+              <textarea
+                id="profile-bio"
+                className="field-input profile-textarea"
+                value={bio}
+                maxLength={150}
+                placeholder="چند کلمه درباره خودت بنویس…"
+                onChange={e => setBio(e.target.value)}
+              />
+            </div>
 
-            {error && <div className="profile-error">{error}</div>}
+            {error && (
+              <div className="field-error" role="alert">
+                <i className="fas fa-triangle-exclamation" aria-hidden="true" />
+                {error}
+              </div>
+            )}
 
             <div className="profile-actions">
-              <button className="profile-btn ghost" onClick={handleCancelEdit} disabled={saving}>انصراف</button>
-              <button className="profile-btn primary" onClick={handleSave} disabled={saving}>
-                {saving ? <i className="fas fa-spinner fa-spin" /> : 'ذخیره'}
+              <button type="button" className="btn btn-secondary" onClick={handleCancelEdit} disabled={saving}>
+                انصراف
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={saving || uploading}>
+                {saving ? <><i className="fas fa-spinner fa-spin" aria-hidden="true" /> ذخیره…</> : 'ذخیره تغییرات'}
               </button>
             </div>
-          </div>
+          </form>
         ) : (
           <>
             <div className="profile-name">{user.name}</div>
             {user.username && <div className="profile-username" dir="ltr">@{user.username}</div>}
-            <div className="profile-status">
-              <span className={`status-dot ${user.status}`} />
-              {user.status === 'online' ? 'آنلاین' : user.status === 'idle' ? 'غیرفعال' : 'آفلاین'}
+
+            <div className={`profile-status status-${user.status ?? 'offline'}`}>
+              <span className="profile-status-dot" aria-hidden="true" />
+              {STATUS_TEXT[user.status] ?? 'آفلاین'}
             </div>
 
-            {user.bio && <div className="profile-bio">{user.bio}</div>}
+            {user.bio && <p className="profile-bio">{user.bio}</p>}
 
             {user.createdAt && (
               <div className="profile-joined">
-                <i className="fas fa-calendar-day" /> عضویت از {joinedAt(user.createdAt)}
+                <i className="fas fa-calendar-day" aria-hidden="true" />
+                عضو از {joinedAt(user.createdAt)}
+              </div>
+            )}
+
+            {error && (
+              <div className="field-error" role="alert">
+                <i className="fas fa-triangle-exclamation" aria-hidden="true" />
+                {error}
               </div>
             )}
 
             {isOwn && (
-              <button className="profile-btn primary edit-trigger" onClick={() => setEditing(true)}>
-                <i className="fas fa-pen" /> ویرایش پروفایل
+              <button type="button" className="btn btn-primary profile-edit-btn" onClick={() => setEditing(true)}>
+                <i className="fas fa-pen" aria-hidden="true" />
+                ویرایش پروفایل
               </button>
             )}
           </>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,13 +1,15 @@
+import Avatar from '../ui/Avatar.jsx';
+
 export default function TypingIndicator({ isTyping, user }) {
   return (
-    <div className="typing-area">
-      {isTyping && (
+    <div className="typing-area" role="status" aria-live="polite">
+      {isTyping && user && (
         <>
-          <img src={user.avatar} alt={user.name} />
-          <div className="typing-dots">
+          <Avatar src={user.avatar} name={user.name} size={20} />
+          <span className="typing-dots" aria-hidden="true">
             <span /><span /><span />
-          </div>
-          <span>{user.name} در حال تایپ است...</span>
+          </span>
+          <span className="typing-text">{user.name} در حال نوشتن است…</span>
         </>
       )}
     </div>

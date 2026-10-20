@@ -16,6 +16,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const [searchQuery, setSearchQuery]     = useState('');
   const [profileTarget, setProfileTarget] = useState(null); // { user, isOwn } | null
   const [newChatOpen, setNewChatOpen]     = useState(false);
+  const [chatsLoading, setChatsLoading]   = useState(true);
+  const [chatsError, setChatsError]       = useState(false);
 
   // New accounts start with an empty conversation list — people only show up
   // here once a message has actually been exchanged with them. Conversations
@@ -37,8 +39,10 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
             .sort((a, b) => new Date(b.updatedAt ?? 0) - new Date(a.updatedAt ?? 0));
           return [...stillPending, ...chats];
         });
+        setChatsError(false);
       })
-      .catch(() => {});
+      .catch(() => setChatsError(true))
+      .finally(() => setChatsLoading(false));
   }, []);
 
   useEffect(() => { loadChats(); }, [loadChats]);
@@ -49,6 +53,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
 
   const {
     messages, isTyping, typingPeer, connected,
+    historyState, historyError, retryHistory,
     sendMessage, notifyTyping, addReaction, clearMessages,
   } = useChat(activeUser, currentUser, handleIncoming);
 
@@ -106,7 +111,9 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
         onLogout={onLogout}
         onOpenProfile={openOwnProfile}
         onNewChat={() => setNewChatOpen(true)}
-        page="chat"
+        loading={chatsLoading}
+        error={chatsError}
+        onRetry={loadChats}
       />
 
       <div className="chat-main">
@@ -121,43 +128,49 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
             />
 
             {!connected && (
-              <div className="conn-banner">
-                <i className="fas fa-wifi" />
-                اتصال به سرور برقرار نیست — در حال تلاش برای اتصال مجدد...
+              <div className="conn-banner" role="status">
+                <i className="fas fa-plug-circle-xmark" aria-hidden="true" />
+                اتصال به سرور برقرار نیست — در حال تلاش برای اتصال مجدد…
               </div>
             )}
 
             {searchQuery && (
-              <div className="search-results-bar">
-                <i className="fas fa-magnifying-glass" />
-                {filteredMessages.length} نتیجه برای «{searchQuery}»
+              <div className="search-results-bar" role="status">
+                <i className="fas fa-magnifying-glass" aria-hidden="true" />
+                {filteredMessages.length.toLocaleString('fa-IR')} نتیجه برای «{searchQuery}»
               </div>
             )}
 
             <MessageList
+              key={activeUser.id}
               messages={filteredMessages}
               activeUser={activeUser}
               onReact={addReaction}
               searchQuery={searchQuery}
+              historyState={historyState}
+              historyError={historyError}
+              onRetryHistory={retryHistory}
             />
 
             <TypingIndicator isTyping={isTyping} user={typingPeer ?? activeUser} />
 
-            <InputArea onSend={sendMessage} onTyping={notifyTyping} />
+            <InputArea onSend={sendMessage} onTyping={notifyTyping} connected={connected} />
           </>
         ) : (
           <div className="empty-chat">
-            <i className="fas fa-comments" />
+            <div className="empty-chat-icon" aria-hidden="true">
+              <i className="far fa-comments" />
+            </div>
+            <h2>گفتگویی باز نشده</h2>
             {users.length > 0 ? (
-              <p>یک گفتگو یا گروه را از فهرست انتخاب کن یا با دکمهٔ «گفتگوی جدید» یک گفتگو یا گروه تازه بساز.</p>
+              <p>یک گفتگو یا گروه را از فهرست کنار انتخاب کن، یا یک گفتگوی تازه شروع کن.</p>
             ) : (
-              <>
-                <p>هنوز گفتگویی نداری. با جستجوی نام نمایشی یا نام کاربری یک نفر را پیدا کن یا یک گروه بساز.</p>
-                <button className="empty-chat-btn" onClick={() => setNewChatOpen(true)}>
-                  <i className="fas fa-magnifying-glass" /> شروع گفتگوی جدید
-                </button>
-              </>
+              <p>هنوز گفتگویی نداری. با جستجوی نام نمایشی یا نام کاربری یک نفر را پیدا کن یا یک گروه بساز.</p>
             )}
+            <button type="button" className="btn btn-primary" onClick={() => setNewChatOpen(true)}>
+              <i className="fas fa-pen-to-square" aria-hidden="true" />
+              گفتگوی جدید
+            </button>
           </div>
         )}
       </div>

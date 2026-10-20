@@ -7,18 +7,21 @@ const SOCKET_URL = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/api\/?$/,
 
 function normalize(msg, myId) {
   return {
-    id:        msg.id,
-    type:      (msg.type ?? 'TEXT').toLowerCase(),
-    text:      msg.text ?? '',
-    src:       msg.fileUrl ? resolveUrl(msg.fileUrl) : undefined,
-    name:      msg.fileName,
-    size:      msg.fileSize,
-    side:      msg.senderId === myId ? 'mine' : 'other',
-    sender:    msg.sender?.displayName ?? msg.sender?.username,
-    avatar:    msg.sender?.avatar ? resolveUrl(msg.sender.avatar) : '/images/user.png',
-    time:      new Date(msg.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
-    createdAt: new Date(msg.createdAt).getTime(),
-    read:      msg.read,
+    id:           msg.id,
+    type:         (msg.type ?? 'TEXT').toLowerCase(),
+    text:         msg.text ?? '',
+    src:          msg.fileUrl ? resolveUrl(msg.fileUrl) : undefined,
+    name:         msg.fileName,
+    size:         msg.fileSize,
+    side:         msg.senderId === myId ? 'mine' : 'other',
+    senderId:     msg.senderId,
+    receiverId:   msg.receiverId,
+    conversationId: msg.conversationId,
+    sender:       msg.sender?.displayName ?? msg.sender?.username,
+    avatar:       msg.sender?.avatar ? resolveUrl(msg.sender.avatar) : '/images/user.png',
+    time:         new Date(msg.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
+    createdAt:    new Date(msg.createdAt).getTime(),
+    read:         msg.read,
     reactions: (msg.reactions ?? []).reduce(
       (acc, r) => ({ ...acc, [r.emoji]: (acc[r.emoji] ?? 0) + 1 }),
       {},
@@ -48,10 +51,24 @@ function targetPayload(target) {
   return isGroup(target) ? { conversationId: target.id } : { toId: target.id };
 }
 
+function emitWithAck(socket, event, payload, timeout = 12000) {
+  return new Promise((resolve, reject) => {
+    socket.timeout(timeout).emit(event, payload, (err, response) => {
+      if (err) return reject(new Error('پاسخی از سرور دریافت نشد؛ اتصال را بررسی کن'));
+      if (!response?.ok) return reject(new Error(response?.error ?? 'ارسال پیام ناموفق بود'));
+      resolve(response);
+    });
+  });
+}
+
 export function useChat(targetUser, currentUser, onIncoming) {
-  const [messages,  setMessages]  = useState([]);
-  const [typingPeer, setTypingPeer] = useState(null);
-  const [connected, setConnected] = useState(false);
+  const [messages,     setMessages]     = useState([]);
+  const [typingPeer,   setTypingPeer]   = useState(null);
+  const [connected,    setConnected]    = useState(false);
+  const [historyState, setHistoryState] = useState('idle'); // idle | loading | ready | error
+  const [historyError, setHistoryError] = useState('');
+  const [historyNonce, setHistoryNonce] = useState(0);
+
   const currentUserId  = currentUser?.id;
   const targetId       = targetUser?.id;
   const socketRef      = useRef(null);
@@ -189,44 +206,70 @@ export function useChat(targetUser, currentUser, onIncoming) {
     if (!target || !currentUserId) return undefined;
 
     let cancelled = false;
+    setHistoryState('loading');
+    setHistoryError('');
+
     fetchTargetMessages(target)
       .then(msgs => {
         if (cancelled) return;
         setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, currentUserId))));
+        setHistoryState('ready');
       })
-      .catch(() => {});
+      .catch(err => {
+        if (cancelled) return;
+        setHistoryState('error');
+        setHistoryError(err.message || 'دریافت پیام‌ها ناموفق بود');
+      });
 
     return () => { cancelled = true; };
-  }, [targetId, currentUserId]);
+  }, [targetId, currentUserId, historyNonce]);
+
+  const retryHistory = useCallback(() => setHistoryNonce(n => n + 1), []);
 
   // ── Send ─────────────────────────────────────────────
   const sendMessage = useCallback(async (payload) => {
     const msg = typeof payload === 'string' ? { type: 'text', text: payload } : payload;
-    if (msg.type === 'text' && !msg.text?.trim()) return false;
+    if (msg.type === 'text' && !msg.text?.trim()) return { ok: false, error: '' };
 
     const socket = socketRef.current;
-    if (!socket) return false;
+    if (!socket?.connected) {
+      return { ok: false, error: 'اتصال به سرور برقرار نیست؛ چند لحظه بعد دوباره تلاش کن' };
+    }
 
     if (msg._file) {
+      let uploaded;
       try {
-        const uploaded = await uploadFile(msg._file);
-        socket.emit('message:send', {
+        uploaded = await uploadFile(msg._file);
+      } catch (err) {
+        return { ok: false, error: err.message || 'آپلود فایل ناموفق بود' };
+      }
+      try {
+        await emitWithAck(socket, 'message:send', {
           ...targetPayload(targetUser),
           type:     uploaded.type,
           fileUrl:  uploaded.url,
           fileName: uploaded.name,
           fileSize: uploaded.size,
         });
-      } catch {
-        return false;
+      } catch (err) {
+        return { ok: false, error: err.message };
       }
-      return true;
+      return { ok: true };
     }
 
-    socket.emit('message:send', { ...targetPayload(targetUser), type: 'TEXT', text: msg.text });
+    try {
+      await emitWithAck(socket, 'message:send', {
+        ...targetPayload(targetUser),
+        type: 'TEXT',
+        text: msg.text.trim(),
+      });
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+
     clearTimeout(typingTimerRef.current);
     socket.emit('typing:stop', targetPayload(targetUser));
-    return true;
+    return { ok: true };
   }, [targetUser]);
 
   // ── Typing notification ──────────────────────────────
@@ -252,10 +295,13 @@ export function useChat(targetUser, currentUser, onIncoming) {
   const clearMessages = useCallback(() => {
     setMessages([]);
     setTypingPeer(null);
+    setHistoryState('idle');
+    setHistoryError('');
   }, []);
 
   return {
     messages, isTyping: !!typingPeer, typingPeer,
-    connected, sendMessage, notifyTyping, addReaction, clearMessages,
+    connected, historyState, historyError, retryHistory,
+    sendMessage, notifyTyping, addReaction, clearMessages,
   };
 }

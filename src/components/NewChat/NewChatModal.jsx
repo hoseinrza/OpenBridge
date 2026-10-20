@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { searchUsers, createGroup, normalizeUser } from '../../services/api.js';
+import Avatar from '../ui/Avatar.jsx';
+import Modal from '../ui/Modal.jsx';
 import './NewChatModal.css';
 
 export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
@@ -15,7 +17,9 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
   const inputRef    = useRef(null);
   const debounceRef = useRef(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [mode]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -26,7 +30,7 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
       setLoading(true);
       searchUsers(q)
         .then(list => { setResults(list.map(normalizeUser).filter(Boolean)); setError(''); })
-        .catch(() => setError('جستجو ناموفق بود'))
+        .catch(() => setError('جستجو ناموفق بود؛ اتصال را بررسی کن'))
         .finally(() => setLoading(false));
     }, 350);
 
@@ -45,7 +49,8 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
   function switchMode(next) {
     setMode(next);
     setCreateError('');
-    setTimeout(() => inputRef.current?.focus(), 0);
+    setQuery('');
+    setResults([]);
   }
 
   function toggleMember(user) {
@@ -67,7 +72,7 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
       return;
     }
     if (selected.length === 0) {
-      setCreateError('حداقل یک عضو دیگر انتخاب کنید');
+      setCreateError('حداقل یک عضو دیگر انتخاب کن');
       return;
     }
 
@@ -83,52 +88,68 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
     }
   }
 
+  const title = mode === 'group' ? 'گروه جدید' : 'گفتگوی جدید';
   const emptyText = mode === 'group'
-    ? 'برای افزودن عضو، نام نمایشی یا نام کاربری او را جستجو کن'
-    : 'نام نمایشی یا نام کاربری شخص مورد نظر را وارد کن تا گفتگوی جدید را شروع کنی';
+    ? 'نام نمایشی یا نام کاربری عضو را جستجو کن'
+    : 'نام نمایشی یا نام کاربری شخص را جستجو کن تا گفتگو شروع شود';
 
   return (
-    <div className="newchat-overlay" onClick={onClose}>
-      <div className="newchat-modal" onClick={e => e.stopPropagation()}>
-        <div className="newchat-header">
-          <span>{mode === 'group' ? 'ساخت گروه جدید' : 'گفتگوی جدید'}</span>
-          <button className="newchat-close" onClick={onClose}>
-            <i className="fas fa-xmark" />
-          </button>
+    <Modal onClose={onClose} labelledBy="newchat-title" className="newchat-modal" initialFocus={false}>
+      <header className="newchat-head">
+        <div>
+          <h2 id="newchat-title">{title}</h2>
+          <p>{mode === 'group' ? 'یک گروه بساز و اعضا را انتخاب کن' : 'با جستجوی نام کاربری گفتگو را شروع کن'}</p>
         </div>
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="بستن">
+          <i className="fas fa-xmark" aria-hidden="true" />
+        </button>
+      </header>
 
-        <div className="newchat-tabs">
-          <button
-            className={mode === 'direct' ? 'active' : ''}
-            onClick={() => switchMode('direct')}
-          >
-            <i className="fas fa-user" /> چت خصوصی
-          </button>
-          <button
-            className={mode === 'group' ? 'active' : ''}
-            onClick={() => switchMode('group')}
-          >
-            <i className="fas fa-users" /> گروه جدید
-          </button>
-        </div>
+      <div className="newchat-tabs" role="group" aria-label="نوع گفتگوی جدید">
+        <button
+          type="button"
+          aria-pressed={mode === 'direct'}
+          className={mode === 'direct' ? 'active' : ''}
+          onClick={() => switchMode('direct')}
+        >
+          <i className="fas fa-user" aria-hidden="true" />
+          گفتگوی خصوصی
+        </button>
+        <button
+          type="button"
+          aria-pressed={mode === 'group'}
+          className={mode === 'group' ? 'active' : ''}
+          onClick={() => switchMode('group')}
+        >
+          <i className="fas fa-users" aria-hidden="true" />
+          گروه جدید
+        </button>
+      </div>
 
+      <div className="newchat-panel">
         {mode === 'group' && (
           <div className="newchat-group">
+            <label htmlFor="group-name" className="sr-only">نام گروه</label>
             <input
-              className="newchat-group-name"
+              id="group-name"
+              className="field-input"
               value={groupName}
               onChange={e => { setGroupName(e.target.value); setCreateError(''); }}
               placeholder="نام گروه (مثلاً تیم طراحی)"
               maxLength={60}
             />
             {selected.length > 0 && (
-              <div className="newchat-chips">
+              <div className="newchat-chips" aria-label="اعضای انتخاب‌شده">
                 {selected.map(user => (
                   <span key={user.id} className="newchat-chip">
-                    <img src={user.avatar} alt="" />
-                    <span>{user.name}</span>
-                    <button onClick={() => removeMember(user.id)} title="حذف عضو">
-                      <i className="fas fa-xmark" />
+                    <Avatar src={user.avatar} name={user.name} size={20} />
+                    <span className="newchat-chip-name">{user.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeMember(user.id)}
+                      aria-label={`حذف ${user.name}`}
+                    >
+                      <i className="fas fa-xmark" aria-hidden="true" />
                     </button>
                   </span>
                 ))}
@@ -138,34 +159,45 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
         )}
 
         <div className="newchat-search">
-          <i className="fas fa-magnifying-glass" />
+          <i className="fas fa-magnifying-glass" aria-hidden="true" />
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={e => handleQueryChange(e.target.value)}
-            placeholder={mode === 'group' ? 'جستجوی عضو برای افزودن...' : 'نام نمایشی یا نام کاربری را جستجو کن...'}
+            placeholder={mode === 'group' ? 'جستجوی عضو…' : 'جستجوی نام نمایشی یا نام کاربری…'}
+            aria-label={mode === 'group' ? 'جستجوی عضو برای افزودن' : 'جستجوی کاربر'}
+            autoComplete="off"
           />
         </div>
 
         <div className="newchat-results">
           {loading && (
-            <div className="newchat-state"><i className="fas fa-spinner fa-spin" />در حال جستجو...</div>
+            <div className="newchat-state" role="status">
+              <i className="fas fa-spinner fa-spin" aria-hidden="true" />
+              در حال جستجو…
+            </div>
           )}
 
           {!loading && error && (
-            <div className="newchat-state error"><i className="fas fa-triangle-exclamation" />{error}</div>
+            <div className="newchat-state error" role="alert">
+              <i className="fas fa-triangle-exclamation" aria-hidden="true" />
+              {error}
+            </div>
           )}
 
           {!loading && !error && !query.trim() && (
             <div className="newchat-state">
-              <i className="fas fa-magnifying-glass" />
+              <i className="fas fa-magnifying-glass" aria-hidden="true" />
               {emptyText}
             </div>
           )}
 
           {!loading && !error && query.trim() && results.length === 0 && (
-            <div className="newchat-state"><i className="fas fa-user-slash" />کاربری با این نام پیدا نشد</div>
+            <div className="newchat-state">
+              <i className="fas fa-user-slash" aria-hidden="true" />
+              کاربری با این نام پیدا نشد
+            </div>
           )}
 
           {!loading && results.map(user => {
@@ -173,45 +205,51 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
             return (
               <button
                 key={user.id}
+                type="button"
                 className={`newchat-result ${isSelected ? 'selected' : ''}`}
                 onClick={() => mode === 'group' ? toggleMember(user) : onSelect(user)}
+                aria-pressed={mode === 'group' ? isSelected : undefined}
               >
-                <div className="user-avatar">
-                  <img src={user.avatar} alt={user.name} />
-                  <span className={`status ${user.status}`} />
-                </div>
-                <div className="newchat-result-info">
+                <Avatar src={user.avatar} name={user.name} size={38} status={user.status} />
+                <span className="newchat-result-info">
                   <span className="newchat-result-name">{user.name}</span>
-                  <span className="newchat-result-username" dir="ltr">@{user.username}</span>
+                  {user.username && <span className="newchat-result-username" dir="ltr">@{user.username}</span>}
                   {user.bio && <span className="newchat-result-bio">{user.bio}</span>}
-                </div>
+                </span>
                 {mode === 'group' ? (
-                  <span className={`newchat-check ${isSelected ? 'on' : ''}`}>
+                  <span className={`newchat-check ${isSelected ? 'on' : ''}`} aria-hidden="true">
                     <i className={isSelected ? 'fas fa-circle-check' : 'far fa-circle'} />
                   </span>
                 ) : (
-                  <i className="fas fa-arrow-left newchat-result-go" />
+                  <i className="fas fa-arrow-left newchat-result-go" aria-hidden="true" />
                 )}
               </button>
             );
           })}
         </div>
-
-        {mode === 'group' && (
-          <div className="newchat-footer">
-            {createError && (
-              <div className="newchat-create-error">
-                <i className="fas fa-triangle-exclamation" />{createError}
-              </div>
-            )}
-            <button className="newchat-create" onClick={handleCreate} disabled={creating}>
-              {creating
-                ? <><i className="fas fa-spinner fa-spin" /> در حال ساخت...</>
-                : <><i className="fas fa-user-group" /> ساخت گروه{selected.length > 0 ? ` (${selected.length} عضو)` : ''}</>}
-            </button>
-          </div>
-        )}
       </div>
-    </div>
+
+      {mode === 'group' && (
+        <footer className="newchat-footer">
+          {createError && (
+            <div className="newchat-error" role="alert">
+              <i className="fas fa-triangle-exclamation" aria-hidden="true" />
+              {createError}
+            </div>
+          )}
+          <button type="button" className="btn btn-primary newchat-create" onClick={handleCreate} disabled={creating}>
+            {creating ? (
+              <><i className="fas fa-spinner fa-spin" aria-hidden="true" /> در حال ساخت…</>
+            ) : (
+              <>
+                <i className="fas fa-user-group" aria-hidden="true" />
+                ساخت گروه
+                {selected.length > 0 && <span className="newchat-count">({selected.length.toLocaleString('fa-IR')} عضو)</span>}
+              </>
+            )}
+          </button>
+        </footer>
+      )}
+    </Modal>
   );
 }

@@ -1,4 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
+import Avatar from '../ui/Avatar.jsx';
+
+const STATUS_TEXT = { online: 'آنلاین', idle: 'غیرفعال', dnd: 'مشغول', offline: 'آفلاین' };
 
 export default function ChatHeader({ user, searchQuery, onSearchChange, onOpenProfile, onBack }) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -13,62 +16,100 @@ export default function ChatHeader({ user, searchQuery, onSearchChange, onOpenPr
     }
   }, [searchOpen, onSearchChange]);
 
+  function closeSearch() {
+    setSearchOpen(false);
+  }
+
   return (
-    <div className="chat-header">
+    <header className="chat-header">
       {searchOpen ? (
-        <div className="search-bar">
-          <i className="fas fa-magnifying-glass search-bar-icon" />
+        <div className="chat-search" role="search">
+          <i className="fas fa-magnifying-glass chat-search-icon" aria-hidden="true" />
           <input
             ref={inputRef}
             type="text"
             value={searchQuery}
             onChange={e => onSearchChange(e.target.value)}
-            placeholder="جستجو در پیام‌ها..."
+            onKeyDown={e => { if (e.key === 'Escape') closeSearch(); }}
+            placeholder="جستجو در پیام‌های این گفتگو…"
+            aria-label="جستجو در پیام‌های این گفتگو"
           />
-          <button className="icon-btn" onClick={() => setSearchOpen(false)}>
-            <i className="fas fa-xmark" />
+          {searchQuery && (
+            <button
+              type="button"
+              className="icon-btn chat-search-clear"
+              onClick={() => onSearchChange('')}
+              aria-label="پاک‌کردن جستجو"
+            >
+              <i className="fas fa-xmark" aria-hidden="true" />
+            </button>
+          )}
+          <button
+            type="button"
+            className="icon-btn chat-search-close"
+            onClick={closeSearch}
+            aria-label="بستن جستجو"
+          >
+            <span>بستن</span>
           </button>
         </div>
       ) : (
         <>
-          {onBack && (
-            <button className="icon-btn chat-back-btn" onClick={onBack} title="بازگشت به فهرست گفتگوها">
-              <i className="fas fa-arrow-right" />
-            </button>
-          )}
+          <div className="chat-header-start">
+            {onBack && (
+              <button
+                type="button"
+                className="icon-btn chat-back-btn"
+                onClick={onBack}
+                aria-label="بازگشت به فهرست گفتگوها"
+                title="بازگشت به فهرست گفتگوها"
+              >
+                <i className="fas fa-arrow-right" aria-hidden="true" />
+              </button>
+            )}
 
-          {isGroup ? (
-            <div className="chat-header-info">
-              <div className="user-avatar sm group-avatar">
-                <i className="fas fa-users" />
-              </div>
-              <div>
-                <div className="chat-peer-name">{user.name}</div>
-                <div className="chat-peer-status group-status">{user.memberCount} عضو</div>
-              </div>
-            </div>
-          ) : (
-            <button className="chat-header-info as-button" onClick={() => onOpenProfile?.(user)} title="مشاهده پروفایل">
-              <div className="user-avatar sm">
-                <img src={user.avatar} alt={user.name} />
-                <span className={`status ${user.status}`} />
-              </div>
-              <div>
-                <div className="chat-peer-name">{user.name}</div>
-                <div className="chat-peer-status">
-                  {user.status === 'online' ? 'آنلاین' : user.status === 'idle' ? 'غیرفعال' : 'آفلاین'}
+            {isGroup ? (
+              <div className="chat-peer">
+                <Avatar src={user.avatar} name={user.name} size={40} group />
+                <div className="chat-peer-text">
+                  <span className="chat-peer-name" title={user.name}>{user.name}</span>
+                  <span className="chat-peer-status group-status">
+                    <i className="fas fa-users" aria-hidden="true" />
+                    {user.memberCount ?? 0} عضو
+                  </span>
                 </div>
               </div>
-            </button>
-          )}
+            ) : (
+              <button
+                type="button"
+                className="chat-peer as-button"
+                onClick={() => onOpenProfile?.(user)}
+                title="مشاهده پروفایل"
+              >
+                <Avatar src={user.avatar} name={user.name} size={40} status={user.status} />
+                <div className="chat-peer-text">
+                  <span className="chat-peer-name" title={user.name}>{user.name}</span>
+                  <span className={`chat-peer-status status-${user.status ?? 'offline'}`}>
+                    {STATUS_TEXT[user.status] ?? 'آفلاین'}
+                  </span>
+                </div>
+              </button>
+            )}
+          </div>
 
           <div className="chat-header-actions">
-            <button className="icon-btn" title="جستجو" onClick={() => setSearchOpen(true)}>
-              <i className="fas fa-magnifying-glass" />
+            <button
+              type="button"
+              className="icon-btn"
+              title="جستجو در پیام‌ها"
+              aria-label="جستجو در پیام‌های این گفتگو"
+              onClick={() => setSearchOpen(true)}
+            >
+              <i className="fas fa-magnifying-glass" aria-hidden="true" />
             </button>
           </div>
         </>
       )}
-    </div>
+    </header>
   );
 }

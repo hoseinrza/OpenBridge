@@ -1,0 +1,58 @@
+.avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--avatar-size, 40px);
+  height: var(--avatar-size, 40px);
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: calc(var(--avatar-size, 40px) * 0.4);
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--surface-2);
+  color: var(--text-2);
+  overflow: hidden;
+}
+
+.avatar-group .avatar-fallback {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.avatar-group .avatar-fallback i { font-size: calc(var(--avatar-size, 40px) * 0.36); }
+
+.presence {
+  position: absolute;
+  bottom: 0;
+  inset-inline-start: 0;
+  width: max(10px, calc(var(--avatar-size, 40px) * 0.26));
+  height: max(10px, calc(var(--avatar-size, 40px) * 0.26));
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  background: var(--text-3);
+}
+.presence-online { background: var(--success); }
+.presence-idle   { background: var(--warning); }
+.presence-dnd    { background: var(--danger); }
+.presence-offline{ background: var(--text-3); }

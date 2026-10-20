@@ -1,0 +1,93 @@
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-5);
+  background: rgba(20, 17, 14, 0.46);
+  animation: modal-fade var(--dur) var(--ease) both;
+}
+
+html[data-theme='dark'] .modal-overlay { background: rgba(0, 0, 0, 0.62); }
+
+.modal-panel {
+  width: 100%;
+  max-width: 420px;
+  max-height: min(620px, calc(100dvh - 48px));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+  animation: modal-in var(--dur) var(--ease) both;
+}
+
+@keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Confirm dialog ──────────────────────────────────────────── */
+.confirm-modal { max-width: 380px; }
+
+.confirm-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-6) var(--sp-4);
+  text-align: center;
+}
+
+.confirm-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--sp-1);
+  border-radius: 50%;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 19px;
+}
+
+.confirm-body h2 {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.confirm-body p {
+  font-size: var(--text-sm);
+  line-height: 1.9;
+  color: var(--text-2);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-6) var(--sp-6);
+}
+
+.confirm-actions .btn { flex: 1; }
+
+@media (max-width: 520px) {
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal-panel {
+    max-width: none;
+    max-height: calc(100dvh - 32px);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    animation: modal-up var(--dur) var(--ease) both;
+  }
+  @keyframes modal-up {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+}

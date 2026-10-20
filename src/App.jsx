@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import LoginPage     from './components/Auth/LoginPage.jsx';
-import ChatPage      from './components/Chat/ChatPage.jsx';
-import VideoCallPage from './components/VideoCall/VideoCallPage.jsx';
+import LoginPage from './components/Auth/LoginPage.jsx';
+import ChatPage  from './components/Chat/ChatPage.jsx';
 import { login, register, logout } from './services/api.js';
 
 function loadUser() {
@@ -40,9 +39,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/"      element={<ChatPage      currentUser={currentUser} onLogout={handleLogout} onProfileUpdate={handleProfileUpdate} />} />
-        <Route path="/video" element={<VideoCallPage currentUser={currentUser} onLogout={handleLogout} />} />
-        <Route path="*"      element={<Navigate to="/" replace />} />
+        <Route path="/" element={<ChatPage currentUser={currentUser} onLogout={handleLogout} onProfileUpdate={handleProfileUpdate} />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );
