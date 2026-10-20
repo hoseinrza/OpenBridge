@@ -1,10 +1,16 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Query, UseGuards, Request } from '@nestjs/common';
+import {
+  Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query,
+  Request, UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RateLimit, RateLimitGuard } from '../common/rate-limit.guard';
+import { CONTACT_MATCH_LIMIT, CONTACT_MATCH_WINDOW_SECONDS } from '../config/env';
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { MatchContactsDto } from './dto/match-contacts.dto';
 
 @Controller('users')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RateLimitGuard)
 export class UsersController {
   constructor(private users: UsersService) {}
 
@@ -31,6 +37,15 @@ export class UsersController {
     if (!query) return [];
     const users = await this.users.search(query, req.user.id);
     return this.users.withOnlineStatus(users);
+  }
+
+  // Address-book sync. The client sends the numbers it already holds; the
+  // reply only says which of them belong to an account.
+  @Post('contacts/match')
+  @HttpCode(200)
+  @RateLimit({ limit: CONTACT_MATCH_LIMIT, windowMs: CONTACT_MATCH_WINDOW_SECONDS * 1000 })
+  matchContacts(@Request() req, @Body() dto: MatchContactsDto) {
+    return this.users.matchContacts(req.user.id, dto.phones);
   }
 
   @Get(':id')

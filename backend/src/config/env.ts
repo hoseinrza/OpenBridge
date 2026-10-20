@@ -63,6 +63,13 @@ export const AUTH_OTP_WINDOW_SECONDS = positiveInt('AUTH_OTP_WINDOW_SECONDS', 60
 // A verified phone number gets this much time to finish the sign-up steps.
 export const SIGNUP_TOKEN_TTL_SECONDS = positiveInt('SIGNUP_TOKEN_TTL_SECONDS', 900);
 
+// Contact sync: one request can carry a whole address book, so the list length
+// is capped, and the endpoint is rate limited per IP because any "does this
+// number have an account?" route is an enumeration target.
+export const CONTACT_MATCH_MAX_PHONES = positiveInt('CONTACT_MATCH_MAX_PHONES', 500);
+export const CONTACT_MATCH_LIMIT = positiveInt('CONTACT_MATCH_LIMIT', 20);
+export const CONTACT_MATCH_WINDOW_SECONDS = positiveInt('CONTACT_MATCH_WINDOW_SECONDS', 900);
+
 // Refresh tokens are opaque and rotate on every use. Sessions expire after
 // this many days regardless of activity.
 export const REFRESH_TOKEN_TTL_DAYS = positiveInt('REFRESH_TOKEN_TTL_DAYS', 30);

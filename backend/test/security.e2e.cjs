@@ -18,6 +18,9 @@ process.env.AUTH_OTP_REQUEST_LIMIT = process.env.AUTH_OTP_REQUEST_LIMIT || '50';
 process.env.AUTH_OTP_REQUEST_PHONE_LIMIT = process.env.AUTH_OTP_REQUEST_PHONE_LIMIT || '6';
 process.env.AUTH_OTP_VERIFY_LIMIT = process.env.AUTH_OTP_VERIFY_LIMIT || '50';
 process.env.AUTH_SIGNUP_LIMIT = process.env.AUTH_SIGNUP_LIMIT || '50';
+// The contact-match bucket is kept small so the rate-limit case below can
+// exhaust it; every other call in the suite gives itself a fresh client IP.
+process.env.CONTACT_MATCH_LIMIT = process.env.CONTACT_MATCH_LIMIT || '3';
 
 const { NestFactory } = require('@nestjs/core');
 const { ValidationPipe } = require('@nestjs/common');
@@ -100,6 +103,17 @@ async function api(path, { method = 'GET', token, body, headers = {} } = {}) {
 function freshPhone() {
   // 09 + nine digits, the canonical form the API stores.
   return `09${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}`;
+}
+
+// Each contact-match call needs its own bucket, so it gets its own client IP.
+let ipSequence = 0;
+function freshIp() {
+  ipSequence += 1;
+  return { 'X-Forwarded-For': `203.0.113.${ipSequence % 240}` };
+}
+
+function toPersianDigits(value) {
+  return String(value).replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
 }
 
 // Completes the whole sign-up: request a code, verify it, then finish the
@@ -785,6 +799,126 @@ test('legacy accounts whose username is their phone still sign in by OTP', async
   });
   assert.equal(renamed.status, 200);
   assert.equal(renamed.data.displayName, 'نام خانوادگی', 'display name derived from the parts');
+});
+
+test('device contacts are matched without exposing phone numbers', async () => {
+  const { alice, bob } = global.__ctx;
+  const { phone: bobPhone } = await prisma.user.findUnique({ where: { id: bob.user.id }, select: { phone: true } });
+  const { phone: alicePhone } = await prisma.user.findUnique({ where: { id: alice.user.id }, select: { phone: true } });
+
+  const notRegistered = freshPhone();
+  const storedWithPlus = `+98${bobPhone.slice(1)}`;
+  const persianDigits = toPersianDigits(freshPhone());
+
+  // A realistic address book: a landline, the same account written three
+  // different ways, numbers nobody owns, and the caller's own number.
+  const phones = [
+    '02188776655',
+    storedWithPlus,
+    persianDigits,
+    notRegistered,
+    alicePhone,
+    `0098${bobPhone.slice(1)}`,
+    bobPhone,
+  ];
+
+  const matched = await api('/users/contacts/match', {
+    method: 'POST',
+    token:  alice.token,
+    headers: freshIp(),
+    body:   { phones },
+  });
+  assert.equal(matched.status, 200, 'contact match');
+  // Only distinct valid mobile numbers other than the caller's own are checked.
+  assert.equal(matched.data.checked, 3, 'landline, self and duplicates are dropped');
+  assert.equal(matched.data.matches.length, 1, 'one account found');
+  assert.equal(matched.data.matches[0].index, 1, 'mapped to the first input position of that number');
+  assert.equal(matched.data.matches[0].user.id, bob.user.id, 'matched account');
+
+  const payload = JSON.stringify(matched.data);
+  assert.ok(!payload.includes(bobPhone), 'matched phone not echoed');
+  assert.ok(!payload.includes(notRegistered), 'unmatched phone not echoed');
+  assert.ok(!/09\d{9}/.test(payload), 'no Iranian mobile number anywhere in the response');
+  assert.equal(matched.data.matches[0].user.phone, undefined, 'profile carries no phone field');
+  assert.equal(typeof matched.data.matches[0].user.online, 'boolean', 'presence included');
+
+  // An address book where nobody has an account is an empty result, not an error.
+  const nobody = await api('/users/contacts/match', {
+    method: 'POST',
+    token:  alice.token,
+    headers: freshIp(),
+    body:   { phones: [notRegistered, '02188776655'] },
+  });
+  assert.equal(nobody.status, 200);
+  assert.deepEqual(nobody.data, { checked: 1, matches: [] });
+});
+
+test('contact match input is validated and requires a session', async () => {
+  const { alice } = global.__ctx;
+  const maxPhones = Number(process.env.CONTACT_MATCH_MAX_PHONES || 500);
+
+  const anonymous = await api('/users/contacts/match', {
+    method: 'POST',
+    body:   { phones: ['09123456789'] },
+  });
+  assert.equal(anonymous.status, 401, 'no session, no matching');
+
+  const empty = await api('/users/contacts/match', {
+    method: 'POST',
+    token:  alice.token,
+    headers: freshIp(),
+    body:   { phones: [] },
+  });
+  assert.equal(empty.status, 400, 'an empty address book is a client error');
+
+  const oversized = await api('/users/contacts/match', {
+    method: 'POST',
+    token:  alice.token,
+    headers: freshIp(),
+    body:   { phones: Array.from({ length: maxPhones + 1 }, (_, i) => `09${String(i).padStart(9, '0')}`) },
+  });
+  assert.equal(oversized.status, 400, 'list length is capped');
+
+  const notStrings = await api('/users/contacts/match', {
+    method: 'POST',
+    token:  alice.token,
+    headers: freshIp(),
+    body:   { phones: [1234567890] },
+  });
+  assert.equal(notStrings.status, 400, 'numbers must arrive as strings');
+
+  const missing = await api('/users/contacts/match', {
+    method: 'POST',
+    token:  alice.token,
+    headers: freshIp(),
+    body:   {},
+  });
+  assert.equal(missing.status, 400, 'phones is required');
+});
+
+test('contact matching is rate limited per client', async () => {
+  const { alice } = global.__ctx;
+  const headers = { 'X-Forwarded-For': '198.51.100.77' };
+  const limit = Number(process.env.CONTACT_MATCH_LIMIT);
+
+  for (let attempt = 1; attempt <= limit; attempt += 1) {
+    const result = await api('/users/contacts/match', {
+      method: 'POST',
+      token:  alice.token,
+      headers,
+      body:   { phones: ['09123456789'] },
+    });
+    assert.equal(result.status, 200, `match ${attempt} allowed`);
+  }
+
+  const blocked = await api('/users/contacts/match', {
+    method: 'POST',
+    token:  alice.token,
+    headers,
+    body:   { phones: ['09123456789'] },
+  });
+  assert.equal(blocked.status, 429, 'the endpoint cannot be used to enumerate accounts quickly');
+  assert.ok(Number(blocked.headers.get('retry-after')) > 0, 'Retry-After header');
 });
 
 test('OTP requests are throttled per phone number', async () => {
