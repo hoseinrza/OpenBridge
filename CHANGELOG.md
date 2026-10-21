@@ -4,6 +4,73 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.5] - 2026-10-21
+
+### Added
+- **Direct chats are now end-to-end encrypted on the web.** A direct
+  conversation between two web devices carries nothing but MLS ciphertext: the
+  text is encrypted on the sender's device and decrypted only on the
+  recipient's, and the server stores an opaque base64 blob per message. This is
+  the first release in which any user-visible message is encrypted.
+- `shared/e2ee/client.js`: the protocol half of the client — MLS device identity,
+  KeyPackage pool, per-conversation group state, and the strict-order receive
+  pipeline. Written to run unchanged on the phone; `src/services/e2ee.js` only
+  supplies a browser (IndexedDB store, socket) and keeps one client per tab.
+- The web device boots at sign-in: it registers itself and uploads a pool of 8
+  KeyPackages, so an account is invitable before anybody opens a chat with it
+  and its very first inbound message can already be encrypted.
+- Per-account key storage: `openbridge-e2ee-<userId>` in IndexedDB. A second
+  account in another tab cannot read the first one's keys or records, and keys
+  survive signing out — the same browser is the same device, and discarding its
+  keys would make every conversation it joined permanently unreadable.
+- Lazy, read-only-first negotiation: opening a chat probes
+  `GET /api/messages/e2ee/direct/:userId`, and only a "not encrypted" answer
+  claims the peer's KeyPackages and flips the flag. Claiming before locking is
+  what keeps the fallback honest — a peer with no keys fails with `no-keys` and
+  its chat stays an ordinary plaintext one instead of becoming a conversation
+  that refuses every message.
+- Every active device of both users is invited, and the peer joins from the
+  Welcome at envelope 1, so a device that was offline while the group was
+  created can still build it purely from the ordered stream.
+- Encrypted chat UI: a divider labeling the last plaintext message («از این پیام
+  به بعد…» with a lock) so pre-encryption history is honest rather than
+  disguised, an encrypted indicator in the header and chat list, the server's
+  reason surfaced when a send is refused, and — inside an encrypted chat —
+  attachments and reactions blocked instead of uploaded in the clear, and search
+  run over this device's own decrypted cache with a placeholder that says so.
+- Read receipts now cover encrypted bubbles: `e2ee:read` broadcasts
+  `message:read`, so the one forward-only mark serves both chat kinds.
+- Six client-level e2e cases in `backend/test/e2ee-client.e2e.cjs`, wired into
+  `npm run test:e2e` (**38/38 pass locally**). They drive the real
+  `shared/e2ee/client.js` against the live Nest server and PostgreSQL with no
+  mocks: ciphertext-only storage, key state surviving a device reload, all
+  active devices invited, a late envelope reordered and a duplicate ignored,
+  and a relabelled sender / a blob from another conversation / an uninvited
+  device all refused.
+
+### Fixed
+- A chat with an account that had never registered a device became
+  envelope-only and refused everything, leaving a stuck composer with a
+  meaningless error. The flag is now set only after a decryptable group exists.
+- Read receipts were silently dropped for direct conversations (the handler
+  matched the peer id only for groups).
+- The Welcome message inflated the unread badge of the device that received it,
+  and the conversation on screen kept showing a badge it had already read.
+
+### Known limits of this release
+- **Mobile is not just unencrypted, it is locked out of an encrypted chat.** No
+  Expo client holds keys, so a chat a web user encrypts rejects that user's
+  phone with a plaintext refusal and no explanation. Next release must close
+  this, on mobile or with a visible "update the app to read this chat" state.
+- Groups on every client, and any existing direct chat nobody has opened from
+  the web app since this release, are still plaintext.
+- No safety numbers: key adoption is trust-on-first-use. A device added after a
+  conversation started cannot read its earlier messages. Losing every device
+  loses the history — by decision, no recovery exists at any access level.
+- The encrypted states have no visual QA: screenshots could not be captured in
+  this environment, so all web verification was DOM assertions and DB queries
+  across three Vite origins, not visual review.
+
 ## [1.1.4] - 2026-10-21
 
 ### Added

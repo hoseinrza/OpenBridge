@@ -577,20 +577,103 @@ cannot read content.
 - Not yet done: clients. Until web and mobile hold keys and build MLS groups, no
   conversation can become `e2ee` from the UI, and nothing is encrypted.
 
+## E2EE Phase 2b on the web: the browser holds the keys (2026-10-21)
+
+**This is the first batch that actually encrypts user-visible messages.** A
+direct chat opened from the web app between two web devices is now end-to-end
+encrypted; the server keeps nothing but opaque ciphertext for it. Groups and
+mobile are still plaintext.
+
+- `shared/e2ee/client.js` (new) is the protocol half of the client, written for
+  the phone to run the same code: MLS identity, key-package pool, per-conversation
+  group state, the strict-order receive pipeline, encrypt→append→broadcast→apply.
+  `src/services/e2ee.js` only supplies what a browser has — an IndexedDB store
+  and a socket — and keeps one client per tab.
+- Keys live in `openbridge-e2ee-<userId>` (IndexedDB), **one database per signed-in
+  account**, so a second tab logged in as somebody else cannot read the first
+  one's records. Signing out keeps the keys: the same browser is the same device,
+  and dropping its keys would make every conversation it joined unreadable
+  forever. Only the in-memory client is disposed.
+- The device boots at sign-in (`src/App.jsx` effect): register, then mint and
+  upload a pool of 8 KeyPackages. Without this, an account is uninvitable until
+  somebody opens a chat with it, which would force a plaintext first message.
+- Negotiation is lazy and read-only-first: opening a chat asks
+  `GET /api/messages/e2ee/direct/:userId`; only when the answer is "not
+  encrypted" does the client claim the peer's packages and flip the flag.
+  **Claim-before-lock** is the invariant that makes the fallback honest — a peer
+  with no pooled keys fails with `no-keys` and its chat stays an ordinary
+  plaintext one, instead of becoming a conversation that refuses every message.
+- Both sides are invited, and every active device of each: the peer joins through
+  the Welcome that is envelope 1, so a device that was offline at creation can
+  still build the group purely from the ordered stream (`ratchetTreeExtension`).
+- One receive path per conversation, serialized: envelopes are applied strictly in
+  `seq` order, a gap triggers catch-up, the caller's own envelope ids (not account
+  ids) are echoed so its own broadcasts are skipped, and a protocol failure is
+  *recorded on the conversation* instead of thrown at whatever UI happened to be
+  mounted. A broken ratchet must not silently drop text.
+- Plaintext has no path in from the UI: an encrypted chat sends over `e2ee:append`
+  only. Attachments and reactions are blocked there rather than silently uploaded
+  in the clear; search becomes local over the device's own decrypted cache; the
+  transcript shows a divider («از این پیام به بعد…») at the first encrypted
+  message so pre-encryption history is labeled, not disguised.
+- Read marks ride the same high-water mark: `e2ee:read` broadcasts `message:read`,
+  so encrypted bubbles get read receipts too (the handler previously matched only
+  groups, which silently dropped them). The Welcome is consumed at join so it
+  cannot inflate the unread badge, and the chat on screen is forced to zero unread.
+- Product bug found by driving the real UI, fixed and pinned by a test: an account
+  with no registered device produced an encrypted-looking chat that refused
+  everything («این گفتگو فقط بسته رمزنگاری‌شده می‌پذیرد») with a stuck composer.
+  Two more read-receipt/unread defects came from the same run.
+- Six client-level e2e cases in `backend/test/e2ee-client.e2e.cjs` (new file, in
+  `npm run test:e2e`) drive the **real** `shared/e2ee/client.js` against the live
+  Nest server and PostgreSQL — no mocks: full open-and-store-only-ciphertext
+  lifecycle, keys surviving a device reload, every active device invited, late
+  envelope reordered and duplicate ignored, a relabelled sender / a blob from
+  another conversation / an uninvited device all refused, and the keyless-peer
+  fallback.
+- Verified in a real browser across separate origins (5173/5174/5175 so per-origin
+  IndexedDB isolation was tested rather than assumed): registration, first send
+  creating the group, peer join, live delivery both ways, offline catch-up in
+  order, read marks and badges, the plaintext→encrypted divider on both devices,
+  local search, blocked attachments, and a DB audit confirming the opted-in chats
+  hold envelopes only. Screenshots could **not** be captured (the app's browser
+  view reports `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`), so visual QA of these
+  states is still owed; every claim above comes from DOM assertions and queries.
+- Not done: mobile. A web-activated chat locks the phone out of sending — the
+  backend refuses its plaintext — and mobile shows no reason why. That interim
+  gap is the first thing Phase 2c must close.
+
 ## Validation actually run
 
-- `backend`: `npm run test:e2e` — **32/32 passed** on 2026-10-21 against the
-  real local PostgreSQL: the 26 earlier cases plus six E2EE Phase 2a transport
+- `backend`: `npm run test:e2e` — **38/38 passed** on 2026-10-21 against the
+  real local PostgreSQL: the 32 earlier cases, then six E2EE Phase 2a transport
   cases (opt-in and one-way flag, plaintext refused inside an encrypted chat,
   gapless strict-order numbering under 12 concurrent appends, catch-up paging
   with membership checks, forward-only read marks, per-conversation isolation
-  and the group guard). The counts in the bullets below belong to the batches
-  that produced them (11 tests then, 19 after contact matching, 26 after
-  Phase 1); the suite has only grown.
+  and the group guard), then six Phase 2b client cases that run the real
+  `shared/e2ee/client.js` against the live server (encrypted open with
+  ciphertext-only storage, state surviving a device reload, all active devices
+  invited, late envelope reordered and duplicate ignored, forged sender /
+  foreign blob / uninvited device all refused, keyless-peer fallback).
+  The counts in the bullets below belong to the batches that produced them (11
+  tests then, 19 after contact matching, 26 after Phase 1, 32 after Phase 2a);
+  the suite has only grown.
 - Live check on the running dev server (`npm run start:dev`): every new route
   appears in the Nest router log, unauthenticated calls return 401, and a
   throwaway two-account session exercised opt-in, append, broadcast, catch-up
-  and read marks end to end. Scratch accounts were removed afterwards.
+  and read marks end to end. Probe accounts were deleted afterwards.
+- Real-browser Phase 2b run, three Vite origins (5173/5174/5175) against the
+  running backend, each origin holding its own account and its own IndexedDB:
+  sign-in device registration, first message creating the MLS group, peer join
+  from the Welcome, live encrypted delivery both directions, an away device
+  catching up in order, read marks clearing badges, the pre-encryption divider
+  on both sides, local-only search, attachments blocked, and a peer with no keys
+  falling back to plaintext with a visible reason. A direct Prisma audit of the
+  opted-in conversations confirmed `messages` held nothing new and
+  `e2ee_envelopes` held only base64 blobs.
+  **Caveat: no screenshots were captured** — the app's browser view reported
+  `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`, so these checks are DOM assertions and
+  DB queries, not visual QA.
 
 - Root: `npm run test:e2ee` — 5/5 passed (MLS lifecycle on two ciphersuites,
   cross-provider interop both directions, and the same lifecycle with
@@ -636,15 +719,30 @@ cannot read content.
 
 ## Unresolved / known issues
 
-- No E2EE; the server stores plaintext messages. A design proposal exists in
-  `docs/engineering/E2EE_DESIGN.md`; its Phase 0 library gate ran on 2026-10-21
-  and was then closed (§3.6) with a pure-JS MLS provider now living in
-  `shared/e2ee/` behind `npm run test:e2ee`. Phase 1 landed the same day: the
-  backend registers devices and stores public KeyPackages only (design doc §4).
-  Phase 2a landed the same day too: an opt-in `e2ee` conversation flag plus an
-  ordered, opaque envelope transport the server cannot read (design doc §6). No
-  product code imports `shared/e2ee`, no client calls `/api/e2ee` or
-  `e2ee:append`, and no message is encrypted.
+- **Encryption is live on web direct chats only.** Since Phase 2b landed
+  (2026-10-21), a direct conversation opened from the web app between two web
+  devices carries nothing but ciphertext the server cannot read. Everything else
+  is still plaintext and the server still reads it: **groups on every client,
+  mobile on every client, and any existing direct chat nobody has opened from
+  the web app since the rollout** (negotiation is lazy, so an untouched chat
+  stays plaintext). Design doc §11 is the authoritative statement.
+- **Mobile is now the blocking gap, not an unfinished nice-to-have.** A chat a
+  web user encrypted locks the phone out of sending: the backend refuses
+  plaintext into an `e2ee` conversation with 400, and the mobile UI has no MLS
+  client and no explanation. Until Phase 2c ships, web users who chat with mobile
+  users can make that chat unusable for them. The mobile composer needs either
+  the protocol or a visible "this chat is encrypted — update the app" state.
+- **No key verification yet.** Key adoption is trust-on-first-use: nothing shows
+  safety numbers, so a key substituted by the server at first contact would not
+  be detected. Phase 5.
+- **A device added after a conversation started cannot read it.** The Welcome
+  addresses the devices that existed when the group was created, and there is no
+  history sharing between devices, so a second browser or a reinstalled phone
+  joins an ongoing chat with a gap. Not solved by Phase 2b.
+- **No recovery, by decision.** Losing every device loses the history; only a
+  user-initiated passphrase-encrypted export is allowed and it is Phase 5 work.
+- **Attachments and reactions are blocked inside encrypted chats**, not encrypted
+  (Phase 4), and search there covers only this device's local cache.
 - The envelope stream is unbounded: `e2ee_envelopes` rows are never deleted, and
   an encrypted chat has no server-visible read state to prune against (a
   high-water mark tells us what *one* participant has seen, not what all of them
@@ -664,9 +762,11 @@ cannot read content.
   re-checked on download.
 - Malware scanning is off unless a clamd instance is configured; encrypted
   content (future E2EE) cannot be scanned server-side.
-- No message edit/delete or account deletion. Device-based E2EE key management
-  now exists on the server (`/api/e2ee/devices`) but in no client, so a user
-  still cannot see or remove a device holding their keys.
+- No message edit/delete or account deletion. Device-based key management exists
+  on both sides now (the web app registers a device at sign-in), but there is no
+  UI for it: a user still cannot list, name or revoke a device holding their
+  keys, even though `GET /api/e2ee/devices` and `DELETE
+  /api/e2ee/devices/:clientId` are live and tested.
 - Database rows and attachment files are unencrypted at rest.
 - Video calling UI remains hidden on web and was removed from mobile navigation;
   signaling code is present but unused.
@@ -711,24 +811,33 @@ cannot read content.
    one API instance.
 4. Add authorization tests for group membership changes (add/remove participant)
    and message edit/delete once those endpoints exist.
-5. E2EE Phase 2b: put keys on the clients. Web and mobile generate their identity
-   and KeyPackage pool locally, register through `/api/e2ee/devices`, refill it
-   when the pool runs low, and turn a new direct conversation into a two-member
-   MLS group fed by `GET /api/e2ee/users/:id/key-packages`. The whole server side
-   is now done and tested (Phase 1 keys, Phase 2a transport: opt-in flag,
-   gapless per-conversation ordering, catch-up paging, forward-only read marks,
-   no plaintext path into an encrypted chat). What is left is client key
-   persistence (IndexedDB on web, AsyncStorage + `expo-crypto` on Expo, Metro
-   configured so `shared/e2ee` resolves on mobile), MLS group setup from a
-   claimed bundle, decrypt into a local plaintext cache for search, and the
-   "encrypted" / "sent before encryption" labels. The custody rule is fixed and
-   already encoded in the schema: no escrow, no recovery, nothing at any access
-   level can read message content (design doc §4). What remains unproven is the
-   provider on a real phone and a real browser tab.
-6. Add a web security review pass (CSP, token storage trade-off) and cover the
+5. **E2EE Phase 2c: keys on mobile — this is now the priority that blocks
+   everything else.** Web Phase 2b landed the same day (design doc §6): the
+   browser registers its device at sign-in, pools KeyPackages in IndexedDB,
+   builds the two-member MLS group on the first send, joins from the Welcome,
+   and encrypts for real. What Phase 2c must reproduce on Expo/Hermes: Metro
+   `watchFolders`/`extraNodeModules` so `shared/e2ee` resolves, an
+   `expo-crypto` `getRandomValues` polyfill over the pure-JS provider, an
+   AsyncStorage-backed key store, the same read-only-first negotiation, and
+   `npx expo export --platform android` to prove the bundle.
+   **The interim hazard is user-visible and must be closed in the same batch:**
+   a chat a web user encrypted rejects the phone's plaintext sends with a bare
+   400, so until mobile speaks MLS the composer has to say "this chat is
+   encrypted — update the app" instead of failing silently.
+   Custody rule unchanged and already encoded: no escrow, no recovery, nothing
+   at any access level can read message content (design doc §4). The provider
+   still has never run on a real phone.
+6. Then E2EE Phase 3 (groups): commit/welcome routing through the ordered
+   transport, rekey on membership change, removal semantics. Groups are the last
+   large plaintext surface, and only Phase 3 may set the flag on one.
+7. Add a web security review pass (CSP, token storage trade-off) and cover the
    signed-URL download path with a cross-user authorization test.
-7. Run the mobile app on a native emulator or device (RTL header, safe areas,
+8. Run the mobile app on a native emulator or device (RTL header, safe areas,
    keyboard avoidance, the contacts permission prompt and address-book read) and
    add automated visual-regression coverage for the documented viewport matrix.
-8. Self-host Font Awesome so the web client can run without a CDN and under a
+   Phase 2b's encrypted states were only checked structurally — the app view
+   could not capture screenshots (`NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`), so the
+   padlock, the pre-encryption divider and the blocked-attachment note have no
+   visual QA yet.
+9. Self-host Font Awesome so the web client can run without a CDN and under a
    strict CSP.

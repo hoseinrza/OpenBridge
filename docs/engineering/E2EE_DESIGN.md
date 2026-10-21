@@ -42,7 +42,7 @@ as a claim that messages are encrypted today.
 |------|-------|
 | Clients | React web (Vite), Expo React Native mobile |
 | Server | NestJS + PostgreSQL + Socket.IO; verifies membership on every event |
-| Message storage | `messages.text` and `messages.fileUrl` in plaintext |
+| Message storage | `messages.text` and `messages.fileUrl` in plaintext, except encrypted direct chats, which write only opaque `e2ee_envelopes` rows |
 | Auth | Short-lived access JWT bound to a server-side session, rotating refresh token |
 | Attachments | Server-generated UUID files, signed expiring download URLs |
 | Group size | Small (tens of members); groups are currently web-only |
@@ -417,6 +417,75 @@ Properties asserted by `backend/test/security.e2e.cjs` (32/32):
   ciphertexts a client has read, and unread is "peer envelopes above my mark".
   A replayed or nonsense mark cannot rewind it.
 
+### Phase 2b landed (2026-10-21): the web client holds the keys
+
+The client half of a direct conversation is in `shared/e2ee/` (protocol, no
+browser APIs) plus `src/services/e2ee.js` (IndexedDB, socket, one client per
+tab) and `src/hooks/useChat.js` (what a conversation this device can carry).
+`backend/test/e2ee-client.e2e.cjs` (6/6) runs that same core against the real
+server with real MLS, and the flow was then driven in a browser across three Vite
+origins (5173/5174/5175), one account per origin, so per-origin key isolation
+was exercised rather than assumed. Those checks are DOM assertions and Prisma
+queries: the environment reported `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE` and
+**no screenshot was captured**, so the visual states below still need a review
+pass.
+
+- **A signed-in device is an invitable device.** Registering and pooling
+  KeyPackages happens at sign-in (`App.jsx`), not at first use. A device that
+  only registers when its user opens a chat cannot be invited into the first
+  conversation somebody else starts.
+- **Keys live in IndexedDB under a per-account database name
+  (`openbridge-e2ee-<userId>`)** so one browser tab signed in as somebody else
+  cannot read another account's records. Signing out closes the client and the
+  envelope socket but never erases the store: the same browser is the same
+  device, and dropping its keys would make every conversation it joined
+  unreadable for good. Forgetting keys is a deliberate, unimplemented action
+  (§10).
+- **Negotiation is lazy and read-only.** Opening a chat only probes
+  `GET /api/messages/e2ee/direct/:userId`; the MLS group — and with it the
+  server's one-way `e2ee` flag — is created by the first send. A chat is never
+  flipped to envelope-only on the strength of a page view.
+- **Peer capability is checked before the server is told.** `openDirect` claims
+  the peer's KeyPackages *first* and stops with `no-keys` if there is nothing to
+  invite, so an account whose devices hold no key material can still be
+  messaged in plaintext. Claiming first is what keeps that true: the flag flips
+  only once a group exists that somebody can decrypt. The header then says
+  «بدون رمزنگاری» with the reason instead of silently pretending otherwise.
+- **The Welcome is envelope one and the joiner needs nothing else**
+  (`ratchetTreeExtension: true`), which is what lets a device that was offline
+  when the chat started read it later. Every active device of the peer — and of
+  the sender — is added in the same commit.
+- **Delivery is ordered per conversation, and a stream that cannot continue says
+  so.** `receive`/`catchUp` never throw at the caller: a gap, an unreadable blob
+  or an unknown sender is recorded on the conversation (`error`) and the UI
+  refuses to send into it. On reconnect every open conversation is walked
+  (`catchUpAll`), not only the visible one, because ratchets are per conversation.
+- **Own traffic is recognised by envelope id, not by account.** A device keeps
+  the ids it submitted; an event carrying one of them advances the mark without
+  being decrypted. Matching on the account instead would make a second device of
+  the same user unable to read the chat.
+- **A Welcome is consumed at the moment of joining** (`markRead` right after the
+  join), because it is not a message anybody can read and would otherwise sit in
+  the unread badge as if it were one.
+- **Attachments and reactions do not go into an encrypted chat yet.** The
+  composer disables the paperclip with a reason, and the reaction bar is hidden
+  on decrypted bubbles: the server cannot see a message id it never received, so
+  there is nothing to react to. Both are Phase 4 / post-Phase-2 work.
+- **Search is local.** The header search filters this device's decrypted cache,
+  and its placeholder says so («جستجو در پیام‌های این دستگاه»), because the
+  server holds nothing searchable.
+- **Read receipts ride on the same mark.** `e2ee:read` moves the participant
+  high-water mark and the gateway broadcasts `message:read`, so a delivered
+  encrypted message shows "خوانده شد" — a conversation-level fact, not proof
+  about individual messages.
+- **What the live run proved and what it did not.** Proved in the browser: two
+  origins exchanging ciphertext, an offline origin catching up in `seq` order,
+  badges and receipts following the marks, the divider appearing once per side,
+  and the fallback when the peer has no keys. Not proved: how any of it *looks*.
+  `take_screenshot` failed with `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE` in this
+  environment, so no encrypted state has had visual QA at the documented
+  viewports, and none is claimed here.
+
 ### New/changed tables
 
 Landed: `devices`, `key_packages` (§4), `e2ee_envelopes`, `Conversation.e2ee`,
@@ -473,10 +542,12 @@ Still proposed, deliberately not built:
    why. *The server half landed on 2026-10-21 (§6, "Phase 2a landed"): the
    opt-in flag, the ordered opaque envelope stream, the catch-up read, the
    forward-only read mark, and the refusal of plaintext inside an encrypted
-   chat.* **No client encrypts anything yet**, so every conversation in
-   production is still plaintext and §11 is the accurate statement of behavior.
-   What remains is the client: MLS identity + KeyPackage pool in the browser and
-   in Expo, a two-member group built from a claimed bundle, and decrypt-into-local-cache.
+   chat. The web client half landed the same day (§6, "Phase 2b landed"): the
+   browser now registers a device, pools KeyPackages, builds the two-member MLS
+   group and encrypts for real.* **Direct chats opened from the web app are
+   therefore end-to-end encrypted**; §11 states the exact remaining gaps.
+   What remains is mobile: an Expo client that holds keys, joins the same group
+   and refuses to send plaintext into an encrypted chat.
 4. **Phase 3 — groups.** MLS already models a group, so this is commit/welcome
    routing through the ordered delivery service, rekey on membership change,
    removal semantics (a removed leaf cannot open the new epoch), and per-device
@@ -528,7 +599,12 @@ security bug.
    `crypto.subtle` trapped, so Expo Go stays supported and no native module is
    needed. Device verification is still owed.*
 3. Is E2EE opt-in per conversation, or default-on for new direct chats once all
-   active devices support it?
+   active devices support it? — *Answered in practice by Phase 2b, in the
+   "default-on" direction: a web client encrypts a direct chat whenever the peer
+   has invitable keys, with no toggle, and falls back to plaintext with a visible
+   reason when it cannot. Whether that stays automatic once mobile devices
+   exist — or becomes opt-in until every platform speaks MLS — is still open,
+   and the mobile lock-out in §11 is the cost of the automatic choice.*
 4. ~~Key backup/recovery~~ — decided 2026-10-21: **no server escrow and no
    recovery path at any access level** (§4). Losing every device loses the
    history; the UI must say so. A user-initiated, passphrase-encrypted export is
@@ -543,14 +619,55 @@ security bug.
 
 ## 11. Explicit statement of current behavior
 
-Until every phase above is implemented and verified:
+As of 2026-10-21, after Phase 2b (§6). This is the statement the UI and support
+answers must match — nothing else may describe a chat as "encrypted".
 
-- OpenBridge messages are **not** end-to-end encrypted.
-- The server can read all message content and attachments.
-- Nothing in the UI may claim otherwise, and no field may be named "encrypted"
-  unless it holds protocol ciphertext.
-- The key infrastructure (`/api/e2ee/*`) and the encrypted transport
-  (`/api/messages/e2ee/direct`, `e2ee:append`) are live and tested, but no
-  shipped client calls them. An `e2ee` conversation flag can today only be set
-  by an API request, never from the web or mobile app, so no user-visible chat
-  is encrypted.
+**What is encrypted now**
+
+- A **direct conversation opened from the web app between two web devices** is
+  end-to-end encrypted. The server stores only opaque `e2ee_envelopes` rows for
+  it, and cannot read the text at any access level: no key material leaves the
+  browser, so there is no escrow, no server-side search, preview, moderation or
+  push payload that could contain message content.
+- The transition is visible on both sides: plaintext messages sent before the
+  flag stays in the transcript labeled as pre-encryption history, and the
+  encrypted stream continues from there.
+
+**What is not encrypted**
+
+- **Group conversations**, on every client. They use the plaintext path and the
+  server reads their content. Phase 3 owns this, and only Phase 3 may set the
+  flag on a group.
+- **Mobile.** No Expo client holds keys yet, so a mobile device can neither read
+  nor write an encrypted conversation.
+- **Existing direct conversations that were never opened from the web app after
+  Phase 2b landed.** Encryption is negotiated lazily when a web client opens or
+  sends in a chat, so a chat nobody has opened since the rollout is still
+  plaintext.
+- **History written before a conversation was encrypted** — unrecoverable by
+  design (§3 constraint 4).
+
+**Interim risk introduced by Phase 2b, to be closed by the mobile phase**
+
+A web user who encrypts a chat with a mobile user locks that conversation to
+envelopes, and the backend then refuses the mobile client's plaintext sends with
+`400` ("این گفتگو فقط بسته رمزنگاری‌شده می‌پذیرد"). Until mobile ships its MLS
+client, that user can write into the chat but sees no explanation of why the
+message is rejected. Closing this needs either a mobile client or a visible
+"this chat is encrypted — update the app" composer state on mobile.
+
+**Known limitations of the current web implementation**
+
+- A device registered after a conversation started cannot decrypt that
+  conversation's earlier envelopes: MLS joins the group from a Welcome, and a
+  Welcome addresses the devices that existed at creation time. There is no
+  history sharing between devices yet.
+- No safety numbers / no out-of-band key verification: key adoption is TOFU, so
+  a server substituted at first contact would not be detected. Phase 5.
+- Attachments and reactions are blocked inside an encrypted conversation rather
+  than encrypted; Phase 4 replaces the block.
+- Search in an encrypted chat covers only this device's local cache, and the UI
+  says so.
+- Envelope retention is undefined: the server keeps ciphertext forever and there
+  is no pruning or export policy yet.
+- Losing every device loses the history. Recovery is deliberately absent (§4).
