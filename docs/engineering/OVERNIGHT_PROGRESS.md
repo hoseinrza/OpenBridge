@@ -423,6 +423,47 @@ group member picking):
 - Added `CHANGELOG.md` and gave the three manifests one shared product version
   (`1.1.0`); the web manifest had been the Vite placeholder `0.0.0`.
 
+## E2EE Phase 0 gate, executed (2026-10-21)
+
+No product code changed and **messages are still not encrypted**. The work was
+the mandatory library gate in `docs/engineering/E2EE_DESIGN.md` §7, run against
+the real packages instead of assumed, and its result is written into §3.5 of
+that document.
+
+What was actually run (Node on this machine, throwaway scratch directory, not
+committed):
+
+- Installed `ts-mls@1.6.4`, `@hpke/core@1.9.0`, `@noble/ciphers`,
+  `@noble/curves`, `@noble/hashes` and exercised MLS with the pure-JS provider
+  and ciphersuite id 1: create group → add member → welcome → join → encrypted
+  application messages in both directions → add a third member → remove the
+  second. Asserted: the removed member cannot decrypt post-removal traffic, a
+  replayed generation is rejected, and `encodeGroupState`/`decodeGroupState`
+  round-trips (~3 KB at three members, 349-byte welcome, ~151-byte overhead on a
+  200-character body, ≈2.2 ms per message round trip).
+- Simulated Hermes by removing `crypto.subtle` from the global and re-running
+  the same lifecycle. It fails at the first key generation: ts-mls's "noble"
+  provider substitutes AEAD/hash/signature but takes the KEM and KDF from
+  `@hpke/core`, which are WebCrypto wrappers (`subtle.generateKey`,
+  `importKey`, `deriveBits`). Reading those sources confirmed AEAD is too.
+- Checked the alternatives: `libsignal` publishes no browser artifact and no
+  Expo binding, so the §3.4 primary path cannot satisfy the gate as written;
+  `@hpke/dhkem-x25519` is also WebCrypto-backed; `@panva/hpke-noble` is a real
+  pure-JS HPKE suite but targets the newer `hpke` interface, not the one
+  ts-mls consumes; `isomorphic-webcrypto` is unmaintained and was rejected as a
+  shim to put under a protocol library.
+- Drafted a ~120-line noble-backed `DhkemPrimitives`/`KdfInterface`/
+  `AeadInterface` substitution. **It is unproven and was not kept**: the
+  reference path (`@hpke/core` `CipherSuite.seal`) itself threw inside Node
+  26's `exportKey`, so there was no trustworthy baseline to compare against.
+  Anyone continuing this must fix that harness first.
+
+Consequences recorded for the implementation phases: MLS needs strictly ordered
+per-conversation delivery from the server (a receiver cannot decrypt generation
+n+1 before n), and mobile key/state storage cannot live in
+`expo-secure-store` (per-item limit) — it needs SQLite/AsyncStorage, which is
+weaker at rest than §4 assumes.
+
 ## Validation actually run
 
 - `backend`: `npm run build` — passed after every batch.
@@ -466,7 +507,9 @@ group member picking):
 ## Unresolved / known issues
 
 - No E2EE; the server stores plaintext messages. A design proposal exists in
-  `docs/engineering/E2EE_DESIGN.md`, but no cryptography is implemented.
+  `docs/engineering/E2EE_DESIGN.md`, and its Phase 0 library gate was executed
+  on 2026-10-21 (§3.5): MLS is workable on web, unusable on Expo/Hermes until
+  the WebCrypto gap is closed. No cryptography is implemented in the product.
 - No session-management UI: `GET /api/auth/sessions` and `DELETE
   /api/auth/sessions/:id` exist, but web/mobile do not expose them yet.
 - Refresh-token reuse detection is not implemented; a replayed old token is
@@ -525,8 +568,13 @@ group member picking):
 4. Add authorization tests for group membership changes (add/remove participant)
    and message edit/delete once those endpoints exist.
 5. Capture and display the E2EE `Session`/device list as the precursor to
-   multi-device key management; run the Phase 0 library gate described in the
-   E2EE design before any cryptographic implementation.
+   multi-device key management. The Phase 0 library gate described in the E2EE
+   design **has now been run** (see the 2026-10-21 section above): MLS works in
+   web/Node, mobile is blocked on the absence of `crypto.subtle` in Hermes, so
+   the next step is a product decision — own a ~120-line pure-JS HPKE suite
+   (keeps Expo Go, adds reviewed-by-us crypto glue) or move mobile to a native
+   WebCrypto module (no owned primitives, no Expo Go). Do not start Phase 1
+   until that is chosen.
 6. Add a web security review pass (CSP, token storage trade-off) and cover the
    signed-URL download path with a cross-user authorization test.
 7. Run the mobile app on a native emulator or device (RTL header, safe areas,

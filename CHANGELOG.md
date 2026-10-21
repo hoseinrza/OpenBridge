@@ -4,6 +4,18 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.1] - 2026-10-21
+
+### Changed
+- **Documentation only — messages are still not encrypted.** The mandatory
+  Phase 0 library gate in `docs/engineering/E2EE_DESIGN.md` was executed with
+  real code (§3.5): libsignal has no web or Expo artifact, `ts-mls` runs a full
+  MLS lifecycle in web/Node with a pure-JS provider (measured sizes and
+  timings), and mobile fails because Hermes has no `crypto.subtle`. Two server
+  consequences are recorded: MLS needs strictly ordered per-conversation
+  delivery, and ~3 KB of group state per conversation does not fit
+  `expo-secure-store`.
+
 ## [1.1.0] - 2026-10-20
 
 ### Added
