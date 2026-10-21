@@ -311,8 +311,10 @@
   position: relative;
 }
 
-.msg-wrapper.mine  { align-items: flex-end; }
-.msg-wrapper.other { align-items: flex-start; }
+/* The page runs right-to-left, so flex-start is the right edge: your own
+   messages sit there and everyone else's take the left. */
+.msg-wrapper.mine  { align-items: flex-start; }
+.msg-wrapper.other { align-items: flex-end; }
 .msg-wrapper.last  { margin-bottom: var(--sp-2); }
 
 .msg-group {
@@ -322,6 +324,10 @@
   max-width: min(72%, 660px);
   min-width: 0;
 }
+
+/* The incoming row is flipped so the avatar stays on the outer (left) edge,
+   ahead of the bubble instead of between the bubble and the middle. */
+.msg-wrapper.other .msg-group { flex-direction: row-reverse; }
 
 .msg-avatar { margin-bottom: 2px; }
 .msg-avatar-spacer { width: 30px; flex-shrink: 0; }
@@ -334,7 +340,7 @@
   max-width: 100%;
 }
 
-.msg-wrapper.mine .msg-bubbles { align-items: flex-end; }
+.msg-wrapper.mine .msg-bubbles { align-items: flex-start; }
 
 .msg-sender {
   font-size: var(--text-xs);
@@ -343,6 +349,8 @@
   padding: 0 var(--sp-1);
   margin-bottom: 2px;
 }
+
+.msg-wrapper.other .msg-sender { text-align: left; }
 
 /* ── Bubble ──────────────────────────────────────────────────── */
 /* The bubble is the whole message surface: media, reaction picker, reaction
@@ -396,14 +404,15 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  align-self: flex-start;
+  align-self: flex-end;
+  justify-content: flex-end;
   padding: 0 1px;
   color: var(--text-3);
 }
 
 .msg-wrapper.mine .msg-footer {
-  align-self: flex-end;
-  justify-content: flex-end;
+  align-self: flex-start;
+  justify-content: flex-start;
   color: rgba(255, 255, 255, 0.78);
 }
 
@@ -464,7 +473,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  align-self: flex-start;
+  align-self: flex-end;
+  justify-content: flex-end;
   width: max-content;
   max-width: 100%;
   padding: 3px;
@@ -474,7 +484,8 @@
 }
 
 .msg-wrapper.mine .reaction-bar {
-  align-self: flex-end;
+  align-self: flex-start;
+  justify-content: flex-start;
   background: rgba(255, 255, 255, 0.14);
   border-color: rgba(255, 255, 255, 0.26);
 }
@@ -511,11 +522,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  align-self: flex-start;
+  align-self: flex-end;
+  justify-content: flex-end;
   max-width: 100%;
 }
 
-.msg-wrapper.mine .msg-reactions { align-self: flex-end; justify-content: flex-end; }
+.msg-wrapper.mine .msg-reactions { align-self: flex-start; justify-content: flex-start; }
 
 .msg-reaction {
   display: inline-flex;
@@ -679,8 +691,8 @@
   padding: var(--sp-4) 0;
 }
 
-.skeleton-row { display: flex; justify-content: flex-start; }
-.skeleton-row.mine { justify-content: flex-end; }
+.skeleton-row { display: flex; justify-content: flex-end; }
+.skeleton-row.mine { justify-content: flex-start; }
 
 .skeleton-bubble {
   display: block;

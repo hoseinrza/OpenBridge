@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, Image, KeyboardAvoidingView, Linking, Platform,
+  ActivityIndicator, FlatList, I18nManager, Image, KeyboardAvoidingView, Linking, Platform,
   Pressable, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { FontAwesome6 } from '@expo/vector-icons';
@@ -13,6 +13,10 @@ import Avatar from '../components/Avatar';
 
 const GROUP_GAP = 5 * 60 * 1000;
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢'];
+// Yoga resolves flex-start/flex-end against the device direction, so the rows
+// are pinned by physical side instead: own messages right, everyone else's left,
+// on both RTL and LTR phones.
+const RTL = I18nManager.isRTL;
 
 function buildRows(messages) {
   const rows = [];
@@ -392,12 +396,14 @@ function makeStyles(colors) {
     dayText: { color: colors.text3, fontFamily: fonts.medium, fontSize: type.xs },
 
     msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, marginVertical: 2 },
-    msgRowMine: { justifyContent: 'flex-start' },
-    msgRowOther: { justifyContent: 'flex-end' },
+    msgRowMine: { justifyContent: RTL ? 'flex-start' : 'flex-end' },
+    // Reversed in LTR so the avatar lands on the outer (left) edge; in RTL the
+    // normal row already draws the avatar on the left.
+    msgRowOther: { flexDirection: RTL ? 'row' : 'row-reverse', justifyContent: 'flex-end' },
     avatarSlot: { width: 28 },
     bubbleCol: { maxWidth: '78%' },
-    bubbleColMine: { alignItems: 'flex-start' },
-    bubbleColOther: { alignItems: 'flex-end' },
+    bubbleColMine: { alignItems: RTL ? 'flex-start' : 'flex-end' },
+    bubbleColOther: { alignItems: RTL ? 'flex-end' : 'flex-start' },
     sender: { color: colors.accentText, fontFamily: fonts.medium, fontSize: type.xs, marginBottom: 3, marginHorizontal: 4 },
 
     bubble: {
@@ -411,11 +417,11 @@ function makeStyles(colors) {
       backgroundColor: colors.bubbleIn,
       borderWidth: 1,
       borderColor: colors.border,
-      borderBottomRightRadius: radius.xs,
+      borderBottomLeftRadius: radius.xs,
     },
-    bubbleMine: { backgroundColor: colors.bubbleOut, borderBottomLeftRadius: radius.xs },
-    bubbleOtherLast: { borderBottomRightRadius: radius.xs },
-    bubbleMineLast: { borderBottomLeftRadius: radius.xs },
+    bubbleMine: { backgroundColor: colors.bubbleOut, borderBottomRightRadius: radius.xs },
+    bubbleOtherLast: { borderBottomLeftRadius: radius.xs },
+    bubbleMineLast: { borderBottomRightRadius: radius.xs },
 
     bubbleText: { color: colors.text1, fontFamily: fonts.regular, fontSize: type.base, lineHeight: 22 },
     bubbleTextMine: { color: colors.onBubbleOut },
@@ -472,8 +478,8 @@ function makeStyles(colors) {
     },
 
     metaRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, marginTop: 1 },
-    metaRowMine: { justifyContent: 'flex-start' },
-    metaRowOther: { justifyContent: 'flex-end' },
+    metaRowMine: { justifyContent: RTL ? 'flex-end' : 'flex-start' },
+    metaRowOther: { justifyContent: RTL ? 'flex-start' : 'flex-end' },
     time: { color: colors.text3, fontFamily: fonts.regular, fontSize: 10 },
     timeMine: { color: 'rgba(255,255,255,0.78)' },
 
