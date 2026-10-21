@@ -4,6 +4,60 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.6] - 2026-10-21
+
+### Changed
+- **A reaction is a tapback, not a tally.** One person holds at most one reaction
+  per message: tapping an emoji adds it, tapping the same one again takes it back,
+  and tapping a different one replaces it. `MessagesService.addReaction` became
+  `toggleReaction` — the old version had no delete path (`update: {}`) and no
+  replace rule, so repeated taps grew the number and one account could stack
+  several emoji on a single message.
+- The rule is enforced by the database, not only by the service: `Reaction` now
+  carries `@@unique([userId, messageId])`, and an e2e case inserts a second row
+  for a pair directly through Prisma to prove the write is rejected with
+  `P2002` even when it skips the service.
+- `backend/prisma/sql/dedupe-reactions.sql` is the migration path for existing
+  rows — keep the newest emoji per pair, drop the old
+  `(userId, messageId, emoji)` index, create `reactions_userId_messageId_key`.
+  The container's start command runs it before `prisma db push`, because Prisma
+  refuses to add an index that existing data might violate and refuses it even
+  after the duplicates are gone.
+- The socket contract changed: `reaction:add` answers with `{ok, reactions}` and
+  broadcasts **`reaction:changed`** with the message's whole row list instead of
+  the old `reaction:added` delta. Clients replace what they hold instead of
+  adding to it, so no device can drift into showing more than the people who
+  reacted.
+- **No counts anywhere.** A chip is the emoji alone; the one you hold is drawn
+  pressed (accent border and fill) so it reads as yours and taps to lift it. The
+  web hover bar marks the emoji you already hold too, so "add" and "remove" are
+  the same control.
+- Mobile can react for the first time: long-press a bubble (text, image or file)
+  to open a tapback strip and pick. Before this, the chips mobile showed were
+  read-only decorations with no way to add or lift one.
+- Emoji are drawn by the device's own colour font — `Apple Color Emoji` first,
+  then `Segoe UI Emoji`, then `Noto Color Emoji` — so an iPhone or Mac shows
+  Apple's kit. Apple licenses that font to Apple hardware only, so it is not a
+  file this app can ship; the codepoints are stored once and each platform draws
+  them with its own artwork.
+
+### Tests
+- `backend/test/security.e2e.cjs` (**32/32**, `npm run test:e2e` **38/38**): one
+  case covers add → lift → replace, six rapid taps by the same account still
+  being one row, two people holding the same emoji as two rows behind one chip,
+  the broadcast carrying the same list the sender's ack got, and the outsider's
+  reaction still reaching nobody under the new event name.
+
+### Known limits of this release
+- Reactions are still plaintext metadata: inside an encrypted direct chat they
+  are blocked outright (there is no server row to attach one to), and in every
+  other conversation the server sees who reacted, with what, to when.
+- Mobile remains locked out of an encrypted chat (see 1.1.5); this release did
+  not touch that.
+- The tapback strip and the pressed-chip states have no visual QA: this
+  environment cannot capture screenshots, so mobile was verified by a clean
+  Android bundle and web by lint, build and DOM-level reasoning.
+
 ## [1.1.5] - 2026-10-21
 
 ### Added

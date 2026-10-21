@@ -643,7 +643,71 @@ mobile are still plaintext.
   backend refuses its plaintext — and mobile shows no reason why. That interim
   gap is the first thing Phase 2c must close.
 
+## Reactions became tapback-shaped (2026-10-21, shipped as 1.1.6)
+
+Asked for: no counts, one reaction per person per message, tapping it again
+lifts it instead of growing a number, and iPhone-style emoji.
+
+**What was actually wrong.** `MessagesService.addReaction` upserted on
+`(userId, messageId, emoji)` with `update: {}` — so it could never delete, never
+replace, and a second tap by the same person on a *different* emoji simply added
+a second row. Both clients then listened to `reaction:added` and incremented a
+local counter, so one account tapping `👍` ten times made a message look like it
+had been liked by ten people. The bug was in three places at once and each place
+looked correct on its own.
+
+**The rule now lives in the database.** `Reaction` gained
+`@@unique([userId, messageId])` next to `@@index([messageId])`, so "one reaction
+per person" is a constraint, not a convention the service happens to respect.
+The e2e case inserts a duplicate pair straight through Prisma and asserts the
+write fails with `P2002` — proof that a code path skipping the service cannot
+break the rule either.
+
+`prisma db push` would not add the index by itself: it refuses a unique index it
+cannot prove is satisfiable, and it kept refusing it *after* the duplicates were
+deleted, because the old `(userId, messageId, emoji)` index was still there for
+it to compare against. `backend/prisma/sql/dedupe-reactions.sql` now does the
+three steps in order — keep the newest row per pair, drop the old index, create
+`reactions_userId_messageId_key` — and the container's `CMD` runs it before
+`db push`, since this image has no migrate step: schema changes land through the
+start command. Verified against the dev database by seeding a legacy duplicate
+pair (6 rows → 5, zero pairs with more than one row, `db push` then clean, and a
+repeat insert rejected with SQL state `23505`).
+
+**The transport changed shape too.** `reaction:add` → `toggleReaction` answers
+`{ok, reactions}` and broadcasts **`reaction:changed`** with the message's whole
+row list to every participant, the sender included. Clients no longer add
+anything: they group the rows by emoji and replace what they hold. That is what
+makes remove/replace/spam all the same code path, and it removes the class of
+drift where a client that missed one event stayed wrong forever.
+
+**No counts, on either client.** A chip is the emoji alone. The row set carries
+`userId`, so the chip knows whether *this* device holds it and draws it pressed
+(accent border + soft fill on web, same idea on the red outgoing bubble where a
+light chip would vanish). Web's hover bar marks the emoji you already hold, so
+the same control adds and lifts. Mobile previously showed read-only chips and had
+no way to react at all; it now long-presses a bubble — text, image or file — into
+a five-emoji strip with a close button, and a tap outside or a pick dismisses it.
+
+**On the "iPhone emoji kit" ask, honestly.** Apple's colour emoji font is
+licensed to Apple hardware and cannot be shipped as an asset, so there is no file
+in this repo that turns a Windows machine into an iPhone. What was done is the
+native-first stack (`Apple Color Emoji` → `Segoe UI Emoji` → `Segoe UI Symbol` →
+`Noto Color Emoji`) applied to the reaction bar, the chips and the picker: an
+iPhone or Mac now shows Apple's own artwork, and the codepoints stored in the
+database stay platform-neutral so both sides see the same reaction.
+
 ## Validation actually run
+
+- 1.1.6 batch, 2026-10-21: `backend` `npm run test:e2e` — **38/38 passed**
+  against the real local PostgreSQL (the reaction case is the one rewritten
+  above, and it includes the `P2002` duplicate-write check). `prisma db push`
+  ran clean over a database that still held a legacy duplicate pair, after the
+  dedupe SQL had been applied through the same command the container uses.
+  Root `npm run lint` clean, root `npm run build` clean, and
+  `npx expo export --platform android` produced a 2.5 MB bundle with exit code 0
+  after the tapback strip landed. No screenshots: the reaction states have had
+  no visual QA on either client.
 
 - `backend`: `npm run test:e2e` — **38/38 passed** on 2026-10-21 against the
   real local PostgreSQL: the 32 earlier cases, then six E2EE Phase 2a transport
@@ -845,6 +909,7 @@ mobile are still plaintext.
    Phase 2b's encrypted states were only checked structurally — the app view
    could not capture screenshots (`NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`), so the
    padlock, the pre-encryption divider and the blocked-attachment note have no
-   visual QA yet.
+   visual QA yet. Same for 1.1.6: the long-press tapback strip and the pressed
+   chip states have only been proven to bundle, not seen on a screen.
 9. Self-host Font Awesome so the web client can run without a CDN and under a
    strict CSP.
