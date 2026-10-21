@@ -96,6 +96,14 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      # The client-level suite boots the API and drives the real MLS core from
+      # shared/e2ee, which resolves its crypto dependencies from the root
+      # manifest. Without this install the backend job cannot import that core,
+      # so the suite that proves "the server only ever sees ciphertext" would
+      # silently not run.
+      - name: Install the root (client) dependencies
+        working-directory: .
+        run: npm ci
       - run: npx prisma generate
       - run: npx prisma db push --skip-generate
       # Builds first, then runs the suite against the real PostgreSQL instance.
