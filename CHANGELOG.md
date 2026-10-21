@@ -4,7 +4,88 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
-## [1.1.10] - 2026-10-21
+## [1.1.11] - 2026-10-21
+
+E2EE Phase 4 on the web client: attachments are now encrypted on the sender's
+device, and every conversation opens with a line that states what this device
+actually does with it.
+
+### Added
+- **Encrypted file and picture sending on web.** A file is sealed with a fresh
+  AES-256-GCM key and a fresh 96-bit nonce in the browser (WebCrypto) before any
+  byte is uploaded; only ciphertext reaches the server. The descriptor — blob id,
+  name, MIME type, size, key, nonce — is a small JSON payload inside the MLS
+  message, so a stored attachment has no filename, no type and no plaintext hash
+  anywhere the platform can read. `shared/e2ee/attachments.js` defines the format
+  with nothing but JSON, base64 and length checks, so a phone can open what a
+  browser wrote.
+- **`EncryptedBlob` storage and its two-step access.** `backend/prisma/schema.prisma`
+  gained a conversation-bound blob table (`enc-<uuid>.bin`, ciphertext length, no
+  metadata); `POST /api/uploads/encrypted` accepts bytes for a conversation that
+  is already end-to-end encrypted and refuses any other; `GET
+  /api/uploads/encrypted/:id/url` re-checks membership and issues a fresh
+  HMAC-signed URL; `GET /api/uploads/encrypted/:filename` serves the bytes only to
+  a valid unexpired signature, as `application/octet-stream` with `nosniff` and
+  `Content-Disposition: attachment`. Uploading to an unencrypted chat is refused
+  with `400`, so the endpoint cannot be used as a free file host.
+- **`src/services/attachments.js` and `EncryptedMedia.jsx`.** Ciphertext is
+  fetched, authenticated and decrypted into a refcounted object URL that is
+  revoked when the last view of it goes away; a picture is opened when it nears
+  the viewport and a larger file only when asked for. GCM failure means no URL is
+  ever created, so a changed file has no rendering path at all.
+- **One notice per conversation, five sentences.** `e2eeNotice` in
+  `MessageList.jsx` labels the chat as encrypted, as about-to-be-encrypted on its
+  first message, as still resolving, as undecryptable on this device, or as a
+  group — the last two saying so plainly instead of borrowing the first one's
+  reassurance. The header chip and the composer's paperclip follow the same state.
+
+### Changed
+- **A fresh direct chat no longer claims it is unprotected.** It used to open with
+  «این گفتگو هنوز سرتاسری رمزنگاری نمی‌شود» and no reason, which was both alarming
+  and wrong; it now states that its first message is encrypted on this device, and
+  the line turns into the full claim the moment that message goes out.
+- **Files follow the same rule as text in an encrypted chat.** There is no
+  plaintext attachment path left inside one: a file is sealed locally or the send
+  is refused with a reason, and the paperclip is disabled only when the
+  conversation truly cannot be carried.
+- **The pre-encryption divider is now a note, not a banner**, and the encrypted
+  bubble footer no longer implies anything about reactions, which an encrypted
+  message cannot have: they live in the server's message table, and there is no
+  row for a message the server cannot see.
+
+### Tests
+- `backend/test/e2ee-client.e2e.cjs` gained two cases and passes 8/8: a file
+  encrypted on the sender, stored as opaque bytes and opened byte-for-byte by the
+  peer (headers asserted, one tampered byte refused, the blob id absent from the
+  envelope, zero plaintext rows, outsider `403`, unknown id `404`, unsigned blob
+  `403`); and a conversation without the flag refusing to host a file at all.
+  `security.e2e.cjs` 32/32, root `npm run test:e2ee` 5/5, `tsc --noEmit`, `eslint`
+  and `vite build` clean.
+- Live run on two real clients: a browser tab and a Node peer on the same shared
+  core each sent an encrypted picture to the other in one fresh direct chat. The
+  peer fetched the sender's blob through its signed URL and recovered the original
+  1234 bytes exactly, with the stored ciphertext not beginning with the PNG magic
+  and the response typed `application/octet-stream`; the browser authenticated the
+  peer's file and rendered it at 300×240 from an object URL, its lightbox and
+  download link included.
+
+### Known limits
+- **Groups are still plaintext, including their attachments** (name, type and
+  bytes all visible to the server) — the blob endpoint requires the encryption
+  flag, and only Phase 3 may set it on a group. Mobile holds no keys yet.
+- **No scanning of encrypted uploads, and no claim of it.** ClamAV, magic-byte
+  checks and MIME validation guard the plaintext path only; checking opaque
+  ciphertext would be theatre, so the code does not do it and the notice does not
+  promise otherwise.
+- **A second device of one account cannot read a chat that started without it**,
+  attachments included: the Welcome addresses the devices that existed when the
+  group was formed. Proved during this batch — each live run needed a fresh peer
+  account.
+- Visual QA is still missing: this environment cannot capture screenshots
+  (`NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`), and the tab it drives never paints, so
+  the viewport-gated open was exercised through a stubbed `IntersectionObserver`
+  and a direct decrypt call. The behaviour is measured, not seen.
+
 
 ### Changed
 - **The bubble interior now has one clear hierarchy.** Group sender names live
@@ -48,6 +129,29 @@ carry one product version, so a release entry applies to every client.
   picker anchoring and chip spacing there were reviewed in code only.
 - The below-picker branch was exercised once in a scrolled short viewport, not
   on a touch device.
+
+### Mobile QA & CI
+- **Automated mobile QA.** `cd mobile && npm test` runs four Jest suites (33
+  tests) with React Native Testing Library over the phone/time helpers, the
+  login and sign-up steps, the chat list (search, empty, error), and the chat
+  surface (message sides, send failure, long-press reactions, disconnected
+  composer). `npm run test:ci` is the CI invocation.
+- **A real on-device smoke flow.** Maestro drives an API-34 Android emulator in
+  CI: it signs in with a CI-only seeded account, opens `E2E Group`, sends
+  `hello from maestro`, and adds a 👍 reaction. The seed
+  (`backend/test/mobile-e2e-seed.mjs`) exists only in the disposable CI
+  database; the flow lives in `mobile/.maestro/auth-and-chat.yaml`.
+- **CI jobs** `mobile-tests` and `mobile-e2e`, a `changes` detector, and a
+  nightly schedule. The emulator runs on `main`, on PRs touching `mobile/` or
+  `shared/e2ee/`, nightly, and manually.
+- **Gate and concurrency.** `ci-gate` accepts the emulator job's `skipped` only
+  when change detection says a PR has no mobile/shared changes; a skip or
+  failure on `main` fails the gate. Main-branch CI runs are no longer cancelled
+  by a newer push; PR runs still are.
+- **Docs.** README and DEPLOY now state the observed pipeline status: CI is
+  green on GitHub Actions, `Deploy` is skipped until `DEPLOY_ENABLED` and SSH
+  secrets exist, and no production deployment has been performed. The claim
+  that mobile QA is manual is removed.
 
 ## [1.1.9] - 2026-10-21
 

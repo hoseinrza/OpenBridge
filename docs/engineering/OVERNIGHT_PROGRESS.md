@@ -766,7 +766,98 @@ fixing it properly means either signing on upload or previewing with a blob URL
 and tracking the uploaded path separately for save. That is a separate change, not
 a bubble-layout one.
 
+## Encrypted attachments, and the line every chat opens with (2026-10-21, shipped as 1.1.11)
+
+E2EE Phase 4 on web. The ask was three things at once — every message encrypted
+by default, a "your messages are encrypted" line at the start of each chat, and
+media sent encrypted — and they are not the same amount of work, so this batch
+does the second and third and says plainly where the first still falls short.
+
+**Files never went inside an envelope.** `E2EE_MAX_ENVELOPE_CHARS` is 16 384
+chars, about 12 KB of base64, and a phone photo is neither small nor worth
+shrinking into a per-message ciphertext. So the bytes go to a blob store and only
+a 300-byte descriptor goes into the MLS payload: `encrypted_blobs` holds
+`enc-<uuid>.bin` with a conversation id and a ciphertext length — no filename, no
+MIME type, no plaintext hash — and `{blob, name, mime, size, key, iv}` travels as
+the message text, which is already sealed. `shared/e2ee/attachments.js` writes
+and reads that JSON with nothing but base64 and length checks, so the same format
+will open on a phone later; `packAttachment` refuses a descriptor it could not
+read back, and `parseAttachment` returns `null` for anything it cannot validate
+rather than half-trusting it.
+
+**AES-256-GCM, one random key and one random 96-bit nonce per file,** from
+WebCrypto in the browser and `node:crypto` in Node, tag appended so both read one
+layout. GCM was chosen over plain AES for exactly one reason: a file changed
+anywhere along the way fails to authenticate, and `openAttachment` then never
+creates an object URL. There is no second path that renders changed bytes, and no
+plaintext attachment path left inside an encrypted chat.
+
+**Two checks, because neither one is enough alone.** The signed URL is issued
+only after a membership check on the blob's own conversation; the bytes are
+served only to a request carrying a valid unexpired HMAC. Download answers
+`application/octet-stream` + `nosniff` + `Content-Disposition: attachment`, so a
+browser cannot act on ciphertext it cannot read. Uploading to a conversation that
+is not encrypted is refused with `400` — that endpoint must not become a free
+file host — and the file is unlinked when the row cannot be written.
+
+**The server does not scan these bytes, and the code does not pretend
+otherwise.** ClamAV, magic checks and MIME validation all still guard the
+plaintext path; on this path they are absent by choice, because checking
+unrelated ciphertext is theatre and a "scanned" label on it would be a false
+claim. Documented in design doc §6 and §11.
+
+**One notice per chat, five sentences.** `e2eeNotice` in `MessageList.jsx` states
+what this device really does with this conversation: encrypted (text, images and
+files decrypt only here and on the peer's device), a direct chat that its first
+message will encrypt, a chat whose state is still resolving, a chat this device
+cannot decrypt, and a group — where the line says outright that groups are still
+plaintext and the server reads them, including their attachments. A fresh chat
+used to be labeled «هنوز سرتاسری رمزنگاری نمی‌شود» with no reason, which was both
+scary and wrong: the accurate statement is that the first message is encrypted on
+this device. The header chip and the composer's paperclip follow the same state,
+so no control claims what the notice denies. The mid-transcript divider is now a
+one-line note without a claim about reactions, because encrypted messages cannot
+be reacted to at all — the reaction affordance stays hidden for them.
+
+**Not done, and not claimed:** groups (Phase 3) and mobile (Phase 2c) are still
+plaintext, so "all messages encrypted by default" is only true for web direct
+chats; a second device of one account still cannot join a chat that started
+without it (proved the hard way — a reused peer account could not re-read its own
+chat, so each live run needed a fresh account); and an encrypted message has no
+server row to hold a reaction.
+
+
 ## Validation actually run
+
+- 1.1.11 batch, 2026-10-21: `backend` `npx tsc --noEmit` clean; `node
+  test/e2ee-client.e2e.cjs` **8/8** (the two new attachment cases included);
+  `npm run test:e2e` **32/32** in `security.e2e.cjs`; root `npm run test:e2ee`
+  5/5; root `npx eslint .` clean; root `npm run build` clean (446 ms, the only
+  warnings are the pre-existing `@hpke/common` pure-annotation ones). Live run:
+  a browser tab (`ob_attach_a`) and a Node peer on the same shared core
+  (`ob_attach_bfmab4`) in one fresh direct chat. A's text send flipped the notice
+  from `is-pending` to `is-on`. A's `red-check.png` (1234 B) was sealed in the
+  browser, stored as `enc-<uuid>.bin`, and the peer fetched it through its signed
+  URL: `httpStatus 200`, `content-type: application/octet-stream`, `nosniff`,
+  `disposition: attachment`, `ciphertextStartsWithPng: false`,
+  `bytesMatchOriginal: true`, `decryptedLength: 1234`, `descriptorIsValid: true`.
+  The peer answered with its own sealed `blue-band.png` (3249 B) plus a text
+  message; A's client decrypted the descriptor from MLS, authenticated the bytes,
+  and produced a blob URL that decoded at 300×240 — and the lightbox opened it
+  with a working download link named `blue-band.png`. A's own outgoing picture
+  decoded at 320×220 in the same list. The notice was checked in all three
+  reachable states: `is-pending` for a chat with no messages, `is-on` after the
+  first send, and `is-off` with the group sentence for a group created for the
+  check. **Honest limits of that run:** this embedded view never paints, so
+  `IntersectionObserver` never fires on its own and the viewport-gated open had to
+  be driven by a stubbed observer plus a direct `openAttachment` call — the
+  decrypt-and-render path is measured, not seen, and no screenshot exists for any
+  of it. The first two peer runs failed for reasons that were *not* the product:
+  the script asked the bare origin instead of `/api/uploads/...` (the same prefix
+  bug the 1.1.7 batch had already fixed in both clients), and a reused peer
+  account could not re-join a Welcome addressed to its previous device. Test
+  accounts `ob_attach_a`, `ob_attach_b*` and the group created for the check are
+  to be deleted with their conversations, envelopes, blobs and stored files.
 
 - 1.1.7 batch, 2026-10-21: root `npm run lint` clean, root `npm run build` clean
   (524 ms, rolldown warnings are the pre-existing `@hpke/common` pure-annotation
@@ -894,11 +985,14 @@ a bubble-layout one.
 
 - **Encryption is live on web direct chats only.** Since Phase 2b landed
   (2026-10-21), a direct conversation opened from the web app between two web
-  devices carries nothing but ciphertext the server cannot read. Everything else
-  is still plaintext and the server still reads it: **groups on every client,
-  mobile on every client, and any existing direct chat nobody has opened from
-  the web app since the rollout** (negotiation is lazy, so an untouched chat
-  stays plaintext). Design doc §11 is the authoritative statement.
+  devices carries nothing but ciphertext the server cannot read — and since
+  Phase 4 landed the same day, that includes **files and pictures**, which are
+  sealed on the sender's device and stored as opaque blobs the server cannot
+  name, type, scan or open. Everything else is still plaintext and the server
+  still reads it: **groups on every client, including their attachments, mobile on
+  every client, and any existing direct chat nobody has opened from the web app
+  since the rollout** (negotiation is lazy, so an untouched chat stays
+  plaintext). Design doc §11 is the authoritative statement.
 - **Mobile is now the blocking gap, not an unfinished nice-to-have.** A chat a
   web user encrypted locks the phone out of sending: the backend refuses
   plaintext into an `e2ee` conversation with 400, and the mobile UI has no MLS
@@ -1000,6 +1094,11 @@ a bubble-layout one.
    `expo-crypto` `getRandomValues` polyfill over the pure-JS provider, an
    AsyncStorage-backed key store, the same read-only-first negotiation, and
    `npx expo export --platform android` to prove the bundle.
+   Phase 4 added a second format it must match: opening
+   `openbridge.attachment.v1` descriptors and sealing a file with AES-256-GCM
+   before upload. Hermes has no `crypto.subtle`, so the authenticated-encryption
+   binding has to be chosen and proved on a device — the descriptor itself is
+   plain JSON plus base64 and needs nothing exotic.
    **The interim hazard is user-visible and must be closed in the same batch:**
    a chat a web user encrypted rejects the phone's plaintext sends with a bare
    400, so until mobile speaks MLS the composer has to say "this chat is
@@ -1009,7 +1108,10 @@ a bubble-layout one.
    still has never run on a real phone.
 6. Then E2EE Phase 3 (groups): commit/welcome routing through the ordered
    transport, rekey on membership change, removal semantics. Groups are the last
-   large plaintext surface, and only Phase 3 may set the flag on one.
+   large plaintext surface, and only Phase 3 may set the flag on one. Group
+   attachments move in the same batch: the blob endpoint refuses a conversation
+   without the flag, so a group file is plaintext with a visible name and MIME
+   type until then, and the notice line says so on every group.
 7. Add a web security review pass (CSP, token storage trade-off) and cover the
    signed-URL download path with a cross-user authorization test.
 8. Run the mobile app on a native emulator or device (RTL header, safe areas,

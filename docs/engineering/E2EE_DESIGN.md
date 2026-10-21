@@ -467,10 +467,11 @@ pass.
 - **A Welcome is consumed at the moment of joining** (`markRead` right after the
   join), because it is not a message anybody can read and would otherwise sit in
   the unread badge as if it were one.
-- **Attachments and reactions do not go into an encrypted chat yet.** The
-  composer disables the paperclip with a reason, and the reaction bar is hidden
-  on decrypted bubbles: the server cannot see a message id it never received, so
-  there is nothing to react to. Both are Phase 4 / post-Phase-2 work.
+- **Attachments are encrypted on the sender's device; reactions are not offered.**
+  A file or picture in an encrypted direct chat is AES-256-GCM sealed in the
+  browser before any byte is uploaded, and the key rides inside the MLS payload
+  (§6, Attachments). Reactions stay hidden on decrypted bubbles: the server
+  cannot see a message id it never received, so there is nothing to react to.
 - **Search is local.** The header search filters this device's decrypted cache,
   and its placeholder says so («جستجو در پیام‌های این دستگاه»), because the
   server holds nothing searchable.
@@ -485,6 +486,17 @@ pass.
   `take_screenshot` failed with `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE` in this
   environment, so no encrypted state has had visual QA at the documented
   viewports, and none is claimed here.
+- **Phase 4 was proved the same way, in both directions.** A web tab and a Node
+  peer running the same shared core exchanged an image each: the peer fetched the
+  blob through its signed URL and got the sender's original bytes exactly
+  (`bytesMatchOriginal`, 1234 B), the stored ciphertext did not begin with the
+  PNG magic, and the response was `application/octet-stream` + `nosniff` +
+  `attachment`. The browser then opened the peer's file, authenticated it, and
+  produced a blob URL that decoded to 300×240. Because this embedded view never
+  paints, the viewport-gated open had to be driven by stubbing
+  `IntersectionObserver` and by calling `openAttachment` directly — so the
+  decrypt-and-render path is measured, not seen, and the lazy-open behaviour in a
+  real painted browser window is still unverified.
 
 ### New/changed tables
 
@@ -502,14 +514,36 @@ Still proposed, deliberately not built:
 
 ### Attachments
 
-- Client generates a random AES-256-GCM key per file, encrypts the bytes, and
-  uploads only ciphertext. The MIME type, size, and filename can be encrypted
-  as part of the message content if metadata protection is wanted.
-- The file key and IV travel inside the message ciphertext, never to the server.
-- The existing signed-URL mechanism still controls access to the blob, but the
-  blob is useless without the message. ClamAV scanning remains useful for
-  transport hygiene but cannot scan encrypted payloads; scanning must happen
-  client-side or be accepted as unavailable.
+Landed as Phase 4 on web (`shared/e2ee/attachments.js`, `src/services/attachments.js`,
+`backend/src/uploads/uploads.controller.ts`, `EncryptedBlob`):
+
+- One random AES-256-GCM key and one random 96-bit nonce per file, from the
+  platform's own authenticated encryption (WebCrypto in the browser, `node:crypto`
+  in Node, tag appended so both read the same layout). Only ciphertext is
+  uploaded; the plaintext bytes never leave the device and never get a URL.
+- The descriptor — blob id, name, MIME, size, key, nonce — is a small JSON object
+  that travels as the MLS message payload. So a file's name, type and size exist
+  only inside ciphertext: the server stores `enc-<uuid>.bin` and a row with no
+  filename, no MIME and no hash of the plaintext.
+- Ciphertext has to travel as a blob because an envelope is capped at
+  `E2EE_MAX_ENVELOPE_CHARS` (16384 chars, ≈12 KB): a photo inside an envelope
+  would be refused by the transport, and a per-recipient ciphertext would be
+  stored once per member. One opaque blob plus one small descriptor keeps both
+  bounds honest.
+- Access is authorized twice, because neither half is enough: the signed URL is
+  issued only after a membership check on the blob's conversation, and the bytes
+  are served only to a request carrying a valid unexpired HMAC signature.
+  Serving is `application/octet-stream` + `nosniff` + `Content-Disposition:
+  attachment`, so a browser cannot act on ciphertext it cannot read.
+- The server does not and cannot scan these bytes. ClamAV, MIME sniffing, magic
+  checks and image recompression all run on the plaintext path and are all
+  deliberately absent here — checking opaque ciphertext would be theatre, and
+  a "scanned" label on it would be a false claim. The upload rate limit and the
+  size cap still apply.
+- A decrypted file exists only as a refcounted object URL inside the tab: it is
+  opened when the bubble nears the viewport, revoked when the last view of it
+  goes away, and a GCM authentication failure means no URL is ever created —
+  there is no path that renders changed bytes.
 
 ### Metadata and notifications
 
@@ -619,8 +653,8 @@ security bug.
 
 ## 11. Explicit statement of current behavior
 
-As of 2026-10-21, after Phase 2b (§6). This is the statement the UI and support
-answers must match — nothing else may describe a chat as "encrypted".
+As of 2026-10-21, after Phase 4 (§6, Attachments). This is the statement the UI
+and support answers must match — nothing else may describe a chat as "encrypted".
 
 **What is encrypted now**
 
@@ -629,15 +663,27 @@ answers must match — nothing else may describe a chat as "encrypted".
   it, and cannot read the text at any access level: no key material leaves the
   browser, so there is no escrow, no server-side search, preview, moderation or
   push payload that could contain message content.
-- The transition is visible on both sides: plaintext messages sent before the
-  flag stays in the transcript labeled as pre-encryption history, and the
-  encrypted stream continues from there.
+- **Files and pictures in such a conversation are encrypted too**, on the sender's
+  device, before a single byte is uploaded. The server holds `enc-<uuid>.bin` and
+  a row with no filename, no MIME type and no plaintext hash; it does not scan
+  them and cannot. The transition is visible on both sides: plaintext messages
+  sent before the flag stay in the transcript labeled as pre-encryption history,
+  and the encrypted stream continues from there.
+- **Every conversation opens with one line that states which of the cases below
+  this device is in** (`MessageList.jsx` → `e2eeNotice`). It is a claim about this
+  device, so it has five distinct sentences and never one stretched across them:
+  encrypted (text, images and files decrypt only here and on the peer's device),
+  a direct chat that will be encrypted by its first message, a chat whose
+  encryption is still being resolved, a chat this device cannot decrypt, and a
+  group. The composer's paperclip and the header chip follow the same state, so
+  no control can imply a protection the notice has just denied.
 
 **What is not encrypted**
 
 - **Group conversations**, on every client. They use the plaintext path and the
-  server reads their content. Phase 3 owns this, and only Phase 3 may set the
-  flag on a group.
+  server reads their content — including group attachments, which still go
+  through the old upload with their name and MIME type visible. Phase 3 owns
+  this, and only Phase 3 may set the flag on a group.
 - **Mobile.** No Expo client holds keys yet, so a mobile device can neither read
   nor write an encrypted conversation.
 - **Existing direct conversations that were never opened from the web app after
@@ -664,8 +710,15 @@ message is rejected. Closing this needs either a mobile client or a visible
   history sharing between devices yet.
 - No safety numbers / no out-of-band key verification: key adoption is TOFU, so
   a server substituted at first contact would not be detected. Phase 5.
-- Attachments and reactions are blocked inside an encrypted conversation rather
-  than encrypted; Phase 4 replaces the block.
+- Reactions are still unavailable inside an encrypted conversation, not
+  encrypted: they live in the server's message table and an encrypted message
+  has no row there. The affordance is hidden rather than faked.
+- An attachment survives only as long as its blob does. There is no pruning or
+  export policy for `encrypted_blobs` either, and no server-side malware check —
+  the bytes are unreadable to the server by design, so nothing scans them.
+- A decrypted file is held in the tab as an object URL, not written to disk, and
+  is not cached across reloads: a reopened conversation re-fetches and
+  re-authenticates the bytes.
 - Search in an encrypted chat covers only this device's local cache, and the UI
   says so.
 - Envelope retention is undefined: the server keeps ciphertext forever and there
