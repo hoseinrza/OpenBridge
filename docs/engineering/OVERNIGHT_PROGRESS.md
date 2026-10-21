@@ -777,11 +777,18 @@ mobile are still plaintext.
   the API response (test mode); in production the request endpoint returns 503
   until a provider (e.g. Kavenegar/SMS.ir) is integrated. OTP throttling is
   in-memory like the rest of the auth limits.
-- The staged CI/CD pipeline has not executed on GitHub Actions yet: the redeploy
-  logic was tested against stubbed `docker`/`curl`, but stage 4 (image builds +
-  compose smoke test) and the SSH deploy job are unproven until their first real
-  run. `deploy.yml` also stays inert until `DEPLOY_ENABLED` and the `SSH_*`
-  secrets are configured, so the VPS currently relies on its own cron.
+- The staged CI/CD pipeline **has now executed for real**: the run on `2c7e20d`
+  (2026-10-21) completed with every blocking stage green — web lint, backend
+  schema + typecheck, backend e2e (38/38 against PostgreSQL), the E2EE library
+  gate, web build, mobile Android bundle, the Docker images + compose smoke
+  test, and the gate job. Two things that run cost us: the backend e2e job could
+  not import `shared/e2ee` until it also installed the root manifest, and `npx
+  prisma validate` fails on a checkout with no `.env` unless `DATABASE_URL` is
+  supplied — both were fixed here, and both had already been failing the
+  pipeline since it was staged. The dependency-audit jobs still fail as
+  informational steps (see the audit item above), and `deploy.yml` stays
+  **skipped** because `vars.DEPLOY_ENABLED` is not `true`, so the VPS is still
+  updated by its own cron, not by CI.
 - The `redis` service is declared in `docker-compose.yml` and `REDIS_URL` is in
   both `.env.example` files, but no code reads it and no Redis client is a
   dependency (`RedisService` is an in-process Map). Either wire a real shared
