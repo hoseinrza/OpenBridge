@@ -1,13 +1,16 @@
 # OpenBridge End-to-End Encryption — Design Proposal
 
-Status: **proposal only — E2EE is not implemented**
+Status: **protocol chosen (MLS) and the Phase 0 library gate is closed —
+E2EE is still not implemented in the product**
 Last updated: 2026-10-21
 
 OpenBridge currently stores message text and attachment bytes in plaintext on
 the server (see `docs/SECURITY.md`). This document evaluates protocol options
-and proposes an implementation path. It intentionally contains **no
-cryptographic code**; nothing here should be read as a claim that messages are
-encrypted today.
+and proposes an implementation path. The only crypto-adjacent code in the repo
+is `shared/e2ee/provider.js`, interface glue for a maintained MLS library that
+is covered by the gate tests in the same folder; **it implements no primitive,
+no message format and no product key storage**, and nothing here should be read
+as a claim that messages are encrypted today.
 
 ## 1. Goals and non-goals
 
@@ -176,6 +179,9 @@ first key generation fail. So MLS on mobile needs one of:
 effectively unmaintained, and substituting an unreviewed WebCrypto shim under a
 protocol library is the wrong place to take risk.
 
+*(Resolved the same day: option 1 turned out to need no owned primitive —
+see §3.6.)*
+
 **Two consequences for the server, independent of the mobile decision:**
 
 - MLS is not order-tolerant. A receiver cannot decrypt generation *n+1* before
@@ -195,20 +201,90 @@ maintained, reviewed protocol implementations") is met at the *protocol* level
 unaudited implementation and to fund an external review, not a free win.
 
 
+### 3.6 Gate closed: the mobile path exists and is in the repo (2026-10-21)
+
+Option 1 from §3.5 was resolved without owning a primitive. The chosen shape is
+`hpke` 1.1.7 (RFC 9180 key schedule, zero dependencies, maintained) with
+`@panva/hpke-noble` 1.1.7 supplying noble-backed `DHKEM(X25519, HKDF-SHA256)`,
+`HKDF-SHA256` and `AES-128-GCM`/`AES-256-GCM`/`ChaCha20Poly1305`. `hpke` exposes
+extension points (`KEMFactory`/`KDFFactory`/`AEADFactory`) precisely so a
+non-WebCrypto runtime can be plugged in, which is what the noble package is for.
+
+The only code OpenBridge owns is `shared/e2ee/provider.js`: it adapts ts-mls's
+`Hpke`/`Kdf`/`Signature` interfaces onto that maintained stack, plus
+`@noble/curves` Ed25519 pinned to the raw-seed format. ts-mls's own
+`makeNobleSignatureImpl` prefers `crypto.subtle` when it exists, which stores
+signing keys as PKCS#8 on web and as a raw seed on Hermes — so reusing it would
+make key material platform-dependent. Pinning noble gives one key format on
+every client.
+
+Proven by `npm run test:e2ee` (also CI job `2b · E2EE library gate`):
+
+| Test | Result |
+|------|--------|
+| Full MLS lifecycle on `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`, pure provider | passes |
+| Full MLS lifecycle on `MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519`, pure provider | passes |
+| Cross-provider interop, WebCrypto seals → pure opens and pure seals → WebCrypto opens | passes both directions |
+| Same lifecycle with `crypto.subtle` replaced by a throwing trap (Hermes condition) | passes |
+
+Interop in both directions is the check that matters: ciphertext produced by the
+pure provider is decrypted by ts-mls's WebCrypto path and vice versa, so the
+adapter adds no protocol divergence. Measured cost: ~3.6–4.9 ms per
+encrypt+decrypt pair, ~2.9–3.0 KB client state for a 3-member group, 342 B
+welcome, ~144 B overhead on a 200-character body.
+
+What this does **not** prove:
+
+- It has not run on a phone. The Hermes simulation removes `crypto.subtle` and
+  keeps only `getRandomValues`; it does not reproduce Hermes' other gaps (no
+  WASM, no `eval`, slower BigInt). The mobile bundle must still be built with
+  `expo export` and exercised on a device during Phase 2.
+- `@panva/hpke-noble` statically imports `@noble/post-quantum` and every curve.
+  Vite tree-shakes it (`sideEffects: false`); Metro does not, so the Android JS
+  bundle carries unused post-quantum code. Accepted for now; if the size is a
+  problem, ask upstream for subpath exports rather than vendoring a copy.
+- Dependency versions are pinned to the tested tree. ts-mls peer-pins
+  `@noble/ciphers@2.1.1` while `@panva/hpke-noble` needs `^2.3.0`, so npm nests a
+  second copy. Both instances are used by disjoint code paths, which is why
+  interop works, but the duplication is real and upgrades must re-run the gate.
+
+**Gate verdict: passed on web, passed on the simulated mobile runtime, not yet
+passed on a device.** Phase 1 may start.
+
+
 ## 4. Identity, prekeys, and trust
 
 ### Server-stored public material only
 
-Per device, the client generates and uploads:
+Per device, in MLS terms (§3.6 fixed the protocol as MLS, so the Signal
+vocabulary below is kept only as history for the parts that still apply):
 
-- identity key pair (Curve25519; used for X3DH and signing),
-- signed prekey (rotated periodically, signed by the identity key),
-- a batch of one-time prekeys,
-- registration id and device id.
+- a long-lived identity leaf credential (Ed25519 in ciphersuite 1),
+- a pool of `KeyPackage`s (HPKE X25519 public key + credential + signature),
+  which is what a Welcome message uses to add that device to a group,
+- device id and registration metadata.
 
-The server stores public keys and signatures only. Private keys never leave the
-device. One-time prekeys are handed out atomically and deleted/marked used;
-when exhausted, clients fall back to the signed prekey and upload more.
+The server stores public keys and signatures only. Private keys and MLS client
+state never leave the device. `KeyPackage`s are handed out atomically and marked
+consumed; when a device's pool runs low it uploads more.
+
+### Key custody: no escrow, no server-side recovery
+
+Decided 2026-10-21, and it is a hard constraint rather than a preference: **no
+access level, including the platform owner, may be able to read message
+content.** Consequences that must be designed in, not worked around:
+
+- No key backup on the server, no recovery endpoint, no admin-readable export,
+  no "email me my keys" flow. Lose every device and the history is gone; the UI
+  has to say that before it happens.
+- No server-side plaintext search, no push payloads containing message text or
+  sender-authored previews, no server-side content scanning of encrypted bodies
+  or attachments.
+- Nothing in the backend may accept, log, or persist a private key, MLS client
+  state, or a passphrase that could unlock them. A test must assert the database
+  and logs contain no plaintext or key material for E2EE messages.
+- Optional *user*-initiated encrypted export (passphrase-protected file the
+  user holds) is the only allowed recovery route, and it is Phase 5 work.
 
 ### Private key storage
 
@@ -218,7 +294,10 @@ when exhausted, clients fall back to the signed prekey and upload more.
   tricks.
 - Mobile: OS keystore (Keychain / Android Keystore) through a native module;
   `expo-secure-store` is useful for small secrets but is not a substitute for
-  keystore-backed key operations.
+  keystore-backed key operations. Note §3.5: MLS client state is ~3 KB, above
+  `expo-secure-store`'s per-item ceiling, so state goes to AsyncStorage/SQLite
+  while only the wrapping key, if any, lives in the keystore. That is weaker at
+  rest than this section assumes, and is a documented trade-off, not a silent one.
 
 ### Trust and verification
 
@@ -231,12 +310,12 @@ when exhausted, clients fall back to the signed prekey and upload more.
 
 ## 5. Multi-device
 
-- Every device registers independently and is a separate encryption recipient.
-- Direct messages: the sender encrypts one copy per recipient device (and one
-  per own other device for sync).
-- Groups: sender keys are distributed to every device of every member over
-  pairwise sessions; a group membership change or device addition requires
-  redistribution/rotation.
+- Every device registers independently and owns its own `KeyPackage` pool, so it
+  is a separate MLS leaf and a separate recipient of Welcomes.
+- Direct conversations are two-member groups (or a group per device pair), so
+  multi-device is the same commit/welcome path as groups — one leaf per device.
+- A new device of an existing member is added by a commit from another device of
+  the same user; it then decrypts from that epoch forward, not backwards.
 - Device linking (new device) uses a QR flow with an ephemeral key exchange.
   History transfer is out of scope for v1; a new device starts with new
   messages unless a peer-to-peer transfer is added later.
@@ -304,12 +383,13 @@ plaintext rows only; E2EE messages store no `text`.
 
 1. **Phase 0 — library gate.** *Run on 2026-10-21; results in §3.5.* libsignal
    fails the gate (no web or Expo artifact). MLS works in web/Node through
-   `ts-mls` with a pure-JS provider, but mobile is blocked until either a
-   pure-JS HPKE suite is substituted for `@hpke/core`'s WebCrypto KEM/KDF/AEAD
-   or mobile moves to development builds with a native WebCrypto module. The
-   gate is therefore **not passed on mobile**, and the recommendation in §3.4
-   is superseded by §3.5: MLS, not Signal, is the only path with a client
-   implementation that exists today. No server changes.
+   `ts-mls` with a pure-JS provider, but mobile was blocked until either a
+   pure-JS HPKE suite was substituted for `@hpke/core`'s WebCrypto KEM/KDF/AEAD
+   or mobile moved to development builds with a native WebCrypto module. The
+   first option was resolved the same day (§3.6): the gate is **passed on web and
+   on the simulated mobile runtime**, with a device run still owed inside
+   Phase 2. The recommendation in §3.4 is superseded: MLS, not Signal, is the
+   protocol OpenBridge uses. No server changes.
 2. **Phase 1 — key infrastructure.** Device registration, prekey upload and
    atomic consumption, public bundle API, device list, revocation. No encryption
    of content yet.
@@ -317,8 +397,10 @@ plaintext rows only; E2EE messages store no `text`.
    opt-in E2EE. Plaintext history stays labeled "sent before encryption".
    Unsupported clients cannot send into an E2EE conversation; the UI explains
    why.
-4. **Phase 3 — groups.** Sender-key distribution, rotation on membership
-   change, multi-device fan-out, removal semantics.
+4. **Phase 3 — groups.** MLS already models a group, so this is commit/welcome
+   routing through the ordered delivery service, rekey on membership change,
+   removal semantics (a removed leaf cannot open the new epoch), and per-device
+   leaves for multi-device.
 5. **Phase 4 — encrypted attachments**, then default-on for new conversations
    once the security review passes.
 6. **Phase 5 — hardening.** Key-change UX, safety numbers, encrypted local
@@ -358,19 +440,19 @@ security bug.
 
 ## 10. Open questions
 
-1. Is a self-built WASM `libsignal` artifact acceptable for long-term web
-   maintenance, or should we require an audited third-party build?
-2. Which React Native integration path is viable for Expo (custom native module
-   vs. WASM), and does it work under Hermes? — *Narrowed by §3.5: neither WASM
-   nor WebCrypto exists in Hermes, so the choice is a ~120-line pure-JS HPKE
-   suite we own and review, or a native module that ends Expo Go support for
-   the encrypted build. Still open, and it is a product decision, not a
-   technical one.*
+1. ~~libsignal WASM artifact~~ — moot: libsignal failed the gate (§3.5) and MLS
+   is the protocol.
+2. Which React Native integration path is viable for Expo? — *Answered by
+   §3.6: neither WASM nor WebCrypto exists in Hermes, and a pure-JS provider
+   built from `hpke` + `@panva/hpke-noble` runs the whole lifecycle with
+   `crypto.subtle` trapped, so Expo Go stays supported and no native module is
+   needed. Device verification is still owed.*
 3. Is E2EE opt-in per conversation, or default-on for new direct chats once all
    active devices support it?
-4. Key backup/recovery: no server escrow (lose devices → lose history) vs. an
-   optional passphrase-encrypted backup. Product decision with support
-   implications.
+4. ~~Key backup/recovery~~ — decided 2026-10-21: **no server escrow and no
+   recovery path at any access level** (§4). Losing every device loses the
+   history; the UI must say so. A user-initiated, passphrase-encrypted export is
+   the only permitted escape hatch and is Phase 5 work.
 5. Should existing plaintext history be exportable/deletable per user before
    E2EE becomes the default?
 6. Do reactions, typing, and read receipts need content encryption in v1?

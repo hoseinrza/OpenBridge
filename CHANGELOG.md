@@ -4,6 +4,35 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.2] - 2026-10-21
+
+### Added
+- **E2EE Phase 0 gate closed; messages are still not encrypted.**
+  `shared/e2ee/provider.js` adapts ts-mls's crypto interfaces onto `hpke` +
+  `@panva/hpke-noble` (noble-backed DHKEM X25519 / HKDF-SHA256 / AES-128-GCM)
+  and pinned `@noble/curves` Ed25519, so MLS no longer needs `crypto.subtle` —
+  the blocker that made Expo/Hermes impossible in 1.1.1. The provider is
+  interface glue and implements no primitive.
+- `npm run test:e2ee`, wired into CI as job `2b · E2EE library gate`: the full
+  MLS lifecycle on two ciphersuites, replay and stale-generation rejection,
+  removed member cannot decrypt, state round-trip, cross-provider interop in
+  both directions against ts-mls's WebCrypto path, and the same run with
+  `crypto.subtle` replaced by a throwing trap. 5/5 pass locally.
+
+### Changed
+- The E2EE design doc records the gate verdict (§3.6), fixes MLS as the
+  protocol (§3.4/§3.5 are superseded), restates key storage and multi-device in
+  MLS terms, and adds a non-negotiable key-custody rule in §4: no server escrow,
+  no recovery endpoint, no server-side search, preview or scanning of encrypted
+  content — no access level, including the platform owner, can read message
+  text.
+- Dependency pins reproduce the tested tree exactly (`ts-mls@1.6.4`,
+  `hpke@1.1.7`, `@panva/hpke-noble@1.1.7`, `@noble/ciphers@2.1.1`,
+  `@noble/curves@2.0.1`, `@noble/hashes@2.4.0`). Two known costs are documented
+  rather than hidden: Metro will not tree-shake the post-quantum code
+  `@panva/hpke-noble` imports, and npm nests a second `@noble/ciphers` because
+  ts-mls peer-pins an older one.
+
 ## [1.1.1] - 2026-10-21
 
 ### Changed

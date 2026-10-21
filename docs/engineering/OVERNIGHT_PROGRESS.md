@@ -464,8 +464,41 @@ n+1 before n), and mobile key/state storage cannot live in
 `expo-secure-store` (per-item limit) — it needs SQLite/AsyncStorage, which is
 weaker at rest than §4 assumes.
 
+## E2EE gate closed with a pure-JS provider (2026-10-21)
+
+Still **no product encryption: messages are plaintext**. What changed is that
+the mobile blocker found above turned out to need no owned primitive, and the
+gate is now an executable test in the repo rather than a scratch directory.
+
+- `shared/e2ee/provider.js` adapts ts-mls's `Hpke`/`Kdf`/`Signature` interfaces
+  onto `hpke@1.1.7` (RFC 9180 key schedule) + `@panva/hpke-noble@1.1.7`
+  (noble-backed DHKEM X25519 / HKDF-SHA256 / AES-128-GCM / ChaCha20Poly1305) and
+  `@noble/curves` Ed25519. It contains glue only.
+- ts-mls's `makeNobleSignatureImpl` is deliberately not reused: it prefers
+  `crypto.subtle` when present and stores PKCS#8 there but a raw seed on
+  Hermes, which would make key material platform-dependent. Pinning noble gives
+  one format on both clients.
+- `npm run test:e2ee` (CI job `2b · E2EE library gate`, `shared/e2ee/*.test.mjs`)
+  asserts, per supported ciphersuite: full lifecycle, replay/stale-generation
+  rejection, removed member cannot decrypt, state round-trip, **cross-provider
+  interop in both directions** against ts-mls's WebCrypto path, and the whole
+  lifecycle with `crypto.subtle` replaced by a throwing trap. 5/5 pass;
+  ~3.6-4.9 ms per encrypt+decrypt, ~2.9-3.0 KB state, 342 B welcome, ~144 B
+  overhead on a 200-character body.
+- Known costs, recorded rather than hidden: `@panva/hpke-noble` statically
+  imports `@noble/post-quantum`, which Metro will not tree-shake, and ts-mls
+  peer-pins `@noble/ciphers@2.1.1` while hpke-noble needs `^2.3.0`, so npm nests
+  a second copy. Versions are pinned to the exact tested tree; upgrades must
+  re-run the gate.
+- Not yet done: nothing has run on a phone or in a real browser tab, and no
+  product code imports `shared/e2ee` yet.
+
 ## Validation actually run
 
+- Root: `npm run test:e2ee` — 5/5 passed (MLS lifecycle on two ciphersuites,
+  cross-provider interop both directions, and the same lifecycle with
+  `crypto.subtle` trapped).
+- Root: `npm run lint` — clean with `shared/e2ee` inside the web lint scope.
 - `backend`: `npm run build` — passed after every batch.
 - `backend`: `npm run test:e2e` — 11/11 tests passed (about 4.5 s) against a
   real local PostgreSQL:
@@ -507,9 +540,10 @@ weaker at rest than §4 assumes.
 ## Unresolved / known issues
 
 - No E2EE; the server stores plaintext messages. A design proposal exists in
-  `docs/engineering/E2EE_DESIGN.md`, and its Phase 0 library gate was executed
-  on 2026-10-21 (§3.5): MLS is workable on web, unusable on Expo/Hermes until
-  the WebCrypto gap is closed. No cryptography is implemented in the product.
+  `docs/engineering/E2EE_DESIGN.md`; its Phase 0 library gate ran on 2026-10-21
+  and was then closed (§3.6) with a pure-JS MLS provider now living in
+  `shared/e2ee/` behind `npm run test:e2ee`. No product code imports it yet and
+  no message is encrypted.
 - No session-management UI: `GET /api/auth/sessions` and `DELETE
   /api/auth/sessions/:id` exist, but web/mobile do not expose them yet.
 - Refresh-token reuse detection is not implemented; a replayed old token is
@@ -567,14 +601,13 @@ weaker at rest than §4 assumes.
    one API instance.
 4. Add authorization tests for group membership changes (add/remove participant)
    and message edit/delete once those endpoints exist.
-5. Capture and display the E2EE `Session`/device list as the precursor to
-   multi-device key management. The Phase 0 library gate described in the E2EE
-   design **has now been run** (see the 2026-10-21 section above): MLS works in
-   web/Node, mobile is blocked on the absence of `crypto.subtle` in Hermes, so
-   the next step is a product decision — own a ~120-line pure-JS HPKE suite
-   (keeps Expo Go, adds reviewed-by-us crypto glue) or move mobile to a native
-   WebCrypto module (no owned primitives, no Expo Go). Do not start Phase 1
-   until that is chosen.
+5. E2EE Phase 1: device registration and `KeyPackage` storage on the backend
+   (public material only, atomic consumption, revocation), then Phase 2 direct
+   conversations. The library question is settled — the chosen pure-JS provider
+   is in `shared/e2ee/` and its gate runs in CI — and the key-custody rule is
+   fixed too: no escrow, no recovery, nothing at any access level can read
+   message content (design doc §4). What remains unproven is a real phone and a
+   real browser tab.
 6. Add a web security review pass (CSP, token storage trade-off) and cover the
    signed-URL download path with a cross-user authorization test.
 7. Run the mobile app on a native emulator or device (RTL header, safe areas,
