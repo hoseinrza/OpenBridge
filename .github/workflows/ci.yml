@@ -39,6 +39,13 @@ jobs:
     name: '1b · Backend schema and typecheck'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # `prisma validate` resolves the datasource's env() reference before it reads
+    # the schema, so it fails on a checkout that has no .env — which is every CI
+    # run. The value is never connected to here; generate, validate and
+    # `nest build` only need it to exist.
+    env:
+      DATABASE_URL: postgresql://openbridge:openbridge@localhost:5432/openbridge
+      JWT_SECRET: ci-only-secret-at-least-32-characters-long-0000
     defaults:
       run:
         working-directory: backend
