@@ -4,6 +4,63 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.7] - 2026-10-21
+
+### Changed
+- **A bubble now holds everything about its message.** On web the timestamp, the
+  encryption lock, the react button, the read receipt, the reaction chips and the
+  reaction picker all render inside `.bubble`; on mobile the tapback strip moved
+  from next to the bubble into it. What stays outside is the profile — the
+  avatar and, in a group, the sender's name — and nothing else.
+- The web reaction picker is no longer a floating bar that appears above the
+  message on hover. It opens in place, under the message content, from the smile
+  button in the bubble's own footer, and closes when you pick or press it again.
+  Hovering now only brightens that button, so the layout no longer jumps when the
+  pointer crosses a message.
+- Because the meta row and chips are painted on the bubble surface instead of the
+  page background, they are bubble-aware now: on the outgoing bubble the time, the
+  lock and the ticks turn translucent white and the chips keep the bubble's
+  palette (`rgba(255,255,255,.16)` for someone else's, `#FFE0DE` border for the
+  one you hold) so a light pill never disappears into the red.
+
+### Fixed
+- **Image and file messages never loaded their own content.** `resolveUrl` in
+  both clients turned `/uploads/<file>` into `/api/<file>` — it sliced off the
+  `uploads` segment that is the actual route — so every attachment 404'd and a
+  picture collapsed to a broken-icon sliver inside its bubble. Both clients now
+  resolve to `/api/uploads/<file>?exp=…&sig=…`
+  (`src/services/api.js:11`, `mobile/src/services/api.js:27`). The defect came in
+  with `d98a3b0` ("Make uploads private…"), and the e2e case for it only checked
+  the URL the API *returns*, never the one the browser finally requests — so it
+  survived five releases.
+- Uploaded avatars could not render on web at all: `normalizeUser`, the group
+  participant list and `normalizeGroup` passed the backend's `/uploads/...` path
+  straight to `<img>`, which resolves against the app origin instead of the API.
+  They now go through `resolveUrl`, the way mobile already did.
+
+### Tests
+- Verified live in two logged-in browsers on two throwaway accounts inside one
+  group, at a narrow viewport: text, image and file bubbles on both sides each
+  contain their own footer, chips and picker (checked as DOM containment *and*
+  bounding-box containment), the avatar and sender name stay outside, the
+  512×512 image now decodes (naturalWidth 512, drawn 280px), the file link answers
+  `200` with `Content-Disposition: attachment`, and a `👍` tapped in one tab shows
+  up in the other as one unpressed chip inside the sender's own bubble.
+- Root `npm run lint` clean, `npm run build` clean,
+  `npx expo export --platform android` exit 0. No backend change, so the e2e
+  suite (38/38 at 1.1.6) was not re-run.
+
+### Known limits of this release
+- The profile dialog still cannot preview an avatar right after picking the file:
+  the upload endpoint answers with an *unsigned* `/uploads/<file>` path and the
+  security suite locks that contract, so the preview 403s until the profile is
+  saved and the API hands back a signed URL. Everything else about a saved
+  avatar works now.
+- Mobile has no visual QA again: the tapback strip inside the bubble is proven to
+  bundle, but no phone or emulator rendered it. On a 320pt-wide screen the strip
+  is wider than the bubble's content box, so it wraps to a second row by design
+  rather than clipping.
+
 ## [1.1.6] - 2026-10-21
 
 ### Changed

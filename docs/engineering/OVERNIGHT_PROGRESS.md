@@ -699,7 +699,98 @@ native-first stack (`Apple Color Emoji` → `Segoe UI Emoji` → `Segoe UI Symbo
 iPhone or Mac now shows Apple's own artwork, and the codepoints stored in the
 database stay platform-neutral so both sides see the same reaction.
 
+## Everything a message owns moved inside its bubble (2026-10-21, shipped as 1.1.7)
+
+**The ask was a layout rule, not a feature:** «همه چیز پیام جز پروفایل داخل حباب
+پیام باشن» — everything belonging to a message inside the bubble, only the profile
+outside, placement left to me. On web the bubble was the one surface that clearly
+says "this is the message", and directly under it sat three loose rows that also
+belong to it: the timestamp/receipt/react-button footer, the reaction chips, and a
+picker bar floating 40px above the whole thing. So the rule became literal: one
+bubble, everything in it, avatar and sender name the only outside company.
+
+**Web structure.** `.bubble` is now a column flex container and holds, in order,
+the content, the picker strip (only while open), the chips (only while any exist)
+and the footer. `BubbleContent` became `BubbleBody` — it returns only the inside —
+because the row owns the `.bubble` class, and the file bubble used to *be* the
+`<a>`: an anchor may not contain the reaction buttons, so the card's link is now
+`.bubble-file-link` sitting inside the bubble next to the meta. `.bubble-image`
+dropped `overflow: hidden` (the button already clips its own corners) — with the
+picker inside the bubble, that rule would have clipped it.
+
+**The picker stopped floating.** `.reaction-bar` lost `position: absolute`,
+`top: -40px`, the `right: 0` / `left: 38px` anchors, the `bar-mine` class and both
+mobile media-query overrides. It is an in-flow pill row inside the bubble, opened
+from the smile button in the footer and closed by picking or by that button again.
+Hover no longer opens it: an in-flow strip that appears on hover resizes the
+bubble as the pointer crosses the row, and the row can move out from under the
+cursor. Hover now only brightens the button, which is what `:hover` was already
+doing in CSS.
+
+**Bubble-aware ink.** The footer and chips used to be painted against the page
+background, so their colours were chosen for it. Inside the bubble they are on the
+accent red for outgoing messages, where a light pill and a dark-grey timestamp
+would both disappear, so the outgoing side gets `rgba(255,255,255,.78)` meta,
+translucent-white chips (`rgba(255,255,255,.16)`, `#FFE0DE` border when you hold
+it) and a translucent picker strip — the same treatment mobile's chips already
+used, which is why the two clients now read as one design.
+
+**Mobile.** The tapback strip moved from `bubbleCol` (a sibling after the bubble
+`Pressable`) into the bubble itself, after the caption and before the chips, so
+long-press → pick now happens entirely inside one surface. Inside the bubble the
+strip is bounded by the bubble's own padding, so five 36pt circles plus the close
+button (~222pt) overflow the content box of a 78%-wide column on a 320pt screen:
+the circles went to 34pt, `marginTop` went away (the bubble's `gap: 4` spaces it),
+`flexWrap: 'wrap'` was added, and the strip took over the chips' two-tone
+treatment (surface3 on the incoming bubble so it is not white-on-white,
+translucent white on the outgoing one).
+
+**A real defect surfaced while measuring an image bubble.** The picture rendered as
+a sliver because the request 404'd. `resolveUrl` in both clients turned the
+backend's `/uploads/<file>` into `/api/<file>` — `path.slice('/uploads'.length)`
+removed the segment that *is* the route (`@Controller('uploads')` +
+`app.setGlobalPrefix('api')`), so every image and file message on every client,
+forever since `d98a3b0` ("Make uploads private and validate uploaded files"),
+requested a URL the server does not serve. The e2e case for that batch asserted
+the shape of the URL the API *returns* — signed and correct — and never the URL
+the browser finally asks for, which is where the segment went missing. Both
+clients now resolve to `/api/uploads/<file>?exp=…&sig=…`. The same audit found web
+avatars passing the raw `/uploads/...` path straight to `<img>` in three places
+(`normalizeUser`, the group participant map, `normalizeGroup`), i.e. a user-picked
+avatar could never display on web; they go through `resolveUrl` now, like mobile.
+
+**Deliberately left alone.** The profile dialog still cannot preview an avatar the
+second it is picked, because the upload endpoint answers with an *unsigned* path
+and `security.e2e.cjs:542` locks that contract (`/^\/uploads\/[a-f0-9-]+\.png$/`);
+fixing it properly means either signing on upload or previewing with a blob URL
+and tracking the uploaded path separately for save. That is a separate change, not
+a bubble-layout one.
+
 ## Validation actually run
+
+- 1.1.7 batch, 2026-10-21: root `npm run lint` clean, root `npm run build` clean
+  (524 ms, rolldown warnings are the pre-existing `@hpke/common` pure-annotation
+  ones), `npx expo export --platform android` exit 0 after the tapback move. No
+  backend change, so `npm run test:e2e` was not re-run. Containment was then
+  measured, not eyeballed: in two logged-in browsers on two throwaway accounts
+  inside one group, for **mine and other** and for **text, image and file**, every
+  owned node (`.bubble-text` / `.msg-image-btn` / `.bubble-file-link`,
+  `.msg-reactions`, `.msg-reaction`, `.reaction-bar`, `.msg-footer`) passed both
+  DOM containment (`bubble.contains(el)`) and bounding-box containment against the
+  bubble rect, with `.msg-avatar` and `.msg-sender` verified to stay outside. The
+  opened strip measured 186×40 inside a 288px-wide image bubble (mine) and sat
+  right-anchored at `bubble.right − 13` inside an incoming bubble; picking `❤️`
+  closed the strip, reordered the bubble to media → chips → footer and left one
+  chip with `aria-pressed=true`. The attachment fix was verified at the HTTP layer
+  from inside the page: the broken URL answered `404 Cannot GET /api/<file>.png`,
+  the corrected one answered `200 image/png` 281 555 bytes for the picture and
+  `200` with `Content-Disposition: attachment` for the file, and the peer's tab
+  decoded the incoming image at naturalSize 512×512. Probe rows and their three
+  upload files were deleted afterwards (five messages: two texts, two images, one
+  file; the 👍 went with its message); the "asd" group keeps the three messages
+  that were already there and were not mine. **Still no screenshots: the in-app
+  browser reports `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`, so every step above is
+  scripted DOM plus computed style — layout numbers verified, appearance not.**
 
 - 1.1.6 batch, 2026-10-21: `backend` `npm run test:e2e` — **38/38 passed**
   against the real local PostgreSQL (the reaction case is the one rewritten
@@ -928,6 +1019,10 @@ database stay platform-neutral so both sides see the same reaction.
    could not capture screenshots (`NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`), so the
    padlock, the pre-encryption divider and the blocked-attachment note have no
    visual QA yet. Same for 1.1.6: the long-press tapback strip and the pressed
-   chip states have only been proven to bundle, not seen on a screen.
+   chip states have only been proven to bundle, not seen on a screen. And again
+   for 1.1.7: the in-bubble footer, chips and picker strip were verified by
+   measured bounding boxes, not by eye — the image-bubble padding and the
+   34pt tapback row at 320pt width are the two places a real screen is most
+   likely to disagree with the maths.
 9. Self-host Font Awesome so the web client can run without a CDN and under a
    strict CSP.
