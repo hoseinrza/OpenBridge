@@ -268,6 +268,44 @@ The server stores public keys and signatures only. Private keys and MLS client
 state never leave the device. `KeyPackage`s are handed out atomically and marked
 consumed; when a device's pool runs low it uploads more.
 
+### Phase 1 landed (2026-10-21): the public-material API
+
+`backend/src/e2ee/` implements the storage half of the list above, and nothing
+else — no content is encrypted yet.
+
+| Endpoint | Effect |
+|----------|--------|
+| `POST /api/e2ee/devices` | register or refresh the caller's own device, idempotent by the client-generated `clientId` |
+| `GET /api/e2ee/devices` | the caller's active devices with their remaining pool size |
+| `DELETE /api/e2ee/devices/:clientId` | revoke: stamp `revokedAt`, delete that device's whole pool |
+| `POST /api/e2ee/devices/:clientId/key-packages` | append opaque base64 KeyPackages to the caller's own pool |
+| `GET /api/e2ee/users/:userId/key-packages` | claim one fresh KeyPackage per active device of the recipient |
+
+Properties the tests in `backend/test/security.e2e.cjs` assert rather than
+assume:
+
+- **Nothing private can be stored, by construction.** `devices` and
+  `key_packages` have no column that could hold a private key, MLS state or a
+  passphrase; the KeyPackage column is one base64 string the server never
+  decodes. A request that carries `privateKey`, `state` or a foreign `userId`
+  has those fields dropped by the global whitelist pipe, and the row proves it.
+- **A package reaches one caller.** Consumption stamps `consumedAt` plus a
+  random `claimToken` in one update that re-checks `consumedAt IS NULL`, then
+  the claim re-reads only the rows carrying its own token. Losers of the race
+  retry for the device's next package or fail; they never see the winner's bytes.
+- **All devices or none.** A claim that cannot cover every active device of the
+  recipient returns an error instead of a partial bundle, because a missing
+  device would mean a group that silently excludes it.
+- **Revocation is permanent and local.** A revoked `clientId` cannot
+  re-register (a new install must mint a new id), and its pool is deleted, used
+  and unused alike. Revoking and deleting run in one transaction so a claim
+  that already selected those rows blocks and then matches nothing.
+- **No enumeration.** Unknown account, account with no devices, and account
+  whose pool is empty all answer with the same 404 and the same text; the
+  endpoint is additionally rate limited per client IP.
+- **Abandoned claims burn one package per device.** Accepted cost of keeping no
+  server-side reservation state; clients refill the pool when it runs low.
+
 ### Key custody: no escrow, no server-side recovery
 
 Decided 2026-10-21, and it is a hard constraint rather than a preference: **no
@@ -390,9 +428,10 @@ plaintext rows only; E2EE messages store no `text`.
    on the simulated mobile runtime**, with a device run still owed inside
    Phase 2. The recommendation in §3.4 is superseded: MLS, not Signal, is the
    protocol OpenBridge uses. No server changes.
-2. **Phase 1 — key infrastructure.** Device registration, prekey upload and
-   atomic consumption, public bundle API, device list, revocation. No encryption
-   of content yet.
+2. **Phase 1 — key infrastructure.** *Landed on 2026-10-21 (§4, "Phase 1
+   landed").* Device registration, KeyPackage upload and atomic consumption,
+   public bundle API, device list, revocation. No encryption of content yet —
+   no client uses these endpoints, so messages are still plaintext.
 3. **Phase 2 — direct E2EE on web and mobile.** New direct conversations are
    opt-in E2EE. Plaintext history stays labeled "sent before encryption".
    Unsupported clients cannot send into an E2EE conversation; the UI explains

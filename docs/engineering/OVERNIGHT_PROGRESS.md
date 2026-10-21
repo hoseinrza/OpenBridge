@@ -493,7 +493,51 @@ gate is now an executable test in the repo rather than a scratch directory.
 - Not yet done: nothing has run on a phone or in a real browser tab, and no
   product code imports `shared/e2ee` yet.
 
+## E2EE Phase 1 on the backend: devices and key packages (2026-10-21)
+
+Still **no product encryption: messages are plaintext.** This batch builds the
+server side of the key plumbing the gate doc promised, with the custody rule
+from design doc §4 enforced by the schema itself.
+
+- `backend/src/e2ee/` adds five endpoints under `/api/e2ee`: register/refresh
+  own device, list own devices, revoke own device, append public KeyPackages to
+  own pool, and claim one fresh KeyPackage per active device of a recipient.
+- New tables `devices` and `key_packages` (applied locally with
+  `prisma db push`). A KeyPackage is one opaque base64 column plus consumption
+  metadata: the server never decodes it, and there is no column anywhere that
+  could hold a private key, MLS client state, or a passphrase.
+- Consumption is atomic. A claim stamps `consumedAt` plus a random
+  `claimToken` in an update that re-checks `consumedAt IS NULL`, then re-reads
+  only the rows carrying its own token, so a package can never reach two
+  callers. A recipient whose pool cannot cover every active device gets an
+  error instead of a partial bundle — a missing device would mean a group that
+  silently excludes it.
+- Revocation is permanent and local: the `clientId` can never re-register, and
+  the device's whole pool (used and unused) is deleted in the same transaction
+  that stamps it, so a claim that already selected those rows blocks and then
+  matches nothing.
+- Caps live in `backend/src/config/env.ts` (`E2EE_MAX_DEVICES_PER_USER`,
+  `E2EE_MAX_PACKAGES_PER_UPLOAD`, `E2EE_MAX_PACKAGES_PER_DEVICE`,
+  `E2EE_MAX_PACKAGE_CHARS`, `E2EE_CLAIM_LIMIT`, `E2EE_REGISTER_LIMIT`).
+- Seven new e2e cases assert the above rather than describing it: injected
+  `userId`/`privateKey`/`state` fields are dropped and never stored, another
+  account's device is unreachable even when its `clientId` is known, base64 and
+  size caps bite, the last package in a pool goes to exactly one of two
+  concurrent racers, and an unknown account, a device-less account and an empty
+  pool all answer with the same 404 text so the endpoint cannot enumerate.
+- Accepted cost, documented: an abandoned claim burns one package per device.
+  That is the price of keeping no reservation state server-side; clients refill
+  when the pool runs low.
+- Not yet done: no client calls any of this. Phase 2 (device keys, MLS groups
+  for direct conversations, ordered envelope delivery) is where ciphertext
+  appears, and a real phone and a real browser tab are still owed.
+
 ## Validation actually run
+
+- `backend`: `npm run test:e2e` — **26/26 passed** on 2026-10-21 against the
+  real local PostgreSQL, including the seven E2EE Phase 1 cases above. The
+  counts in the bullets below belong to the batches that produced them (11
+  tests then, 19 after contact matching); the suite has only grown.
 
 - Root: `npm run test:e2ee` — 5/5 passed (MLS lifecycle on two ciphersuites,
   cross-provider interop both directions, and the same lifecycle with
@@ -542,8 +586,13 @@ gate is now an executable test in the repo rather than a scratch directory.
 - No E2EE; the server stores plaintext messages. A design proposal exists in
   `docs/engineering/E2EE_DESIGN.md`; its Phase 0 library gate ran on 2026-10-21
   and was then closed (§3.6) with a pure-JS MLS provider now living in
-  `shared/e2ee/` behind `npm run test:e2ee`. No product code imports it yet and
-  no message is encrypted.
+  `shared/e2ee/` behind `npm run test:e2ee`. Phase 1 landed the same day: the
+  backend registers devices and stores public KeyPackages only (design doc §4).
+  No product code imports `shared/e2ee`, no client calls `/api/e2ee`, and no
+  message is encrypted.
+- Consumed `KeyPackage` rows are never pruned: every claim leaves one row with
+  `consumedAt` set, deleted only when the device is revoked. Harmless at current
+  traffic, but a retention rule is owed before volume grows.
 - No session-management UI: `GET /api/auth/sessions` and `DELETE
   /api/auth/sessions/:id` exist, but web/mobile do not expose them yet.
 - Refresh-token reuse detection is not implemented; a replayed old token is
@@ -556,7 +605,9 @@ gate is now an executable test in the repo rather than a scratch directory.
   re-checked on download.
 - Malware scanning is off unless a clamd instance is configured; encrypted
   content (future E2EE) cannot be scanned server-side.
-- No message edit/delete, account deletion, or device-based E2EE key management.
+- No message edit/delete or account deletion. Device-based E2EE key management
+  now exists on the server (`/api/e2ee/devices`) but in no client, so a user
+  still cannot see or remove a device holding their keys.
 - Database rows and attachment files are unencrypted at rest.
 - Video calling UI remains hidden on web and was removed from mobile navigation;
   signaling code is present but unused.
@@ -601,12 +652,16 @@ gate is now an executable test in the repo rather than a scratch directory.
    one API instance.
 4. Add authorization tests for group membership changes (add/remove participant)
    and message edit/delete once those endpoints exist.
-5. E2EE Phase 1: device registration and `KeyPackage` storage on the backend
-   (public material only, atomic consumption, revocation), then Phase 2 direct
-   conversations. The library question is settled — the chosen pure-JS provider
-   is in `shared/e2ee/` and its gate runs in CI — and the key-custody rule is
-   fixed too: no escrow, no recovery, nothing at any access level can read
-   message content (design doc §4). What remains unproven is a real phone and a
+5. E2EE Phase 2: put keys on the clients. Web and mobile generate their identity
+   and KeyPackage pool locally, register through `/api/e2ee/devices`, refill it
+   when the pool runs low, and turn a new direct conversation into a two-member
+   MLS group fed by `GET /api/e2ee/users/:id/key-packages`. The server side is
+   done and tested (Phase 1); what is left is client key persistence, the opaque
+   envelope transport with strictly ordered per-conversation delivery, a local
+   plaintext cache for search, and no plaintext send path into an encrypted
+   conversation. The custody rule is fixed and already encoded in the schema: no
+   escrow, no recovery, nothing at any access level can read message content
+   (design doc §4). What remains unproven is the provider on a real phone and a
    real browser tab.
 6. Add a web security review pass (CSP, token storage trade-off) and cover the
    signed-URL download path with a cross-user authorization test.

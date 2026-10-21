@@ -4,6 +4,39 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.3] - 2026-10-21
+
+### Added
+- **E2EE Phase 1 on the backend: device registration and `KeyPackage` storage.
+  Messages are still not encrypted.** `backend/src/e2ee/` serves five endpoints
+  under `/api/e2ee`: register or refresh own device, list own devices, revoke
+  own device, append public KeyPackages to own pool, and claim one fresh
+  KeyPackage per active device of a recipient. The pool is one opaque base64
+  column plus consumption metadata — the server never decodes it, and there is
+  deliberately no column that could hold a private key, MLS client state or a
+  passphrase.
+- KeyPackage consumption is atomic: a claim stamps rows with `consumedAt` and a
+  random `claimToken`, then re-reads exactly the rows carrying its own token, so
+  one package can never reach two callers. A recipient whose pool cannot cover
+  every active device yields no partial bundle — an incomplete group is a
+  silent message leak to the missing device.
+- New tables `devices` and `key_packages` (applied with `prisma db push`), and
+  new caps in `backend/src/config/env.ts`: `E2EE_MAX_DEVICES_PER_USER`,
+  `E2EE_MAX_PACKAGES_PER_UPLOAD`, `E2EE_MAX_PACKAGES_PER_DEVICE`,
+  `E2EE_MAX_PACKAGE_CHARS`, `E2EE_CLAIM_LIMIT`, `E2EE_REGISTER_LIMIT`.
+- Seven e2e cases in `backend/test/security.e2e.cjs` (26/26 pass locally):
+  injected `userId`/`privateKey`/`state` fields dropped and never stored,
+  another account's device unreachable by id, revoked device ids cannot
+  re-register, base64/size/count caps, the same package never handed out twice
+  including two concurrent racers for the last one, and identical error text
+  for an unknown account and a device-less one so the endpoint cannot be used
+  to enumerate accounts.
+
+### Changed
+- `docs/engineering/E2EE_DESIGN.md` marks Phase 1 done and describes the
+  delivered API and its custody properties (§4/§7); the overnight log's next
+  priority is now Phase 2 (client keys and encrypted direct conversations).
+
 ## [1.1.2] - 2026-10-21
 
 ### Added
