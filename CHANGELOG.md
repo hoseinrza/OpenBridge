@@ -17,11 +17,17 @@ carry one product version, so a release entry applies to every client.
   LTR one. The loading skeleton follows the same sides.
 
 ### Tests
-- Rendered a static copy of the chat in headless Chrome screenshots (not the
-  live app) at 1000px and 500px: outgoing bubbles sit against the right edge,
-  incoming ones against the left with the avatar outside on the left, the sender
-  name over the outer edge, and each footer, chip and tail follows its own
-  bubble. No live two-account run was repeated for this layout change.
+- Rendered a static copy of the chat in headless Chrome screenshots at 1000px
+  and 500px: outgoing bubbles sit against the right edge, incoming ones against
+  the left with the avatar outside on the left, the sender name over the outer
+  edge, and each footer, chip and tail follows its own bubble.
+- Also measured the live app on the local stack in headless Chrome (dark theme,
+  1264px wide): signed in as one test account, opened the conversation holding
+  messages from both accounts, and read the row boxes. All three outgoing
+  bubbles ended on the chat column's right edge (right: 928px); the incoming
+  bubble sat at the left (left: 54px) with its avatar outside it (left: 16px).
+  Both test accounts, their OTP rows and their conversation were deleted after
+  the run.
 - Root `npm run lint` clean, `npm run build` clean,
   `npx expo export --platform android` exit 0. No backend change, so the e2e
   suite was not re-run.
@@ -31,6 +37,8 @@ carry one product version, so a release entry applies to every client.
   emulator rendered it. `I18nManager.isRTL` is read once at module load, so a
   device that only flips direction after a relaunch picks the sides up on the
   next launch, the same way the rest of the app does.
+- The live web check was one signed-in browser at 1264px; the 500px layout was
+  rendered from the static copy above, not the live app.
 
 ## [1.1.7] - 2026-10-21
 
