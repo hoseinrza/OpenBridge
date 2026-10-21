@@ -30,6 +30,7 @@ import { getGroupMembers } from 'ts-mls/clientState.js';
 import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
 import { pureCryptoProvider, SUPPORTED_CIPHERSUITES } from './provider.js';
+import { parseAttachment } from './attachments.js';
 import { decodeUtf8, encodeUtf8, fromBase64, toBase64 } from './wire.js';
 
 export const DEFAULT_CIPHERSUITE = SUPPORTED_CIPHERSUITES[0];
@@ -71,6 +72,17 @@ function identityOf(leaf) {
   const credential = leaf.credential;
   const raw = credential?.basic?.identity ?? credential?.identity;
   return raw ? decodeUtf8(raw) : '';
+}
+
+/**
+ * A decrypted payload is either a message or one attachment descriptor. Both are
+ * text on the wire — MLS carries bytes, and a descriptor is JSON — so the split
+ * happens once here, on the way into the cache, and nothing downstream has to
+ * know that a picture arrived as a sentence.
+ */
+function shapePayload(text) {
+  const attachment = parseAttachment(text);
+  return attachment ? { text: '', attachment } : { text, attachment: null };
 }
 
 /**
@@ -265,7 +277,7 @@ export async function createE2eeClient({
     if (!record?.state) throw fail('no-group', 'این گفتگو روی این دستگاه کلید ندارد');
     const state = loadState(record);
     const result = await processPrivateMessage(state, message.privateMessage, emptyPskIndex, impl);
-    const text = decodeUtf8(result.message);
+    const { text, attachment } = shapePayload(decodeUtf8(result.message));
     result.consumed.forEach(zeroOutUint8Array);
 
     const members = membersOf(result.newState);
@@ -286,6 +298,7 @@ export async function createE2eeClient({
       id: envelope.id,
       senderId: envelope.senderId,
       text,
+      attachment,
       at,
       mine,
     });
@@ -301,6 +314,7 @@ export async function createE2eeClient({
       seq: envelope.seq,
       senderId: envelope.senderId,
       text,
+      attachment,
       at,
       mine,
     };
@@ -479,7 +493,7 @@ export async function createE2eeClient({
         seq: ack.seq,
         id: ack.id,
         senderId: me.id,
-        text,
+        ...shapePayload(text),
         at: now(),
         mine: true,
       });

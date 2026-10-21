@@ -52,6 +52,7 @@ model User {
   sessions       Session[]
   devices        Device[]
   envelopes      E2eeEnvelope[]
+  encryptedBlobs EncryptedBlob[]
 
   @@map("users")
 }
@@ -76,6 +77,27 @@ model E2eeEnvelope {
 
   @@unique([conversationId, seq])
   @@map("e2ee_envelopes")
+}
+
+// An attachment the sender encrypted on its own device. The server stores the
+// bytes it was handed and never opens them: there is no MIME check, no malware
+// scan (nothing readable to scan) and no column that could hold the file's real
+// name, type or contents. `conversationId` is the whole access rule — the id
+// only ever reaches a member inside their decrypted message, and membership is
+// what authorizes a fresh download URL. Size and which chat holds a blob are
+// metadata the server does learn; content it cannot.
+model EncryptedBlob {
+  id             String   @id @default(uuid())
+  filename       String   @unique
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  ownerId        String
+  owner          User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  size           Int
+  createdAt      DateTime    @default(now())
+
+  @@index([conversationId])
+  @@map("encrypted_blobs")
 }
 
 // One row per installed app that can hold end-to-end encryption keys. The
@@ -170,6 +192,7 @@ model Conversation {
   participants ConversationParticipant[]
   messages     Message[]
   envelopes    E2eeEnvelope[]
+  blobs        EncryptedBlob[]
 
   @@map("conversations")
 }

@@ -32,6 +32,15 @@ export function signedFileUrl(rawUrl: string | null | undefined): string | null 
   return `${path}?exp=${expiresAt}&sig=${signature(filename, expiresAt)}`;
 }
 
+// An encrypted blob is served from /uploads/encrypted/<file>, which UPLOAD_PATH
+// deliberately does not match: a client-encrypted attachment is never carried in
+// a plaintext message row, so nothing that reads a Message.fileUrl can sign it.
+// Its URL is handed out only by the blob endpoints, which check membership.
+export function signedEncryptedUrl(filename: string): string {
+  const expiresAt = Math.floor(Date.now() / 1000) + TTL_SECONDS;
+  return `/uploads/encrypted/${filename}?exp=${expiresAt}&sig=${signature(filename, expiresAt)}`;
+}
+
 export function verifyFileSignature(filename: string, expiresAtRaw: string, sig: string): boolean {
   if (!/^[A-Za-z0-9._-]{1,120}$/.test(filename)) return false;
 

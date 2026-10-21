@@ -26,6 +26,9 @@ const { NestFactory } = require('@nestjs/core');
 const { ValidationPipe } = require('@nestjs/common');
 const { io } = require('socket.io-client');
 const { PrismaClient } = require('@prisma/client');
+const { randomBytes, createCipheriv, createDecipheriv, randomFillSync } = require('node:crypto');
+const { readFile, unlink } = require('node:fs/promises');
+const { join } = require('node:path');
 const { AppModule } = require('../dist/app.module');
 const { isOriginAllowed } = require('../dist/config/env');
 
@@ -36,6 +39,7 @@ const SHARED = '../../shared/e2ee/';
 
 const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const createdUserIds = [];
+const createdBlobIds = [];
 const otpPhones = [];
 const live = [];
 
@@ -48,7 +52,13 @@ async function loadCore() {
   if (!core) {
     const client = await import(`${SHARED}client.js`);
     const stores = await import(`${SHARED}stores.js`);
-    core = { createE2eeClient: client.createE2eeClient, memoryStore: stores.memoryStore };
+    const attachments = await import(`${SHARED}attachments.js`);
+    core = {
+      createE2eeClient: client.createE2eeClient,
+      memoryStore: stores.memoryStore,
+      packAttachment: attachments.packAttachment,
+      parseAttachment: attachments.parseAttachment,
+    };
   }
   return core;
 }
@@ -184,6 +194,39 @@ async function makeClient(session, { store } = {}) {
   return handle;
 }
 
+// A sender encrypting a file the way the browser does: AES-256-GCM with a
+// 32-byte key, a 96-bit nonce and the tag appended to the ciphertext, which is
+// exactly the layout WebCrypto produces and the layout every client must read.
+function sealFile(plain) {
+  const key = randomBytes(32);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  return {
+    key: key.toString('base64'),
+    iv: iv.toString('base64'),
+    cipher: Buffer.concat([cipher.update(plain), cipher.final(), cipher.getAuthTag()]),
+  };
+}
+
+function openFile({ key, iv }, bytes) {
+  const decipher = createDecipheriv('aes-256-gcm', Buffer.from(key, 'base64'), Buffer.from(iv, 'base64'));
+  decipher.setAuthTag(bytes.subarray(bytes.length - 16));
+  return Buffer.concat([decipher.update(bytes.subarray(0, bytes.length - 16)), decipher.final()]);
+}
+
+/** The one POST a client makes with a file it has already encrypted. */
+async function uploadBlob(session, conversationId, bytes) {
+  const form = new FormData();
+  form.append('conversationId', conversationId);
+  form.append('file', new Blob([bytes], { type: 'application/octet-stream' }), 'blob');
+  const response = await fetch(`${origin}${API_PREFIX}/uploads/encrypted`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.token}` },
+    body: form,
+  });
+  return { status: response.status, data: await response.json().catch(() => ({})) };
+}
+
 before(async () => {
   app = await NestFactory.create(AppModule, { logger: false });
   app.setGlobalPrefix('api');
@@ -201,6 +244,14 @@ after(async () => {
   }
   if (prisma) {
     if (otpPhones.length) await prisma.otpCode.deleteMany({ where: { phone: { in: otpPhones } } });
+    if (createdBlobIds.length) {
+      const kept = await prisma.encryptedBlob.findMany({
+        where: { id: { in: createdBlobIds } }, select: { filename: true },
+      });
+      for (const blob of kept) {
+        await unlink(join(process.cwd(), 'uploads', blob.filename)).catch(() => {});
+      }
+    }
     if (createdUserIds.length) {
       await prisma.conversation.deleteMany({ where: { participants: { some: { userId: { in: createdUserIds } } } } });
       await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
@@ -443,4 +494,133 @@ test('a peer with no keys is refused before its conversation is locked to envelo
   assert.equal(ack.ok, true, `plaintext still goes through (${JSON.stringify(ack)})`);
   const row = await prisma.message.findUnique({ where: { id: ack.id }, select: { text: true } });
   assert.equal(row.text, 'هنوز خوانا', 'and it is stored the way the plaintext path stores it');
+});
+
+test('a file is encrypted on the sender, stored as opaque bytes and opened by the peer', async () => {
+  const { packAttachment } = await loadCore();
+  const sender = await makeClient(await createUser('carol'));
+  const peer = await makeClient(await createUser('dan'));
+  await Promise.all([sender.client.ready(), peer.client.ready()]);
+
+  const chat = await sender.client.openDirect(peer.session.user.id);
+
+  // A real PNG signature at the front of the plain file: this is exactly the
+  // byte sequence a magic-byte check would have caught, and the server never
+  // sees it, because what arrives is already ciphertext.
+  const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const plain = Buffer.alloc(6 * 1024);
+  pngHeader.copy(plain, 0);
+  randomFillSync(plain, pngHeader.length);
+  const sealed = sealFile(plain);
+
+  const uploaded = await uploadBlob(sender.session, chat.conversationId, sealed.cipher);
+  assert.equal(uploaded.status, 201, `a member can store a blob (${JSON.stringify(uploaded.data)})`);
+  assert.match(uploaded.data.id, /^[0-9a-f-]{36}$/, 'the blob is named by an id, not by a path');
+  createdBlobIds.push(uploaded.data.id);
+
+  await sender.client.send(chat.conversationId, packAttachment({
+    blob: uploaded.data.id,
+    name: 'screenshot.png',
+    mime: 'image/png',
+    size: plain.length,
+    key: sealed.key,
+    iv: sealed.iv,
+  }));
+
+  const received = await waitUntil(async () => {
+    const history = await peer.client.history(chat.conversationId);
+    return history.find(message => message.attachment?.blob === uploaded.data.id) ?? null;
+  }, 'the peer to decrypt the descriptor');
+
+  assert.equal(received.text, '', 'a picture leaves no readable body in the message list');
+  assert.equal(received.attachment.name, 'screenshot.png', 'the name came inside the message, not the database');
+  assert.equal(received.attachment.mime, 'image/png');
+  assert.equal(received.attachment.size, plain.length, 'the sender sized it before encrypting');
+
+  // The blob id is a name, not a credential: it only opens for a session that
+  // really is in the conversation holding it.
+  const granted = await api(`/uploads/encrypted/${uploaded.data.id}/url`, { token: peer.session.token });
+  assert.equal(granted.status, 200, 'a member is handed a fresh signed url');
+  const wire = await fetch(`${origin}${API_PREFIX}${granted.data.url}`);
+  const bytes = Buffer.from(await wire.arrayBuffer());
+  assert.equal(wire.status, 200, 'the bytes move');
+  assert.equal(wire.headers.get('content-type'), 'application/octet-stream', 'ciphertext is never typed');
+  assert.equal(wire.headers.get('x-content-type-options'), 'nosniff', 'and never sniffed by a browser');
+  assert.equal(wire.headers.get('content-disposition'), 'attachment', 'or opened as one');
+  assert.equal(bytes.subarray(0, pngHeader.length).equals(pngHeader), false, 'what came back is not a png');
+  assert.equal(bytes.includes(plain.subarray(pngHeader.length, pngHeader.length + 64)), false, 'nor any run of it');
+
+  assert.deepEqual(openFile(received.attachment, bytes), plain, 'the peer gets the sender\'s bytes back');
+
+  // GCM is what turns a changed byte into a refusal: there is no second path
+  // that would render the altered file.
+  const tampered = Buffer.from(bytes);
+  tampered[pngHeader.length] ^= 0x01;
+  assert.throws(() => openFile(received.attachment, tampered), 'a file that changed anywhere does not open');
+
+  // What the platform keeps: an opaque blob, its size, and which chat owns it.
+  const kept = await prisma.encryptedBlob.findUnique({ where: { id: uploaded.data.id } });
+  assert.match(kept.filename, /^enc-[0-9a-f-]{36}\.bin$/, 'a name chosen here, with no client filename in it');
+  assert.equal(kept.conversationId, chat.conversationId, 'one conversation holds it');
+  assert.equal(kept.ownerId, sender.session.user.id);
+  assert.equal(kept.size, sealed.cipher.length, 'only the ciphertext size is known');
+  const stored = await readFile(join(process.cwd(), 'uploads', kept.filename));
+  assert.deepEqual(stored, sealed.cipher, 'the file on disk is the ciphertext as it was handed over');
+
+  // Neither the descriptor nor the blob it names is readable from storage: the
+  // envelope is MLS ciphertext and no plaintext message row was ever written.
+  const envelopes = await prisma.e2eeEnvelope.findMany({
+    where: { conversationId: chat.conversationId }, orderBy: { seq: 'asc' },
+  });
+  assert.deepEqual(envelopes.map(envelope => envelope.seq), [1, 2], 'the welcome, then the attachment');
+  for (const envelope of envelopes) {
+    const raw = Buffer.from(envelope.content, 'base64');
+    assert.equal(raw.includes(uploaded.data.id), false, 'the blob id is not carried in the clear');
+    assert.equal(raw.includes('screenshot.png'), false, 'nor is the filename');
+  }
+  assert.equal(await prisma.message.count({ where: { conversationId: chat.conversationId } }), 0,
+    'and no readable message row exists to hold any of it');
+
+  // A stranger inside the platform, and a well-shaped id that stores nothing.
+  const outsider = await createUser('erin');
+  const refused = await api(`/uploads/encrypted/${uploaded.data.id}/url`, { token: outsider.token });
+  assert.equal(refused.status, 403, 'an account in no part of this chat is refused');
+  const missing = await api('/uploads/encrypted/00000000-0000-4000-8000-000000000000/url', { token: peer.session.token });
+  assert.equal(missing.status, 404, 'a blob that was never stored has no url to give');
+
+  // The signature is what authorises the bytes themselves, so the same path
+  // without one moves nothing.
+  const unsigned = await fetch(`${origin}${API_PREFIX}/uploads/encrypted/${kept.filename}`);
+  assert.equal(unsigned.status, 403, 'an unsigned request for a blob file is refused');
+  sender.socket.disconnect();
+  peer.socket.disconnect();
+});
+
+test('a conversation that is not encrypted cannot be used as a file host', async () => {
+  const { parseAttachment } = await loadCore();
+  assert.equal(parseAttachment('hello'), null, 'an ordinary message is not mistaken for a descriptor');
+  assert.equal(parseAttachment(`{"k":"openbridge.attachment.v1","blob":"${'0'.repeat(36)}","key":"AAA","iv":"AAA"}`), null,
+    'and a descriptor with a bad blob id or short key stays an ordinary message');
+
+  const sender = await createUser('plaina');
+  const receiver = await createUser('plainb');
+  const { socket, connected } = await connectSocket(sender.token);
+  assert.equal(connected, true);
+  const ack = await emitAck(socket, 'message:send', { toId: receiver.user.id, type: 'TEXT', text: 'readable' });
+  assert.equal(ack.ok, true, 'the two can still exchange plaintext');
+  const { conversationId } = await prisma.message.findUnique({
+    where: { id: ack.id }, select: { conversationId: true },
+  });
+  socket.disconnect();
+
+  const attempt = await uploadBlob(sender, conversationId, randomBytes(2048));
+  assert.equal(attempt.status, 400, 'an encrypted-blob upload into a plaintext chat is refused');
+  assert.equal(await prisma.encryptedBlob.count({ where: { conversationId } }), 0, 'and nothing was stored');
+
+  // Not a member of the chat at all: refused before a byte is written, so this
+  // endpoint cannot be used to park files in somebody else's conversation.
+  const stranger = await createUser('plainc');
+  const trespass = await uploadBlob(stranger, conversationId, randomBytes(2048));
+  assert.equal(trespass.status, 403, 'a stranger cannot write into a conversation');
+  assert.equal(await prisma.encryptedBlob.count({ where: { conversationId } }), 0, 'and left no blob behind');
 });
