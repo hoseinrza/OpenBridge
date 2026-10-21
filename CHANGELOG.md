@@ -54,9 +54,13 @@ carry one product version, so a release entry applies to every client.
   other conversation the server sees who reacted, with what, to when.
 - Mobile remains locked out of an encrypted chat (see 1.1.5); this release did
   not touch that.
-- The tapback strip and the pressed-chip states have no visual QA: this
-  environment cannot capture screenshots, so mobile was verified by a clean
-  Android bundle and web by lint, build and DOM-level reasoning.
+- The tapback strip and the pressed-chip states have no visual QA. The web
+  behaviour is verified live in two browsers on two throwaway accounts (one chip
+  per emoji whoever taps, no digits anywhere, your own chip marked pressed on
+  each device), but the app's browser view cannot capture screenshots in this
+  environment, so every step ran as a scripted DOM event — behaviour and markup,
+  not appearance. The mobile strip has only been proven to bundle: no phone or
+  emulator ran it.
 
 ## [1.1.5] - 2026-10-21
 

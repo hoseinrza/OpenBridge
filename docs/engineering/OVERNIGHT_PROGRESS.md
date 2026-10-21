@@ -664,15 +664,17 @@ write fails with `P2002` — proof that a code path skipping the service cannot
 break the rule either.
 
 `prisma db push` would not add the index by itself: it refuses a unique index it
-cannot prove is satisfiable, and it kept refusing it *after* the duplicates were
-deleted, because the old `(userId, messageId, emoji)` index was still there for
-it to compare against. `backend/prisma/sql/dedupe-reactions.sql` now does the
-three steps in order — keep the newest row per pair, drop the old index, create
-`reactions_userId_messageId_key` — and the container's `CMD` runs it before
-`db push`, since this image has no migrate step: schema changes land through the
-start command. Verified against the dev database by seeding a legacy duplicate
-pair (6 rows → 5, zero pairs with more than one row, `db push` then clean, and a
-repeat insert rejected with SQL state `23505`).
+cannot prove is satisfiable by the rows in the table, and in this database it
+kept refusing it even after the duplicates had been deleted — the observation is
+only that deleting the rows was not enough, not why. Making the SQL idempotent
+and explicit fixed it, so `backend/prisma/sql/dedupe-reactions.sql` now does the
+three steps in order — keep the newest row per pair, drop the old
+`(userId, messageId, emoji)` index, create `reactions_userId_messageId_key` —
+and the container's `CMD` runs it before `db push`, because this image has no
+migrate step: schema changes land through the start command. Verified against the
+dev database by seeding a legacy duplicate pair (6 rows → 5, zero pairs with more
+than one row, `db push` then clean, and a repeat insert rejected with SQL state
+`23505`).
 
 **The transport changed shape too.** `reaction:add` → `toggleReaction` answers
 `{ok, reactions}` and broadcasts **`reaction:changed`** with the message's whole
@@ -708,6 +710,22 @@ database stay platform-neutral so both sides see the same reaction.
   `npx expo export --platform android` produced a 2.5 MB bundle with exit code 0
   after the tapback strip landed. No screenshots: the reaction states have had
   no visual QA on either client.
+- Live two-account reaction run, driven through the DOM of two Vite origins
+  (127.0.0.1:5173 and :5174) against the restarted dev backend, in a fresh
+  group conversation between two throwaway accounts: adding gave one chip whose
+  text was exactly `👍` with `aria-pressed=true` and the `mine` class; tapping
+  the chip lifted it; `👍` then `❤️` left a single `❤️`; more than a dozen taps
+  across all five emoji left **one row in `reactions`**; the peer's browser saw
+  each change without a reload, and after the peer tapped the same chip it stayed
+  a single chip — `mine` on both devices, **two rows** in the database, i.e. the
+  chip counts people and never taps. `getComputedStyle` on a chip returned
+  `"Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji",
+  sans-serif`, which on this Windows host resolves to Segoe, as documented.
+  **Caveat: the in-app browser still reports `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`,
+  so pointer actions were impossible and every step above ran through scripted DOM
+  events — behaviour and markup verified, appearance not.** The two probe accounts,
+  their group and their direct conversation were deleted afterwards (`reactions`
+  back to 0, 13 conversations, no orphan devices or KeyPackages).
 
 - `backend`: `npm run test:e2e` — **38/38 passed** on 2026-10-21 against the
   real local PostgreSQL: the 32 earlier cases, then six E2EE Phase 2a transport
