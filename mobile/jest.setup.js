@@ -25,3 +25,6 @@ jest.mock('@expo/vector-icons', () => {
 });
 
 jest.mock('socket.io-client', () => ({ io: jest.fn() }));
+
+const { configure } = require('@testing-library/react-native');
+configure({ asyncUtilTimeout: 5000 });
