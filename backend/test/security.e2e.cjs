@@ -21,6 +21,13 @@ process.env.AUTH_SIGNUP_LIMIT = process.env.AUTH_SIGNUP_LIMIT || '50';
 // The contact-match bucket is kept small so the rate-limit case below can
 // exhaust it; every other call in the suite gives itself a fresh client IP.
 process.env.CONTACT_MATCH_LIMIT = process.env.CONTACT_MATCH_LIMIT || '3';
+// E2EE caps are shrunk so the storage limits are testable without hundreds of
+// uploads, and the claim bucket is kept small for its own throttling case.
+// Every other E2EE call uses freshIp(), so it never shares a bucket.
+process.env.E2EE_CLAIM_LIMIT = process.env.E2EE_CLAIM_LIMIT || '8';
+process.env.E2EE_REGISTER_LIMIT = process.env.E2EE_REGISTER_LIMIT || '200';
+process.env.E2EE_MAX_DEVICES_PER_USER = process.env.E2EE_MAX_DEVICES_PER_USER || '3';
+process.env.E2EE_MAX_PACKAGES_PER_DEVICE = process.env.E2EE_MAX_PACKAGES_PER_DEVICE || '10';
 
 const { NestFactory } = require('@nestjs/core');
 const { ValidationPipe } = require('@nestjs/common');
@@ -114,6 +121,12 @@ function freshIp() {
 
 function toPersianDigits(value) {
   return String(value).replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
+}
+
+// KeyPackages are opaque bytes as far as the server is concerned, so the suite
+// uses recognizable base64 instead of real MLS material.
+function fakePackage(label) {
+  return Buffer.from(`key-package:${label}`).toString('base64');
 }
 
 // Completes the whole sign-up: request a code, verify it, then finish the
@@ -947,4 +960,243 @@ test('the removed password endpoints are gone', async () => {
     });
     assert.equal(result.status, 404, `${path} is no longer routed`);
   }
+});
+
+// ── E2EE Phase 1: devices and key packages ─────────────────────────
+// These cases cover the custody rule (design doc §4): the server holds opaque
+// public blobs and must never accept, return or infer private material.
+
+test('device registration stores only the fields the client declares', async () => {
+  const { alice, eve } = global.__ctx;
+  const clientId = `alice_${suffix}_primary`;
+
+  const injected = await api('/e2ee/devices', {
+    method: 'POST',
+    token:  alice.token,
+    body:   {
+      clientId,
+      label:      'Desktop',
+      userId:     eve.user.id,
+      privateKey: 'MIA-private-key-material',
+      state:      'MIA-mls-client-state',
+    },
+  });
+  assert.equal(injected.status, 201, 'own device registers');
+  assert.deepEqual(Object.keys(injected.data).sort(), [
+    'availableKeyPackages', 'clientId', 'createdAt', 'id', 'label', 'lastSeenAt',
+  ], 'the response is the declared device view and nothing else');
+
+  const leaked = await prisma.device.count({ where: { userId: eve.user.id } });
+  assert.equal(leaked, 0, 'an injected userId cannot register a device on another account');
+
+  const row = await prisma.device.findUnique({
+    where: { userId_clientId: { userId: alice.user.id, clientId } },
+  });
+  assert.ok(row, 'device row exists');
+  assert.ok(!JSON.stringify(row).includes('MIA'), 'no private key or client state was stored');
+
+  const again = await api('/e2ee/devices', {
+    method: 'POST',
+    token:  alice.token,
+    body:   { clientId, label: 'لپ‌تاپ' },
+  });
+  assert.equal(again.status, 201);
+  assert.equal(again.data.id, row.id, 'the same install re-registers the same device');
+  assert.equal(again.data.label, 'لپ‌تاپ', 'a new label renames it');
+  assert.equal((await api('/e2ee/devices', { token: alice.token })).data.length, 1, 'no duplicate device rows');
+});
+
+test('device and key-package inputs are validated and capped', async () => {
+  const owner = await createUser('caps');
+  const perUpload  = Number(process.env.E2EE_MAX_PACKAGES_PER_UPLOAD || 50);
+  const perDevice  = Number(process.env.E2EE_MAX_PACKAGES_PER_DEVICE);
+  const maxChars   = Number(process.env.E2EE_MAX_PACKAGE_CHARS || 4096);
+  const maxDevices = Number(process.env.E2EE_MAX_DEVICES_PER_USER);
+  const pool       = `pool_${suffix}`;
+  const poolPath   = `/e2ee/devices/${pool}/key-packages`;
+
+  assert.equal((await api('/e2ee/devices', { method: 'POST', body: { clientId: 'abcdefgh' } })).status, 401, 'no session, no device');
+  assert.equal((await api('/e2ee/devices', { method: 'POST', token: owner.token, body: { clientId: 'short' } })).status, 400, 'clientId too short');
+  assert.equal((await api('/e2ee/devices', { method: 'POST', token: owner.token, body: { clientId: `has spaces` } })).status, 400, 'clientId charset');
+  assert.equal((await api('/e2ee/devices', { method: 'POST', token: owner.token, body: { clientId: `label_${suffix}`, label: 'x'.repeat(41) } })).status, 400, 'label length');
+
+  assert.equal((await api(poolPath, { method: 'POST', token: owner.token, body: { packages: [] } })).status, 400, 'empty refill');
+  assert.equal((await api(poolPath, { method: 'POST', token: owner.token, body: { packages: ['not base64!!'] } })).status, 400, 'non-base64 package');
+  assert.equal((await api(poolPath, {
+    method: 'POST',
+    token:  owner.token,
+    body:   { packages: [Buffer.alloc(Math.floor(maxChars * 3 / 4) + 1).toString('base64')] },
+  })).status, 400, 'oversized package');
+  assert.equal((await api(poolPath, {
+    method: 'POST',
+    token:  owner.token,
+    body:   { packages: Array.from({ length: perUpload + 1 }, (_, i) => fakePackage(`bulk${i}`)) },
+  })).status, 400, 'upload length is capped');
+  assert.equal((await api(`/e2ee/devices/never_${suffix}/key-packages`, {
+    method: 'POST',
+    token:  owner.token,
+    body:   { packages: [fakePackage('orphan')] },
+  })).status, 404, 'an unknown device cannot be filled');
+
+  assert.equal((await api('/e2ee/devices', { method: 'POST', token: owner.token, body: { clientId: pool } })).status, 201, 'the pool device registers');
+  const filled = await api(poolPath, {
+    method: 'POST',
+    token:  owner.token,
+    body:   { packages: Array.from({ length: perDevice }, (_, i) => fakePackage(`fill${i}`)) },
+  });
+  assert.equal(filled.status, 201, 'the pool fills up to the cap');
+  assert.deepEqual(filled.data, { available: perDevice }, 'only the new pool size comes back');
+  assert.equal((await api(poolPath, { method: 'POST', token: owner.token, body: { packages: [fakePackage('one too many')] } })).status, 400, 'one package past the cap');
+
+  for (let device = 1; device < maxDevices; device += 1) {
+    const result = await api('/e2ee/devices', { method: 'POST', token: owner.token, body: { clientId: `dev_${device}_${suffix}` } });
+    assert.equal(result.status, 201, `device ${device} of ${maxDevices} allowed`);
+  }
+  assert.equal((await api('/e2ee/devices', { method: 'POST', token: owner.token, body: { clientId: `dev_x_${suffix}` } })).status, 409, 'device count is capped');
+
+  const stored = await prisma.keyPackage.count({ where: { device: { userId: owner.user.id } } });
+  assert.equal(stored, perDevice, 'only the accepted upload reached the database');
+});
+
+test('a key package is handed out to exactly one caller', async () => {
+  const { alice, bob } = global.__ctx;
+  const clientId = `bob_${suffix}_phone`;
+  const uploaded = ['a', 'b', 'c'].map(tag => fakePackage(`${clientId}_${tag}`));
+  const claimPath = `/e2ee/users/${bob.user.id}/key-packages`;
+
+  assert.equal((await api('/e2ee/devices', { method: 'POST', token: bob.token, body: { clientId, label: 'گوشی' } })).status, 201);
+  const upload = await api(`/e2ee/devices/${clientId}/key-packages`, {
+    method: 'POST',
+    token:  bob.token,
+    body:   { packages: uploaded },
+  });
+  assert.equal(upload.status, 201);
+  assert.deepEqual(upload.data, { available: 3 }, 'the pool size is reported, the contents are not echoed');
+
+  const first = await api(claimPath, { token: alice.token, headers: freshIp() });
+  assert.equal(first.status, 200, 'claim');
+  assert.equal(first.data.packages.length, 1, 'one package per active device');
+  assert.ok(uploaded.includes(first.data.packages[0]), 'stored byte for byte, not re-encoded');
+
+  const second = await api(claimPath, { token: alice.token, headers: freshIp() });
+  assert.equal(second.status, 200);
+  assert.notEqual(second.data.packages[0], first.data.packages[0], 'the same package is never handed out twice');
+
+  // Two callers race for the last remaining package.
+  const [racerA, racerB] = await Promise.all([
+    api(claimPath, { token: alice.token, headers: freshIp() }),
+    api(claimPath, { token: alice.token, headers: freshIp() }),
+  ]);
+  assert.deepEqual([racerA.status, racerB.status].sort(), [200, 404], 'exactly one racer gets the last package');
+  const winner = racerA.status === 200 ? racerA : racerB;
+  const handedOut = new Set([
+    first.data.packages[0], second.data.packages[0], winner.data.packages[0],
+  ]);
+  assert.equal(handedOut.size, 3, 'all three packages were distinct');
+
+  const exhausted = await api(claimPath, { token: alice.token, headers: freshIp() });
+  assert.equal(exhausted.status, 404, 'an empty pool is not a usable recipient');
+  assert.match(exhausted.data.message, /کلید عمومی/);
+
+  const left = await prisma.keyPackage.count({ where: { device: { clientId }, consumedAt: null } });
+  assert.equal(left, 0, 'nothing is left claimable');
+});
+
+test('revoking a device removes it from the bundle', async () => {
+  const { alice, bob } = global.__ctx;
+  const phone  = `bob_${suffix}_phone`;
+  const tablet = `bob_${suffix}_tablet`;
+  const claimPath = `/e2ee/users/${bob.user.id}/key-packages`;
+
+  assert.equal((await api(`/e2ee/devices/${phone}/key-packages`, {
+    method: 'POST',
+    token:  bob.token,
+    body:   { packages: [fakePackage(`${phone}_r1`), fakePackage(`${phone}_r2`)] },
+  })).status, 201, 'the surviving pool refills');
+  assert.equal((await api('/e2ee/devices', { method: 'POST', token: bob.token, body: { clientId: tablet } })).status, 201, 'a second device registers');
+  assert.equal((await api(`/e2ee/devices/${tablet}/key-packages`, {
+    method: 'POST',
+    token:  bob.token,
+    body:   { packages: [fakePackage(`${tablet}_a`), fakePackage(`${tablet}_b`)] },
+  })).status, 201);
+
+  const both = await api(claimPath, { token: alice.token, headers: freshIp() });
+  assert.equal(both.status, 200, 'a two-device recipient is claimable');
+  assert.equal(both.data.packages.length, 2, 'one package per device, all or nothing');
+
+  const listed = await api('/e2ee/devices', { token: bob.token });
+  assert.equal(listed.status, 200);
+  assert.equal(listed.data.length, 2);
+  assert.deepEqual(Object.keys(listed.data[0]).sort(), [
+    'availableKeyPackages', 'clientId', 'createdAt', 'id', 'label', 'lastSeenAt',
+  ]);
+  assert.ok(!JSON.stringify(listed.data).includes(fakePackage(`${tablet}_a`)), 'the device list carries no key material');
+
+  const revoked = await api(`/e2ee/devices/${tablet}`, { method: 'DELETE', token: bob.token });
+  assert.equal(revoked.status, 200, 'revocation');
+  assert.equal(revoked.data.removedKeyPackages, 2, 'the whole pool goes with the device, used or unused');
+  assert.equal(await prisma.keyPackage.count({ where: { device: { clientId: tablet } } }), 0, 'nothing about a revoked device is retained');
+  assert.ok(await prisma.keyPackage.count({ where: { device: { clientId: phone } } }) > 0, 'the delete was scoped to one device');
+
+  const after = await api(claimPath, { token: alice.token, headers: freshIp() });
+  assert.equal(after.status, 200, 'the surviving device is still reachable');
+  assert.equal(after.data.packages.length, 1, 'the revoked device is no longer part of the bundle');
+
+  assert.deepEqual((await api('/e2ee/devices', { token: bob.token })).data.map(device => device.clientId), [phone], 'the revoked device left the list');
+
+  const resurrect = await api('/e2ee/devices', { method: 'POST', token: bob.token, body: { clientId: tablet } });
+  assert.equal(resurrect.status, 409, 'a revoked device id cannot silently come back');
+});
+
+test('another account cannot touch these devices', async () => {
+  const { alice, bob } = global.__ctx;
+  const phone = `bob_${suffix}_phone`;
+
+  assert.equal((await api(`/e2ee/devices/${phone}`, { method: 'DELETE', token: alice.token })).status, 404, 'no foreign revocation');
+  assert.equal((await api(`/e2ee/devices/${phone}/key-packages`, {
+    method: 'POST',
+    token:  alice.token,
+    body:   { packages: [fakePackage('intruder')] },
+  })).status, 404, 'no foreign pool write');
+  assert.equal((await api(`/e2ee/devices/nope_${suffix}`, { method: 'DELETE', token: alice.token })).status, 404, 'an id nobody owns');
+
+  const victim = await prisma.device.findUnique({
+    where: { userId_clientId: { userId: bob.user.id, clientId: phone } },
+  });
+  assert.equal(victim.revokedAt, null, 'the victim device is untouched');
+  assert.equal((await api(`/e2ee/devices/${phone}/key-packages`, {
+    method: 'POST',
+    token:  bob.token,
+    body:   { packages: [fakePackage('bob_owns_this')] },
+  })).status, 201, 'the owner still controls it');
+});
+
+test('the bundle endpoint does not reveal which accounts exist', async () => {
+  const { alice, eve } = global.__ctx;
+
+  const noDevice = await api(`/e2ee/users/${eve.user.id}/key-packages`, { token: alice.token, headers: freshIp() });
+  const unknown  = await api('/e2ee/users/00000000-0000-4000-8000-000000000000/key-packages', { token: alice.token, headers: freshIp() });
+  assert.equal(noDevice.status, 404, 'an account without devices');
+  assert.equal(unknown.status, 404, 'an unknown account looks exactly the same');
+  assert.equal(unknown.data.message, noDevice.data.message, 'identical error text');
+  assert.equal((await api('/e2ee/users/not-a-uuid/key-packages', { token: alice.token, headers: freshIp() })).status, 400, 'the id format is enforced');
+
+  const anonymous = await api('/e2ee/devices');
+  assert.equal(anonymous.status, 401, 'no session, no device list');
+});
+
+test('key packages cannot be harvested quickly', async () => {
+  const { alice, bob } = global.__ctx;
+  const headers = { 'X-Forwarded-For': '198.51.100.91' };
+  const limit   = Number(process.env.E2EE_CLAIM_LIMIT);
+  const claimPath = `/e2ee/users/${bob.user.id}/key-packages`;
+
+  for (let attempt = 1; attempt <= limit; attempt += 1) {
+    const result = await api(claimPath, { token: alice.token, headers });
+    assert.notEqual(result.status, 429, `claim ${attempt} allowed`);
+  }
+
+  const blocked = await api(claimPath, { token: alice.token, headers });
+  assert.equal(blocked.status, 429, 'the pool is not a metered faucet');
+  assert.ok(Number(blocked.headers.get('retry-after')) > 0, 'Retry-After header');
 });

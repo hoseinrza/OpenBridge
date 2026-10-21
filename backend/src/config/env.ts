@@ -74,6 +74,23 @@ export const CONTACT_MATCH_WINDOW_SECONDS = positiveInt('CONTACT_MATCH_WINDOW_SE
 // this many days regardless of activity.
 export const REFRESH_TOKEN_TTL_DAYS = positiveInt('REFRESH_TOKEN_TTL_DAYS', 30);
 
+// E2EE device registration and the public KeyPackage pool. The server only ever
+// stores opaque public blobs, so the caps exist to bound storage and to keep
+// the bundle endpoint from being used as a free data store.
+export const E2EE_MAX_DEVICES_PER_USER = positiveInt('E2EE_MAX_DEVICES_PER_USER', 10);
+export const E2EE_MAX_PACKAGES_PER_UPLOAD = positiveInt('E2EE_MAX_PACKAGES_PER_UPLOAD', 50);
+export const E2EE_MAX_PACKAGES_PER_DEVICE = positiveInt('E2EE_MAX_PACKAGES_PER_DEVICE', 200);
+// A suite-1 MLS KeyPackage is a few hundred bytes; base64 adds a third. The cap
+// is generous but stops the pool from storing arbitrary payloads.
+export const E2EE_MAX_PACKAGE_CHARS = positiveInt('E2EE_MAX_PACKAGE_CHARS', 4096);
+// Handing out a KeyPackage tells the caller that the account has a registered
+// device, so the endpoint is rate limited per IP like the other enumeration
+// surfaces.
+export const E2EE_CLAIM_LIMIT = positiveInt('E2EE_CLAIM_LIMIT', 20);
+export const E2EE_CLAIM_WINDOW_SECONDS = positiveInt('E2EE_CLAIM_WINDOW_SECONDS', 60);
+export const E2EE_REGISTER_LIMIT = positiveInt('E2EE_REGISTER_LIMIT', 30);
+export const E2EE_REGISTER_WINDOW_SECONDS = positiveInt('E2EE_REGISTER_WINDOW_SECONDS', 600);
+
 // Comma-separated list of browser origins allowed to call the HTTP API and
 // the Socket.IO endpoint. Native apps and same-origin requests send no Origin
 // header and are always allowed. When unset in development we allow only

@@ -7,6 +7,7 @@ import { UsersModule }    from './users/users.module';
 import { MessagesModule } from './messages/messages.module';
 import { ChatModule }     from './chat/chat.module';
 import { UploadsModule }  from './uploads/uploads.module';
+import { E2eeModule }     from './e2ee/e2ee.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { UploadsModule }  from './uploads/uploads.module';
     MessagesModule,
     ChatModule,
     UploadsModule,
+    E2eeModule,
   ],
   controllers: [AppController],
 })

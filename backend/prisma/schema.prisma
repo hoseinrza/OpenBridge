@@ -50,8 +50,50 @@ model User {
   participations ConversationParticipant[]
   reads          MessageRead[]
   sessions       Session[]
+  devices        Device[]
 
   @@map("users")
+}
+
+// One row per installed app that can hold end-to-end encryption keys. The
+// client generates `clientId` once per install and reuses it, so registering is
+// idempotent; the id is not a secret, only an install handle. Revocation is
+// permanent: the row is kept (with revokedAt set) so the same clientId can
+// never silently become trusted again.
+model Device {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId   String
+  label      String?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+
+  keyPackages KeyPackage[]
+
+  @@unique([userId, clientId])
+  @@index([userId])
+  @@map("devices")
+}
+
+// Public MLS KeyPackage blobs handed out to peers so they can add this device
+// to a group. The server stores one opaque base64 string plus consumption
+// metadata and never parses it — there is deliberately no column that could
+// hold a private key, client state, or passphrase. `claimToken` records which
+// atomic claim won the row; see E2eeService.claimKeyPackages.
+model KeyPackage {
+  id         String    @id @default(uuid())
+  deviceId   String
+  device     Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  content    String    @db.Text
+  createdAt  DateTime  @default(now())
+  consumedAt DateTime?
+  claimToken String?
+
+  @@index([deviceId, consumedAt, createdAt])
+  @@index([claimToken])
+  @@map("key_packages")
 }
 
 // Short-lived login codes. Only the HMAC of the code is stored, and a new
