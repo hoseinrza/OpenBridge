@@ -112,6 +112,7 @@ export default function ChatScreen({ route }) {
       <View style={[styles.msgRow, isMine ? styles.msgRowMine : styles.msgRowOther]}>
         <View style={[styles.bubbleCol, isMine ? styles.bubbleColMine : styles.bubbleColOther]}>
           <Pressable
+            testID={`bubble-${isMine ? 'mine' : 'other'}`}
             style={[
               styles.bubble,
               isMine ? styles.bubbleMine : styles.bubbleOther,
@@ -166,6 +167,7 @@ export default function ChatScreen({ route }) {
                 {REACTIONS.map(emoji => (
                   <Pressable
                     key={emoji}
+                    testID={`reaction-option-${emoji}`}
                     style={[
                       styles.tapback,
                       isMine && styles.tapbackOut,
@@ -208,6 +210,7 @@ export default function ChatScreen({ route }) {
                 {reactions.map(({ emoji, mine }) => (
                   <Pressable
                     key={emoji}
+                    testID={`reaction-chip-${emoji}`}
                     style={[
                       styles.reactionChip,
                       isMine && styles.reactionChipOut,
@@ -343,9 +346,11 @@ export default function ChatScreen({ route }) {
           placeholderTextColor={colors.text3}
           multiline
           maxLength={4000}
+          testID="composer-input"
           accessibilityLabel="متن پیام"
         />
         <Pressable
+          testID="composer-send"
           style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
           onPress={onSend}
           disabled={!canSend}
