@@ -233,6 +233,7 @@ export default function LoginScreen() {
                   autoComplete="tel"
                   maxLength={20}
                   editable={!busy}
+                  testID="login-phone"
                   accessibilityLabel="شماره موبایل"
                   returnKeyType="send"
                   onSubmitEditing={() => issueCode(false)}
@@ -251,6 +252,7 @@ export default function LoginScreen() {
                 style={[styles.submit, busy && styles.submitBusy]}
                 onPress={() => issueCode(false)}
                 disabled={busy}
+                testID="login-request-code"
                 accessibilityRole="button"
                 accessibilityLabel="دریافت کد تأیید"
                 accessibilityState={{ disabled: busy, busy }}
@@ -299,6 +301,7 @@ export default function LoginScreen() {
                   autoComplete="sms-otp"
                   maxLength={6}
                   editable={!busy}
+                  testID="login-code"
                   accessibilityLabel="کد تأیید ۶ رقمی"
                   returnKeyType="done"
                   onSubmitEditing={submitCode}
@@ -309,9 +312,14 @@ export default function LoginScreen() {
               {!!testCode && (
                 <View style={styles.testCode} accessibilityLiveRegion="polite">
                   <FontAwesome6 name="flask" size={13} color={colors.text3} />
-                  <Text style={styles.testCodeText}>
-                    کد تست (فقط محیط توسعه): <Text selectable style={styles.testCodeValue}>{testCode}</Text>
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.testCodeText}>
+                      کد تست (فقط محیط توسعه):
+                    </Text>
+                    <Text selectable testID="login-test-code" style={styles.testCodeValue}>
+                      {testCode}
+                    </Text>
+                  </View>
                 </View>
               )}
 
@@ -326,6 +334,7 @@ export default function LoginScreen() {
                 style={[styles.submit, busy && styles.submitBusy]}
                 onPress={submitCode}
                 disabled={busy}
+                testID="login-submit"
                 accessibilityRole="button"
                 accessibilityLabel={isNewUser ? 'ادامه ثبت‌نام' : 'تأیید و ورود'}
                 accessibilityState={{ disabled: busy, busy }}
