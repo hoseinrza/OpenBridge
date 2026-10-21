@@ -54,9 +54,10 @@ async function createUser({ phone, username, firstName, lastName }) {
   return { id: verified.user.id, token: verified.token ?? verified.accessToken };
 }
 
+// Names must be letters only: SignupDto rejects digits in first/last name.
 const users = [
-  { phone: '09120000001', username: 'e2e_user_a', firstName: 'E2E', lastName: 'Alpha' },
-  { phone: '09120000002', username: 'e2e_user_b', firstName: 'E2E', lastName: 'Beta' },
+  { phone: '09120000001', username: 'e2e_user_a', firstName: 'Alpha', lastName: 'Tester' },
+  { phone: '09120000002', username: 'e2e_user_b', firstName: 'Beta', lastName: 'Tester' },
 ];
 
 await waitForHealth();
