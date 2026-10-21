@@ -24,7 +24,7 @@ export function resolveUrl(path) {
   if (!path) return null;
   if (path.startsWith('http')) return path;
   // Private uploads are served under the API prefix with a signed URL.
-  if (path.startsWith('/uploads/')) return `${BASE}${path.slice('/uploads'.length)}`;
+  if (path.startsWith('/uploads/')) return `${BASE}${path}`;
   return `${ORIGIN}${path}`;
 }
 

@@ -8,7 +8,7 @@ const ORIGIN = BASE.replace(/\/api\/?$/, '');
 export function resolveUrl(path) {
   if (!path) return path;
   if (path.startsWith('http')) return path;
-  if (path.startsWith('/uploads/')) return `${BASE}${path.slice('/uploads'.length)}`;
+  if (path.startsWith('/uploads/')) return `${BASE}${path}`;
   return `${ORIGIN}${path}`;
 }
 
@@ -29,7 +29,7 @@ export function normalizeUser(u) {
     name:      u.displayName || u.username,
     username:  u.username,
     // No avatar means the UI renders the user's initials instead of a stock image.
-    avatar:    u.avatar || null,
+    avatar:    resolveUrl(u.avatar) || null,
     bio:       u.bio ?? '',
     status:    u.online ? 'online' : 'offline',
     createdAt: u.createdAt,
@@ -46,14 +46,14 @@ export function normalizeGroup(group) {
     return {
       id:     user.id,
       name:   user.displayName || user.username,
-      avatar: user.avatar || null,
+      avatar: resolveUrl(user.avatar) || null,
     };
   });
   return {
     kind:         'group',
     id:           group.id,
     name:         group.name || 'گروه بدون نام',
-    avatar:       group.avatar || null,
+    avatar:       resolveUrl(group.avatar) || null,
     participants,
     memberCount:  participants.length,
     unread:       group.unread ?? 0,
