@@ -1,0 +1,34 @@
+appId: com.openbridge.mobile
+---
+- launchApp:
+    clearState: true
+- assertVisible: "ورود یا ثبت‌نام"
+- tapOn:
+    id: "login-phone"
+- inputText: "09120000001"
+- tapOn:
+    id: "login-request-code"
+- assertVisible: "کد تأیید"
+- copyTextFrom:
+    id: "login-test-code"
+- tapOn:
+    id: "login-code"
+- inputText: ${maestro.copiedText}
+- tapOn:
+    id: "login-submit"
+- assertVisible: "گفتگوها"
+- tapOn: "E2E Group"
+- assertVisible: "E2E Group"
+- tapOn:
+    id: "composer-input"
+- inputText: "hello from maestro"
+- tapOn:
+    id: "composer-send"
+- assertVisible: "hello from maestro"
+- longPressOn: "hello from maestro"
+- assertVisible: "👍"
+- tapOn:
+    id: "reaction-option-👍"
+- assertVisible:
+    id: "reaction-chip-👍"
+- takeScreenshot: "e2e-chat-after-reaction"
