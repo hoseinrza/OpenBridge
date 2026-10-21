@@ -27,8 +27,7 @@ appId: com.openbridge.mobile
 - assertVisible: "hello from maestro"
 - longPressOn: "hello from maestro"
 - assertVisible: "👍"
-- tapOn:
-    id: "reaction-option-👍"
+- tapOn: "👍"
 - assertVisible:
-    id: "reaction-chip-👍"
+    id: "reaction-chip-0"
 - takeScreenshot: "e2e-chat-after-reaction"

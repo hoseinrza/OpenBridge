@@ -207,10 +207,10 @@ export default function ChatScreen({ route }) {
 
             {reactions.length > 0 && (
               <View style={styles.reactions}>
-                {reactions.map(({ emoji, mine }) => (
+                {reactions.map(({ emoji, mine }, index) => (
                   <Pressable
                     key={emoji}
-                    testID={`reaction-chip-${emoji}`}
+                    testID={`reaction-chip-${index}`}
                     style={[
                       styles.reactionChip,
                       isMine && styles.reactionChipOut,
