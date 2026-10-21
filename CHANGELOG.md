@@ -4,6 +4,34 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.8] - 2026-10-21
+
+### Changed
+- **Your messages sit on the right again, everyone else's on the left.** The
+  right-to-left page had the two sides mirrored: outgoing bubbles hugged the left
+  edge and incoming ones the right. Both clients now anchor outgoing messages to
+  the right and incoming to the left, with the avatar on the outer left edge, the
+  bubble tail on the outer corner, and the footer, chips and reaction picker
+  following their own bubble. Mobile resolves the row direction from
+  `I18nManager.isRTL`, so the physical sides are the same on an RTL phone and an
+  LTR one. The loading skeleton follows the same sides.
+
+### Tests
+- Rendered a static copy of the chat in headless Chrome screenshots (not the
+  live app) at 1000px and 500px: outgoing bubbles sit against the right edge,
+  incoming ones against the left with the avatar outside on the left, the sender
+  name over the outer edge, and each footer, chip and tail follows its own
+  bubble. No live two-account run was repeated for this layout change.
+- Root `npm run lint` clean, `npm run build` clean,
+  `npx expo export --platform android` exit 0. No backend change, so the e2e
+  suite was not re-run.
+
+### Known limits of this release
+- Mobile has no visual QA: the row-direction swap bundles, but no phone or
+  emulator rendered it. `I18nManager.isRTL` is read once at module load, so a
+  device that only flips direction after a relaunch picks the sides up on the
+  next launch, the same way the rest of the app does.
+
 ## [1.1.7] - 2026-10-21
 
 ### Changed
