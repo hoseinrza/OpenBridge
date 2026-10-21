@@ -372,14 +372,34 @@ jobs:
             adb install -r mobile/android/app/build/outputs/apk/release/app-release.apk
             adb logcat -c
             set +e
-            maestro test --format junit --output "$RUNNER_TEMP/maestro-report.xml" mobile/.maestro
+            maestro test --format junit --output "$RUNNER_TEMP/maestro-report-1.xml" mobile/.maestro > "$RUNNER_TEMP/maestro-1.log" 2>&1
             status=$?
             if [ $status -ne 0 ]; then
               echo "First Maestro attempt failed; retrying once"
-              maestro test --format junit --output "$RUNNER_TEMP/maestro-report.xml" mobile/.maestro
+              maestro test --format junit --output "$RUNNER_TEMP/maestro-report-2.xml" mobile/.maestro > "$RUNNER_TEMP/maestro-2.log" 2>&1
               status=$?
             fi
             adb logcat -d > "$RUNNER_TEMP/logcat.txt"
+            if [ $status -ne 0 ]; then
+              adb exec-out screencap -p > "$RUNNER_TEMP/emulator-failure.png" || true
+              {
+                echo '## Maestro failure'
+                echo '### Attempt 1 (last 80 lines)'
+                echo '```'
+                tail -n 80 "$RUNNER_TEMP/maestro-1.log"
+                echo '```'
+                echo '### Attempt 2 (last 40 lines)'
+                echo '```'
+                tail -n 40 "$RUNNER_TEMP/maestro-2.log"
+                echo '```'
+                echo '### ReactNativeJS and crashes'
+                echo '```'
+                adb logcat -d -s ReactNativeJS:E AndroidRuntime:E | tail -n 60
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              first=$(grep -m1 -E 'Element not found|Assertion|FAILED|Error|not found' "$RUNNER_TEMP/maestro-1.log" | head -c 600)
+              echo "::error title=Maestro::Attempt 1: ${first}"
+            fi
             exit $status
 
       - name: Upload the E2E report and screenshots
@@ -388,7 +408,9 @@ jobs:
         with:
           name: mobile-e2e-artifacts
           path: |
-            ${{ runner.temp }}/maestro-report.xml
+            ${{ runner.temp }}/maestro-report-*.xml
+            ${{ runner.temp }}/maestro-*.log
+            ${{ runner.temp }}/emulator-failure.png
             ${{ runner.temp }}/logcat.txt
             /home/runner/.maestro/tests
             mobile/.maestro/**/*.png
