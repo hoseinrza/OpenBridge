@@ -69,7 +69,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const {
     messages, isTyping, typingPeer, connected,
     historyState, historyError, retryHistory,
-    encrypted, encryptionNote, blockedReason, attachmentBlocked,
+    encrypted, secureMode, encryptionNote, blockedReason,
     sendMessage, notifyTyping, toggleReaction, clearMessages,
   } = useChat(activeUser, currentUser, handleIncoming);
 
@@ -165,6 +165,9 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               activeUser={activeUser}
               onReact={toggleReaction}
               searchQuery={searchQuery}
+              encrypted={encrypted}
+              secureMode={secureMode}
+              encryptionNote={encryptionNote}
               historyState={historyState}
               historyError={historyError}
               onRetryHistory={retryHistory}
@@ -177,7 +180,6 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               onTyping={notifyTyping}
               connected={connected}
               blocked={blockedReason}
-              attachmentBlocked={attachmentBlocked}
             />
           </>
         ) : (

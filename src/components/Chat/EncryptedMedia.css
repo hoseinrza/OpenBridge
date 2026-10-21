@@ -1,0 +1,61 @@
+/* One attachment whose bytes only exist after this device opens them.
+   The bubble keeps its own colours, so every state here is drawn from the text
+   colour it inherits rather than a surface of its own. */
+
+.enc-media {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.enc-media-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  width: min(250px, 62vw);
+  padding: var(--sp-4) var(--sp-3);
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  text-align: center;
+}
+
+.enc-media-state > i {
+  font-size: 16px;
+  opacity: 0.65;
+}
+
+.enc-media-state > span {
+  /* The note is a sentence, not a word: it must break on a small screen
+     instead of widening the bubble. */
+  overflow-wrap: anywhere;
+}
+
+.enc-media-retry {
+  font: inherit;
+  color: inherit;
+  padding: 3px 12px;
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  cursor: pointer;
+}
+
+.enc-media-retry:hover { background: color-mix(in srgb, currentColor 18%, transparent); }
+
+/* The file row is a button until its bytes are in hand, so it has to keep the
+   look the plaintext download link has. */
+.enc-media .bubble-file-link {
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.enc-media .bubble-file-link:disabled { cursor: default; opacity: 0.8; }

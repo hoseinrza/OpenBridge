@@ -105,7 +105,7 @@ export default function ChatHeader({
             {encrypted && (
               <span
                 className="e2ee-chip is-on"
-                title="متن پیام‌های این گفتگو فقط روی دستگاه شما و دستگاه طرف مقابل رمزگشایی می‌شود؛ سرور هیچ‌وقت آن را نمی‌بیند"
+                title="متن، تصویر و فایل این گفتگو فقط روی دستگاه شما و دستگاه طرف مقابل رمزگشایی می‌شود؛ سرور هیچ‌وقت آن‌ها را نمی‌بیند"
               >
                 <i className="fas fa-lock" aria-hidden="true" />
                 رمزنگاری سرتاسری

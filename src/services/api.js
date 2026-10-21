@@ -247,3 +247,43 @@ export async function uploadFile(file) {
   if (!res.ok) throw new Error(data.message ?? 'آپلود ناموفق');
   return data; // { url, name, size, type }
 }
+
+// ── Client-encrypted attachments ──────────────────────
+// Bytes the sender has already encrypted: the server stores them without
+// looking, so no MIME type, file name or readable content is ever sent with
+// them. Only the conversation the blob belongs to travels in the field, because
+// that is what authorizes both the write and every later download.
+export async function uploadEncryptedFile(cipherBytes, conversationId) {
+  const form = new FormData();
+  form.append('conversationId', conversationId);
+  form.append('file', new Blob([cipherBytes], { type: 'application/octet-stream' }));
+
+  const send = () => fetch(`${BASE}/uploads/encrypted`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token()}` },
+    body: form,
+  });
+
+  let res = await send();
+  if (res.status === 401) {
+    try {
+      await refreshSession();
+      res = await send();
+    } catch {
+      handleUnauthorized('/uploads/encrypted');
+    }
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message ?? 'آپلود فایل رمزنگاری‌شده ناموفق بود');
+  return data; // { id, url }
+}
+
+// Ciphertext for a blob named inside a decrypted message. The signed URL is
+// asked for with this session — membership is checked before a byte moves — and
+// the bytes themselves come back as opaque octet-stream.
+export async function fetchEncryptedFile(id) {
+  const { url } = await request('GET', `/uploads/encrypted/${id}/url`);
+  const res = await fetch(resolveUrl(url));
+  if (!res.ok) throw new Error('دریافت فایل رمزنگاری‌شده ناموفق بود');
+  return new Uint8Array(await res.arrayBuffer());
+}

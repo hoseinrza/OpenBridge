@@ -4,7 +4,7 @@ import EmojiPicker from './EmojiPicker.jsx';
 const MAX_TEXTAREA_HEIGHT = 132;
 
 export default function InputArea({
-  onSend, onTyping, connected = true, blocked = null, attachmentBlocked = null,
+  onSend, onTyping, connected = true, blocked = null,
 }) {
   const [text, setText]           = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -77,8 +77,8 @@ export default function InputArea({
     const file = e.target.files?.[0];
     if (!file || busy) return;
     e.target.value = '';
-    if (attachmentBlocked) {
-      setError(attachmentBlocked);
+    if (blocked) {
+      setError(blocked);
       return;
     }
     if (!connected) {
@@ -157,12 +157,12 @@ export default function InputArea({
         <button
           type="button"
           className="icon-btn attach-btn"
-          title={attachmentBlocked ?? 'پیوست فایل'}
+          title={blocked ?? 'پیوست فایل'}
           aria-label="پیوست فایل"
-          disabled={busy || Boolean(attachmentBlocked)}
+          disabled={busy || Boolean(blocked)}
           onClick={() => fileRef.current?.click()}
         >
-          <i className={`fas ${attachmentBlocked ? 'fa-lock' : 'fa-paperclip'}`} aria-hidden="true" />
+          <i className={`fas ${blocked ? 'fa-lock' : 'fa-paperclip'}`} aria-hidden="true" />
         </button>
 
         <div className="input-wrap">

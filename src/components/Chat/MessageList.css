@@ -1,0 +1,46 @@
+/* The line every conversation opens with. It is a statement about this device,
+   so it reads as one note rather than as part of the welcome text — and the
+   three states are coloured apart, because "encrypted", "will be with the first
+   message" and "not protected here" are different facts, not three shades of
+   the same reassurance. */
+
+.chat-welcome .welcome-e2ee {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  max-width: min(440px, 92%);
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: var(--text-xs);
+  line-height: 1.8;
+  text-align: start;
+  unicode-bidi: plaintext;
+}
+
+.chat-welcome .welcome-e2ee > i {
+  margin-top: 2px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.welcome-e2ee.is-on {
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 26%, transparent);
+  color: var(--success);
+}
+
+.welcome-e2ee.is-off {
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, var(--warning) 26%, transparent);
+  color: var(--warning);
+}
+
+/* A chat this device is about to protect is neither the badge nor the warning:
+   it is a fact that has not happened yet, so it gets the quiet surface. */
+.welcome-e2ee.is-pending {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-muted);
+}

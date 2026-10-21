@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import MessageGroup from './MessageGroup.jsx';
 import Avatar from '../ui/Avatar.jsx';
 import { dayKey, formatDayLabel } from '../../utils/time.js';
+import './MessageList.css';
 
 const GROUP_GAP = 5 * 60 * 1000;
 
@@ -53,8 +54,35 @@ function Skeleton() {
   );
 }
 
+// The line at the top of a chat has to say what this device really does with
+// this conversation, so every case gets its own sentence: the chats that are
+// protected, the ones that will be with the first message, and the ones this
+// device cannot protect at all — never one sentence stretched to fit all three.
+function e2eeNotice({ encrypted, secureMode, isGroup, reason }) {
+  if (encrypted) {
+    return {
+      tone: 'on',
+      text: 'پیام، تصویر و فایل این گفتگو فقط روی دستگاه شما و دستگاه طرف مقابل رمزگشایی می‌شود؛ سرور هیچ‌وقت آن‌ها را نمی‌بیند.',
+    };
+  }
+  if (isGroup) {
+    return { tone: 'off', text: 'گروه‌ها هنوز سرتاسری رمزنگاری نمی‌شوند؛ پیام‌های این گفتگو روی سرور هم خوانده می‌شوند.' };
+  }
+  if (secureMode === 'checking') {
+    return { tone: 'pending', text: 'در حال بررسی است که این گفتگو روی این دستگاه رمزنگاری می‌شود.' };
+  }
+  if (secureMode === 'unavailable') {
+    return { tone: 'off', text: `این گفتگو روی این دستگاه رمزگشایی نمی‌شود${reason ? ` — ${reason}` : ''}.` };
+  }
+  if (reason) {
+    return { tone: 'off', text: `این گفتگو فعلاً سرتاسری رمزنگاری نمی‌شود — ${reason}.` };
+  }
+  return { tone: 'pending', text: 'اولین پیام این گفتگو از همین دستگاه رمزنگاری می‌شود؛ از آن لحظه سرور نه متن و نه فایل شما را می‌بیند.' };
+}
+
 export default function MessageList({
   messages, activeUser, onReact, searchQuery,
+  encrypted, secureMode, encryptionNote,
   historyState, historyError, onRetryHistory,
 }) {
   const listRef   = useRef(null);
@@ -67,6 +95,12 @@ export default function MessageList({
   const isGroup = activeUser.kind === 'group';
 
   const rows = useMemo(() => buildRows(messages), [messages]);
+  const notice = e2eeNotice({
+    encrypted,
+    secureMode,
+    isGroup,
+    reason: (secureMode === 'unavailable' ? historyError : encryptionNote) || '',
+  });
   const newCount = !searchQuery && !atBottom
     ? Math.max(0, messages.length - seenCount)
     : 0;
@@ -138,6 +172,14 @@ export default function MessageList({
             ) : (
               <p>این شروع گفتگوی شما با {activeUser.name} است</p>
             )}
+
+            {/* What this device really does with the messages of this chat, said
+                at the top of every one of them — including the chats it cannot
+                protect yet, which are described as exactly that. */}
+            <p className={`welcome-e2ee is-${notice.tone}`} role="note">
+              <i className={`fas ${notice.tone === 'off' ? 'fa-lock-open' : 'fa-lock'}`} aria-hidden="true" />
+              <span>{notice.text}</span>
+            </p>
           </div>
         )}
 

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   apiCall, fetchGroupMessages, fetchMessages, resolveUrl, uploadFile,
 } from '../services/api.js';
+import { uploadEncrypted } from '../services/attachments.js';
+import { packAttachment } from '../../shared/e2ee/attachments.js';
 import { e2eeConnected, getE2ee, initE2ee, onE2eeConnection } from '../services/e2ee.js';
 import { connectSocket, emitWithAck } from '../services/socket.js';
 
@@ -51,12 +53,18 @@ function normalize(msg, myId) {
 
 // A decrypted message carries no profile data, because the server never saw the
 // message it belongs to — the active peer supplies the name the bubble shows.
+// An attachment carries only a descriptor: the bytes are fetched and opened by
+// the bubble itself, so nothing readable is held in this list.
 function normalizeEncrypted(message, peer) {
   const created = new Date(message.at).getTime();
+  const attachment = message.attachment ?? null;
   return {
     id:             `e2ee-${message.seq}`,
-    type:           'text',
+    type:           attachment ? (attachment.mime?.startsWith('image/') ? 'image' : 'file') : 'text',
     text:           message.text,
+    attachment,
+    name:           attachment?.name ?? null,
+    size:           attachment?.size ?? null,
     side:           message.mine ? 'mine' : 'other',
     senderId:       message.senderId,
     conversationId: message.conversationId,
@@ -118,6 +126,7 @@ export function useChat(targetUser, currentUser, onIncoming) {
   const openingRef     = useRef(false);
   const refreshHistoryRef = useRef(() => {});
   const encryptedSendRef  = useRef(() => Promise.resolve({ ok: true }));
+  const attachmentSendRef = useRef(() => Promise.reject(new Error('رمزنگاری فایل آماده نیست')));
 
   // Keep refs in sync after render; writing refs during render is unsafe.
   useEffect(() => {
@@ -143,6 +152,30 @@ export function useChat(targetUser, currentUser, onIncoming) {
       const conversationId = secureRef.current?.conversationId
         ?? (await client.openDirect(target.id)).conversationId;
       await client.send(conversationId, text);
+      const history = await client.history(conversationId);
+      setSecure({ mode: 'open', conversationId, error: null });
+      setMessages(prev => mergeMessages(prev, history.map(m => normalizeEncrypted(m, target))));
+      clearTimeout(typingTimerRef.current);
+      socketRef.current?.emit('typing:stop', targetPayload(target));
+      return { ok: true };
+    };
+
+    // The order is the safety of this path: the group exists before a byte is
+    // uploaded, so a peer with no keys to invite never leaves an orphan blob on
+    // the server, and the file is encrypted before anything is sent at all.
+    attachmentSendRef.current = async (target, file) => {
+      const client = await initE2ee({ id: currentUserRef.current.id });
+      const conversationId = secureRef.current?.conversationId
+        ?? (await client.openDirect(target.id)).conversationId;
+      const { id, key, iv } = await uploadEncrypted(file, conversationId);
+      await client.send(conversationId, packAttachment({
+        blob: id,
+        name: file.name,
+        mime: file.type || 'application/octet-stream',
+        size: file.size,
+        key,
+        iv,
+      }));
       const history = await client.history(conversationId);
       setSecure({ mode: 'open', conversationId, error: null });
       setMessages(prev => mergeMessages(prev, history.map(m => normalizeEncrypted(m, target))));
@@ -386,10 +419,6 @@ export function useChat(targetUser, currentUser, onIncoming) {
       // already have marked encrypted, which is a send the server must refuse.
       return { ok: false, error: 'لحظه‌ای صبر کن، وضعیت رمزنگاری این گفتگو در حال بررسی است' };
     }
-    if (msg._file && status?.mode === 'open') {
-      return { ok: false, error: 'پیوست فایل هنوز در گفتگوهای رمزنگاری‌شده پشتیبانی نمی‌شود' };
-    }
-
     // A direct text message is encrypted whenever this device can do it, and
     // opening the group is what makes the conversation encrypted for good.
     if (msg.type === 'text' && !isGroup(target)
@@ -399,6 +428,21 @@ export function useChat(targetUser, currentUser, onIncoming) {
       } catch (error) {
         if (!peerWithoutKeys(error)) {
           return { ok: false, error: error.message || 'رمزنگاری یا ارسال پیام ناموفق بود' };
+        }
+        setSecure(prev => ({ ...(prev ?? {}), mode: 'plain', reason: error.message }));
+      }
+    }
+
+    // A file follows the same rule as text: once the conversation carries
+    // envelopes, the bytes are encrypted on this device before they are sent,
+    // and there is no plaintext attachment path left to fall back into.
+    if (msg._file && (status?.mode === 'open'
+      || (!isGroup(target) && status?.mode === 'plain'))) {
+      try {
+        return await attachmentSendRef.current(target, msg._file);
+      } catch (error) {
+        if (!peerWithoutKeys(error)) {
+          return { ok: false, error: error.message || 'رمزنگاری یا ارسال فایل ناموفق بود' };
         }
         setSecure(prev => ({ ...(prev ?? {}), mode: 'plain', reason: error.message }));
       }
@@ -489,10 +533,12 @@ export function useChat(targetUser, currentUser, onIncoming) {
     historyError: unavailable ?? historyError,
     retryHistory,
     encrypted: open,
+    // The notice at the top of a chat says different things for a chat that is
+    // encrypted, one that will be on the first send, and one that cannot be.
+    secureMode: secure?.mode ?? null,
     // Why a chat that could be encrypted is not, shown whenever it is not.
     encryptionNote: secure?.mode === 'plain' ? (secure.reason ?? null) : null,
     blockedReason: unavailable,
-    attachmentBlocked: open ? 'پیوست فایل در گفتگوهای رمزنگاری‌شده هنوز رمزنگاری نمی‌شود' : null,
     sendMessage, notifyTyping, toggleReaction, clearMessages,
   };
 }

@@ -1,15 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import Modal from '../ui/Modal.jsx';
 import Avatar from '../ui/Avatar.jsx';
+import EncryptedMedia from './EncryptedMedia.jsx';
+import { formatSize } from '../../utils/format.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢'];
-
-function formatSize(bytes) {
-  if (!bytes) return '';
-  if (bytes < 1024)        return `${bytes} بایت`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} کیلوبایت`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} مگابایت`;
-}
 
 function Highlight({ text, query }) {
   if (!query || !text) return text;
@@ -26,12 +21,27 @@ function Highlight({ text, query }) {
    that everything the message owns — media, picker, reaction chips, timestamp
    and receipt — is laid out inside one surface. */
 function BubbleBody({ message, searchQuery, onOpenImage }) {
+  // An encrypted attachment has no address the browser could fetch. Only the
+  // descriptor is known here, so the body — including its loading and failure
+  // states — belongs to the component that can turn it back into bytes.
+  if (message.attachment) {
+    return (
+      <EncryptedMedia
+        attachment={message.attachment}
+        kind={message.type}
+        name={message.name}
+        size={message.size}
+        onOpen={onOpenImage}
+      />
+    );
+  }
+
   if (message.type === 'image') {
     return (
       <button
         type="button"
         className="msg-image-btn"
-        onClick={onOpenImage}
+        onClick={() => onOpenImage(message.src)}
         aria-label="بازکردن تصویر در اندازه کامل"
       >
         <img src={message.src} alt={message.text || 'تصویر ارسالی'} className="msg-image" />
@@ -77,7 +87,9 @@ export default function MessageGroup({
   const bubbleRef = useRef(null);
   const toggleRef = useRef(null);
   const pickerRef = useRef(null);
-  const [lightbox, setLightbox] = useState(false);
+  // The preview holds the address it is showing: for an encrypted picture that
+  // is an object URL made by the bubble, which only exists while it is open.
+  const [lightbox, setLightbox] = useState(null);
   const isMine = message.side === 'mine';
   // Reactions live in the server's message table, and an encrypted message has
   // no row there to react to — so the affordance is not offered for it.
@@ -179,7 +191,7 @@ export default function MessageGroup({
             <BubbleBody
               message={message}
               searchQuery={searchQuery}
-              onOpenImage={() => setLightbox(true)}
+              onOpenImage={setLightbox}
             />
 
             <div className="msg-footer">
@@ -269,12 +281,12 @@ export default function MessageGroup({
           className="image-lightbox"
         >
           <h2 id="image-preview-title" className="sr-only">پیش‌نمایش تصویر</h2>
-          <img src={message.src} alt={message.text || 'تصویر ارسالی'} className="lightbox-image" />
+          <img src={lightbox} alt={message.text || 'تصویر ارسالی'} className="lightbox-image" />
           <div className="lightbox-actions">
             <a
               className="btn btn-secondary"
-              href={message.src}
-              download
+              href={lightbox}
+              download={message.name || 'image'}
               target="_blank"
               rel="noopener noreferrer"
             >
