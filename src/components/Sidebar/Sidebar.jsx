@@ -123,7 +123,9 @@ export default function Sidebar({
           const preview = user.preview ? previewText(user.preview) : '';
           const meta = preview
             ? (isGroup && user.preview.senderName ? `${user.preview.senderName}: ${preview}` : preview)
-            : (isGroup ? 'هنوز پیامی نیست' : (STATUS_TEXT[user.status] ?? ''));
+            : user.encrypted
+              ? 'رمزنگاری‌شده'
+              : (isGroup ? 'هنوز پیامی نیست' : (STATUS_TEXT[user.status] ?? ''));
 
           return (
             <button
