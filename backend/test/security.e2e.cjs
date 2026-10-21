@@ -28,6 +28,9 @@ process.env.E2EE_CLAIM_LIMIT = process.env.E2EE_CLAIM_LIMIT || '8';
 process.env.E2EE_REGISTER_LIMIT = process.env.E2EE_REGISTER_LIMIT || '200';
 process.env.E2EE_MAX_DEVICES_PER_USER = process.env.E2EE_MAX_DEVICES_PER_USER || '3';
 process.env.E2EE_MAX_PACKAGES_PER_DEVICE = process.env.E2EE_MAX_PACKAGES_PER_DEVICE || '10';
+// Envelope caps are shrunk the same way, so an oversized blob costs 3 KB
+// instead of the 16 KB the production default allows.
+process.env.E2EE_MAX_ENVELOPE_CHARS = process.env.E2EE_MAX_ENVELOPE_CHARS || '2048';
 
 const { NestFactory } = require('@nestjs/core');
 const { ValidationPipe } = require('@nestjs/common');
@@ -127,6 +130,44 @@ function toPersianDigits(value) {
 // uses recognizable base64 instead of real MLS material.
 function fakePackage(label) {
   return Buffer.from(`key-package:${label}`).toString('base64');
+}
+
+// MLS messages are opaque here too: the delivery service must store and return
+// them without understanding them, so recognizable base64 is the right fake.
+function fakeEnvelope(label) {
+  return Buffer.from(`mls-envelope:${label}`).toString('base64');
+}
+
+// Gathers events in arrival order until `count` of them land, or the window
+// closes. Ordering assertions need the sequence as received, not a Set.
+function collectEvents(socket, event, count, ms = 15_000) {
+  return new Promise(resolve => {
+    const seen = [];
+    const handler = data => {
+      seen.push(data);
+      if (seen.length === count) finish();
+    };
+    function finish() {
+      clearTimeout(timer);
+      socket.off(event, handler);
+      resolve(seen);
+    }
+    const timer = setTimeout(finish, ms);
+    socket.on(event, handler);
+  });
+}
+
+function participant(conversationId, userId) {
+  return prisma.conversationParticipant.findUnique({ where: { conversationId_userId: { conversationId, userId } } });
+}
+
+// The encrypted chat between alice and bob, resolved the way a client would:
+// by asking, never by carrying a conversation id across tests.
+async function encryptedDirect(me, peer) {
+  const response = await api(`/messages/e2ee/direct/${peer.user.id}`, { token: me.token });
+  assert.equal(response.status, 200, 'direct e2ee state');
+  assert.equal(response.data.e2ee, true, `${peer.user.username} chat is encrypted`);
+  return response.data.conversationId;
 }
 
 // Completes the whole sign-up: request a code, verify it, then finish the
@@ -1199,4 +1240,221 @@ test('key packages cannot be harvested quickly', async () => {
   const blocked = await api(claimPath, { token: alice.token, headers });
   assert.equal(blocked.status, 429, 'the pool is not a metered faucet');
   assert.ok(Number(blocked.headers.get('retry-after')) > 0, 'Retry-After header');
+});
+
+// ── Phase 2a: the server as a sequenced delivery service ──────────────────
+
+test('a direct chat opts into encryption and the chat list says so', async () => {
+  const { alice, bob, eve } = global.__ctx;
+
+  const anonymous = await api('/messages/e2ee/direct', { method: 'POST', body: { userId: bob.user.id } });
+  assert.equal(anonymous.status, 401, 'no session, no opt-in');
+
+  const self = await api('/messages/e2ee/direct', { method: 'POST', token: alice.token, body: { userId: alice.user.id } });
+  assert.equal(self.status, 400, 'there is no encrypted chat with yourself');
+
+  const junk = await api('/messages/e2ee/direct', { method: 'POST', token: alice.token, body: { userId: 'not-a-uuid' } });
+  assert.equal(junk.status, 400, 'the peer id format is enforced');
+
+  const ghost = await api('/messages/e2ee/direct', {
+    method: 'POST', token: alice.token,
+    body: { userId: '00000000-0000-4000-8000-000000000000' },
+  });
+  assert.equal(ghost.status, 404, 'an unknown peer gets no conversation');
+
+  // A client asks this every time it opens a chat, so probing must be inert.
+  const eveBefore = await prisma.conversation.count({ where: { participants: { some: { userId: eve.user.id } } } });
+  const probe     = await api(`/messages/e2ee/direct/${eve.user.id}`, { token: alice.token });
+  assert.equal(probe.status, 200, 'a chat that does not exist yet is not an error');
+  assert.deepEqual(probe.data, { conversationId: null, e2ee: false }, 'there is nothing to encrypt yet');
+  assert.equal(
+    await prisma.conversation.count({ where: { participants: { some: { userId: eve.user.id } } } }),
+    eveBefore,
+    'the probe created nothing',
+  );
+
+  const enabled = await api('/messages/e2ee/direct', { method: 'POST', token: alice.token, body: { userId: bob.user.id } });
+  assert.equal(enabled.status, 201, 'opt-in');
+  assert.equal(enabled.data.e2ee, true, 'the answer is the encrypted state');
+  const conversationId = enabled.data.conversationId;
+
+  // Either side flips the same conversation, and nobody can flip it back: the
+  // flag is one-way, so a downgrade can only ever be an explicit user action.
+  const fromPeer = await api('/messages/e2ee/direct', { method: 'POST', token: bob.token, body: { userId: alice.user.id } });
+  assert.equal(fromPeer.data.conversationId, conversationId, 'both sides land on the same chat');
+  assert.equal((await prisma.conversation.findUnique({ where: { id: conversationId } })).e2ee, true, 'persisted');
+
+  const state = await api(`/messages/e2ee/direct/${bob.user.id}`, { token: alice.token });
+  assert.deepEqual(state.data, { conversationId, e2ee: true }, 'read-only state agrees');
+
+  const list = await api('/messages/conversations', { token: bob.token });
+  const entry = list.data.find(c => c.user.id === alice.user.id);
+  assert.equal(entry?.e2ee, true, 'the chat list carries the flag so the UI can label the conversation');
+});
+
+test('an encrypted conversation refuses plaintext and other conversations stay open', async () => {
+  const { alice, bob } = global.__ctx;
+  const conversationId = await encryptedDirect(alice, bob);
+  const before = await prisma.message.count({ where: { conversationId } });
+
+  const byConversation = await emitAck(sockets.alice, 'message:send', { conversationId, type: 'text', text: 'in the clear' });
+  assert.equal(byConversation.ok, false, 'plaintext cannot be written into an encrypted chat');
+  assert.match(byConversation.error, /رمزنگاری/, 'and the client is told why');
+
+  const byPeer = await emitAck(sockets.alice, 'message:send', { toId: bob.user.id, type: 'text', text: 'in the clear' });
+  assert.equal(byPeer.ok, false, 'the peer-id path is the same conversation');
+
+  assert.equal(await prisma.message.count({ where: { conversationId } }), before, 'no plaintext row was written');
+
+  const groupStill = await emitAck(sockets.alice, 'message:send', { conversationId: group.id, type: 'text', text: 'groups are untouched' });
+  assert.equal(groupStill.ok, true, 'the refusal is scoped to the encrypted conversation');
+});
+
+test('envelopes are numbered with no gaps and delivered in strict order', async () => {
+  const { alice, bob } = global.__ctx;
+  const conversationId = await encryptedDirect(alice, bob);
+  const base = (await prisma.e2eeEnvelope.aggregate({ where: { conversationId }, _max: { seq: true } }))._max.seq ?? 0;
+
+  const received = collectEvents(sockets.bob, 'e2ee:envelope', 12);
+  const senders  = [sockets.alice, sockets.bob];
+  const acks = await Promise.all(Array.from({ length: 12 }, (_, i) => emitAck(
+    senders[i % 2], 'e2ee:append', { conversationId, content: fakeEnvelope(`burst-${i}`) }, 20_000,
+  )));
+
+  acks.forEach((ack, i) => assert.equal(ack.ok, true, `append ${i} accepted`));
+  assert.deepEqual(
+    acks.map(ack => ack.seq).sort((a, b) => a - b),
+    Array.from({ length: 12 }, (_, i) => base + 1 + i),
+    'one number per envelope, gapless and duplicate-free, however the sends interleave',
+  );
+
+  const delivered = await received;
+  assert.equal(delivered.length, 12, 'every envelope reached the peer');
+  const order = delivered.map(envelope => envelope.seq);
+  for (let i = 1; i < order.length; i += 1) {
+    assert.ok(order[i] > order[i - 1], `delivery order must ascend (${order.join(',')})`);
+  }
+  assert.equal(new Set(delivered.map(envelope => envelope.content)).size, 12, 'each blob survived the trip');
+});
+
+test('a reconnecting member can pull the stream from any point and outsiders cannot', async () => {
+  const { alice, bob, eve } = global.__ctx;
+  const conversationId = await encryptedDirect(alice, bob);
+  const all  = await prisma.e2eeEnvelope.findMany({ where: { conversationId }, orderBy: { seq: 'asc' } });
+  const last = all[all.length - 1];
+
+  const page = await api(`/messages/${conversationId}/envelopes?afterSeq=${last.seq - 6}`, { token: bob.token });
+  assert.equal(page.status, 200, 'catch-up read');
+  const expected = all.filter(envelope => envelope.seq > last.seq - 6);
+  assert.deepEqual(page.data.map(envelope => envelope.seq), expected.map(envelope => envelope.seq), 'oldest first, nothing skipped');
+  assert.deepEqual(page.data.map(envelope => envelope.content), expected.map(envelope => envelope.content), 'returned byte for byte');
+
+  const bounded = await api(`/messages/${conversationId}/envelopes?take=3`, { token: alice.token });
+  assert.deepEqual(bounded.data.map(envelope => envelope.seq), all.slice(0, 3).map(envelope => envelope.seq), 'a client may page in small chunks');
+
+  assert.equal((await api(`/messages/${conversationId}/envelopes?afterSeq=-1`, { token: alice.token })).status, 400, 'a mark cannot be negative');
+  assert.equal((await api(`/messages/${conversationId}/envelopes?afterSeq=1.5`, { token: alice.token })).status, 400, 'and must be a whole number');
+  const pageCap = Number(process.env.E2EE_ENVELOPE_PAGE || 200) + 1;
+  assert.equal((await api(`/messages/${conversationId}/envelopes?take=${pageCap}`, { token: alice.token })).status, 400, 'one page is bounded');
+  assert.equal((await api(`/messages/${conversationId}/envelopes`, { token: eve.token })).status, 403, 'an outsider gets no stream, not even its length');
+  assert.equal((await api(`/messages/${conversationId}/envelopes`)).status, 401, 'no session, no envelopes');
+  assert.equal((await api('/messages/not-a-uuid/envelopes', { token: alice.token })).status, 400, 'the id format is enforced');
+
+  // The ciphertext stream and the plaintext history stay separate: nothing in
+  // the old endpoints exposes the new ones.
+  const history = await api(`/messages/${bob.user.id}`, { token: alice.token });
+  assert.equal(history.data.length, await prisma.message.count({ where: { conversationId } }), 'history holds only pre-encryption messages');
+  assert.ok(!JSON.stringify(history.data).includes(all[0].content), 'envelopes never appear in plaintext history');
+});
+
+test('read state in an encrypted chat is one mark that only moves forward', async () => {
+  const { alice, bob, eve } = global.__ctx;
+  const conversationId = await encryptedDirect(alice, bob);
+  const top = (await prisma.e2eeEnvelope.aggregate({ where: { conversationId }, _max: { seq: true } }))._max.seq;
+
+  const sentByPeer = await prisma.e2eeEnvelope.count({ where: { conversationId, senderId: bob.user.id } });
+  const before = await api('/messages/conversations', { token: alice.token });
+  assert.equal(
+    before.data.find(c => c.user.id === bob.user.id)?.unread,
+    sentByPeer,
+    'unread counts the peer envelopes above my mark',
+  );
+
+  const receipt = waitEvent(sockets.bob, 'message:read', 5000);
+  const marked = await emitAck(sockets.alice, 'e2ee:read', { conversationId, upToSeq: top });
+  assert.deepEqual(marked, { ok: true, moved: true }, 'the receipt is confirmed, not swallowed');
+  assert.deepEqual(await receipt, { by: alice.user.id, conversationId }, 'the peer is told, so badges clear like plaintext chats');
+  // The ack arrives after the write, so there is nothing left to wait for.
+  assert.equal((await participant(conversationId, alice.user.id)).e2eeReadSeq, top, 'the mark is in the database');
+
+  const after = await api('/messages/conversations', { token: alice.token });
+  assert.equal(after.data.find(c => c.user.id === bob.user.id)?.unread, 0, 'badges clear');
+
+  // A replayed, late or nonsense receipt must not rewind the mark, and an
+  // outsider must not be able to file one at all.
+  const replay = await emitAck(sockets.alice, 'e2ee:read', { conversationId, upToSeq: 1 });
+  assert.deepEqual(replay, { ok: true, moved: false }, 'a stale mark is accepted as already done, not applied');
+  assert.equal((await emitAck(sockets.alice, 'e2ee:read', { conversationId, upToSeq: 'everything' })).ok, false, 'nonsense is refused');
+  assert.equal((await emitAck(sockets.eve, 'e2ee:read', { conversationId, upToSeq: 0 })).ok, false, 'a stranger cannot mark my chat read');
+  assert.equal((await participant(conversationId, alice.user.id)).e2eeReadSeq, top, 'a mark only ever moves forward');
+  assert.equal(
+    await prisma.conversationParticipant.count({ where: { conversationId, userId: eve.user.id } }),
+    0,
+    'an outsider cannot mark a chat they are not in',
+  );
+});
+
+test('bad blobs are rejected, streams stay separate, and groups are still out of scope', async () => {
+  const { alice, bob, eve } = global.__ctx;
+  const conversationId = await encryptedDirect(alice, bob);
+
+  const missing = await emitAck(sockets.alice, 'e2ee:append', { conversationId });
+  assert.equal(missing.ok, false, 'an empty envelope is not stored');
+  const junk = await emitAck(sockets.alice, 'e2ee:append', { conversationId, content: 'not base64 !!!' });
+  assert.equal(junk.ok, false, 'content has to be bytes');
+  const oversized = await emitAck(sockets.alice, 'e2ee:append', {
+    conversationId,
+    content: 'A'.repeat(Number(process.env.E2EE_MAX_ENVELOPE_CHARS) + 1),
+  });
+  assert.equal(oversized.ok, false, 'and it has to fit');
+  const noConversation = await emitAck(sockets.alice, 'e2ee:append', { content: fakeEnvelope('nowhere') });
+  assert.equal(noConversation.ok, false, 'a blob with no conversation is refused');
+
+  const outsider = await emitAck(sockets.eve, 'e2ee:append', { conversationId, content: fakeEnvelope('outsider') });
+  assert.equal(outsider.ok, false, 'only members may append');
+  assert.match(outsider.error, /عضو/, 'the answer is about membership, never about the encryption state');
+
+  // A second encrypted chat numbers its own envelopes from one: sequence is
+  // per conversation, so the first stream cannot be measured through it.
+  const firstStreamLength = await prisma.e2eeEnvelope.count({ where: { conversationId } });
+  const other = await api('/messages/e2ee/direct', { method: 'POST', token: alice.token, body: { userId: eve.user.id } });
+  assert.equal(other.status, 201, 'a fresh chat can be encrypted');
+  const first = await emitAck(sockets.alice, 'e2ee:append', {
+    conversationId: other.data.conversationId,
+    content:        fakeEnvelope('first-here'),
+  });
+  assert.equal(first.seq, 1, 'every conversation starts at one');
+  const peerStream = await api(`/messages/${other.data.conversationId}/envelopes`, { token: eve.token });
+  assert.deepEqual(peerStream.data.map(envelope => envelope.seq), [1], 'and the other member sees exactly that');
+  assert.equal(
+    await prisma.e2eeEnvelope.count({ where: { conversationId } }),
+    firstStreamLength,
+    'appending to one chat never touches another',
+  );
+
+  // Groups have no encrypted transport yet. Flipping the flag ahead of Phase 3
+  // would lock them, so it is refused rather than half-supported.
+  await prisma.conversation.update({ where: { id: group.id }, data: { e2ee: true } });
+  try {
+    const groupAppend = await emitAck(sockets.alice, 'e2ee:append', { conversationId: group.id, content: fakeEnvelope('group') });
+    assert.equal(groupAppend.ok, false, 'a group commit needs welcome routing first');
+    assert.match(groupAppend.error, /گروه/);
+    assert.equal(await prisma.e2eeEnvelope.count({ where: { conversationId: group.id } }), 0, 'nothing was stored');
+    const groupPlaintext = await emitAck(sockets.alice, 'message:send', { conversationId: group.id, type: 'text', text: 'flagged group' });
+    assert.equal(groupPlaintext.ok, false, 'a flagged group accepts nothing at all, which is why only Phase 3 may set it');
+  } finally {
+    await prisma.conversation.update({ where: { id: group.id }, data: { e2ee: false } });
+  }
+  const reopened = await emitAck(sockets.alice, 'message:send', { conversationId: group.id, type: 'text', text: 'back to plaintext' });
+  assert.equal(reopened.ok, true, 'the group works again once the flag is off');
 });

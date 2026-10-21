@@ -29,6 +29,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
 
   private rateLimits = new Map<string, { count: number; resetAt: number }>();
+  // One chain per conversation so an envelope's sequence number is assigned and
+  // emitted in the same critical section. Per-process, like the other in-memory
+  // state here; the database advisory lock is what keeps the numbering correct
+  // if a second instance ever appends concurrently.
+  private envelopeChains = new Map<string, Promise<unknown>>();
 
   constructor(
     private jwt: JwtService,
@@ -117,6 +122,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  // Chains a task onto the conversation's queue. Rejections are swallowed by
+  // the chain itself so one failed send cannot poison every later envelope of
+  // that conversation; the caller still gets the rejected promise.
+  private enqueueOrdered<T>(conversationId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.envelopeChains.get(conversationId) ?? Promise.resolve();
+    const result = previous.then(task, task);
+    const tail = result.then(() => undefined, () => undefined);
+    this.envelopeChains.set(conversationId, tail);
+    // The queue only needs to exist while something is waiting on it, so the
+    // entry is dropped as soon as this task is last in line.
+    tail.then(() => {
+      if (this.envelopeChains.get(conversationId) === tail) this.envelopeChains.delete(conversationId);
+    });
+    return result;
+  }
+
   private failure(err: unknown, fallback: string) {
     console.error('[socket] event failed', err);
     return { ok: false, error: err instanceof HttpException ? err.message : fallback };
@@ -182,6 +203,70 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { ok: true, id: msg.id };
     } catch (err) {
       return this.failure(err, 'ارسال پیام ناموفق بود');
+    }
+  }
+
+  // ── Encrypted conversations: opaque envelopes, delivered in order ──────
+  // The server is a sequenced delivery service here and nothing more: it stores
+  // the blob it is handed, numbers it per conversation, and emits it in that
+  // order. It cannot tell a Welcome from a chat message, so a client that
+  // submits garbage simply fails to decrypt on every device, including its own.
+  @SubscribeMessage('e2ee:append')
+  async onE2eeAppend(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: { conversationId?: string; content?: string },
+  ) {
+    if (!this.allowRate(socket.id, 'e2ee:append', 30, 10_000)) {
+      return { ok: false, error: 'تعداد بسته‌های ارسالی بیش از حد مجاز است' };
+    }
+    if (!isId(body?.conversationId)) return { ok: false, error: 'گفتگو مشخص نیست' };
+
+    try {
+      const envelope = await this.enqueueOrdered(body.conversationId, async () => {
+        const stored = await this.messages.appendE2eeEnvelope(
+          body.conversationId, socket.data.userId, body.content,
+        );
+        const participantIds = await this.messages.getConversationParticipantIds(body.conversationId);
+        this.server.to(participantIds).emit('e2ee:envelope', stored);
+        return stored;
+      });
+      return { ok: true, id: envelope.id, seq: envelope.seq };
+    } catch (err) {
+      return this.failure(err, 'ارسال بسته ناموفق بود');
+    }
+  }
+
+  // Read state of an encrypted chat is one high-water mark per participant, so
+  // a receipt is a sequence number rather than a message id. The event clients
+  // already listen for is reused so both chat kinds clear badges the same way.
+  @SubscribeMessage('e2ee:read')
+  async onE2eeRead(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: { conversationId?: string; upToSeq?: number },
+  ) {
+    // Every path answers: a client that waits for confirmation of its own read
+    // mark must never hang on a rejected or ignored receipt.
+    if (!this.allowRate(socket.id, 'e2ee:read', 20, 10_000)) {
+      return { ok: false, error: 'تعداد درخواست‌ها بیش از حد مجاز است' };
+    }
+    if (!isId(body?.conversationId)) return { ok: false, error: 'گفتگو مشخص نیست' };
+
+    const upToSeq = Number(body?.upToSeq);
+    if (!Number.isInteger(upToSeq) || upToSeq < 0) return { ok: false, error: 'شماره بسته نامعتبر است' };
+
+    try {
+      const result = await this.messages.markE2eeRead(body.conversationId, socket.data.userId, upToSeq);
+      if (result.count) {
+        const participantIds = await this.messages.getConversationParticipantIds(body.conversationId);
+        this.server.to(participantIds).emit('message:read', {
+          by: socket.data.userId,
+          conversationId: body.conversationId,
+        });
+      }
+      // count 0 is not a failure: the mark was already at or above this point.
+      return { ok: true, moved: result.count === 1 };
+    } catch (err) {
+      return this.failure(err, 'ثبت خوانده‌شدن ناموفق بود');
     }
   }
 

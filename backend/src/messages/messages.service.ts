@@ -1,5 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { isBase64 } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
+import { E2EE_MAX_ENVELOPE_CHARS } from '../config/env';
 import { signedFileUrl } from '../uploads/file-urls';
 
 const WITH_RELATIONS = {
@@ -106,12 +108,29 @@ export class MessagesService {
     // after that account is deleted), so skip conversations with no partner
     // instead of returning an entry without a user.
     const withPartner = conversations.filter(c => c.participants[0]?.user);
+    if (!withPartner.length) return [];
+
+    const myRows = await this.prisma.conversationParticipant.findMany({
+      where:  { userId: myId, conversationId: { in: withPartner.map(c => c.id) } },
+      select: { conversationId: true, e2eeReadSeq: true },
+    });
+    const readSeq = new Map(myRows.map(row => [row.conversationId, row.e2eeReadSeq]));
 
     return Promise.all(withPartner.map(async (c) => {
-      const unread = await this.prisma.message.count({
-        where: { conversationId: c.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
-      });
-      return { user: c.participants[0].user, unread, updatedAt: c.updatedAt };
+      // An encrypted conversation has no plaintext rows to count, so unread is
+      // "envelopes above my high-water mark that I did not submit".
+      const unread = c.e2ee
+        ? await this.prisma.e2eeEnvelope.count({
+          where: {
+            conversationId: c.id,
+            senderId:       { not: myId },
+            seq:            { gt: readSeq.get(c.id) ?? 0 },
+          },
+        })
+        : await this.prisma.message.count({
+          where: { conversationId: c.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
+        });
+      return { user: c.participants[0].user, unread, e2ee: c.e2ee, updatedAt: c.updatedAt };
     }));
   }
 
@@ -279,6 +298,15 @@ export class MessagesService {
     type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number;
   }) {
     await this.assertMember(conversationId, senderId);
+    // An encrypted conversation has no plaintext path: accepting one here would
+    // be a silent downgrade the recipients cannot see coming.
+    const conversation = await this.prisma.conversation.findUnique({
+      where:  { id: conversationId },
+      select: { e2ee: true },
+    });
+    if (conversation?.e2ee) {
+      throw new BadRequestException('این گفتگو فقط بسته رمزنگاری‌شده می‌پذیرد');
+    }
     const normalized = this.normalizeOutgoingMessage(data);
     const message = await this.prisma.message.create({
       data: {
@@ -321,5 +349,114 @@ export class MessagesService {
       where:  { userId },
       select: { conversationId: true },
     }).then(rows => rows.map(r => r.conversationId));
+  }
+
+  // ── End-to-end encrypted conversations ───────────────────────────────────
+
+  /**
+   * Opt a direct chat into E2EE. Idempotent and one-way: enabling never turns
+   * off, and the plaintext rows that already exist stay where they are so the
+   * client can label them "sent before encryption" instead of hiding them.
+   */
+  async enableDirectE2ee(myId: string, otherId: string) {
+    if (myId === otherId) throw new BadRequestException('نمی‌توانید با خودتان گفتگو کنید');
+    const other = await this.prisma.user.findUnique({ where: { id: otherId }, select: { id: true } });
+    if (!other) throw new NotFoundException('کاربر پیدا نشد');
+
+    const conversation = await this.getOrCreateDirectConversation(myId, otherId);
+    if (!conversation.e2ee) {
+      await this.prisma.conversation.update({ where: { id: conversation.id }, data: { e2ee: true } });
+    }
+    return { conversationId: conversation.id, e2ee: true };
+  }
+
+  // Read-only look-up a client uses when it opens a chat, so it can choose the
+  // encrypted path without creating or changing anything.
+  async directE2eeState(myId: string, otherId: string) {
+    const conversation = await this.findDirectConversation(myId, otherId);
+    return { conversationId: conversation?.id ?? null, e2ee: conversation?.e2ee ?? false };
+  }
+
+  /**
+   * Store one opaque MLS message at the next sequence number of an encrypted
+   * conversation. The caller in the gateway emits it inside the same
+   * per-conversation critical section: MLS rejects a message whose ratchet
+   * generation it has not seen yet, so assignment and delivery must not
+   * interleave.
+   */
+  async appendE2eeEnvelope(conversationId: string, senderId: string, content: string) {
+    // Format checks first: they say nothing about the conversation, so they
+    // cannot leak whether an id belongs to someone else.
+    if (typeof content !== 'string' || !content.length) throw new BadRequestException('بسته خالی است');
+    if (content.length > E2EE_MAX_ENVELOPE_CHARS) throw new BadRequestException('بسته بیش از حد بزرگ است');
+    // Format only. The server can say "this is not bytes"; it cannot say
+    // "this is a valid MLS message", and it does not try to.
+    if (!isBase64(content)) throw new BadRequestException('بسته باید base64 باشد');
+
+    // Membership before conversation state: an outsider must not learn whether
+    // a conversation id they guessed is encrypted or still plaintext.
+    await this.assertMember(conversationId, senderId);
+
+    const conversation = await this.prisma.conversation.findUnique({
+      where:  { id: conversationId },
+      select: { e2ee: true, isGroup: true },
+    });
+    if (!conversation.e2ee) throw new BadRequestException('این گفتگو رمزنگاری سرتاسری ندارد');
+    // Group commits need welcome routing for members who join after the
+    // conversation exists; that is Phase 3, and accepting bytes now would be a
+    // half-implemented version of it.
+    if (conversation.isGroup) throw new BadRequestException('گفتگوهای گروهی هنوز رمزنگاری سرتاسری ندارند');
+
+    const [envelope] = await this.prisma.$transaction(async tx => {
+      // Transaction-scoped advisory lock: sequence assignment stays gapless
+      // even if a second API process appends at the same moment. The unique
+      // (conversationId, seq) index is the backstop if that assumption breaks.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${conversationId}))`;
+      const last = await tx.e2eeEnvelope.findFirst({
+        where:   { conversationId },
+        orderBy: { seq: 'desc' },
+        select:  { seq: true },
+      });
+      const created = await tx.e2eeEnvelope.create({
+        data: { conversationId, senderId, seq: (last?.seq ?? 0) + 1, content },
+      });
+      await tx.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
+      return [created];
+    });
+
+    return {
+      id:             envelope.id,
+      conversationId,
+      seq:            envelope.seq,
+      senderId,
+      content:        envelope.content,
+      createdAt:      envelope.createdAt,
+    };
+  }
+
+  // Catch-up read: a client that reconnects pulls everything above the last
+  // sequence number it processed, in order, and feeds it to MLS one by one.
+  async listE2eeEnvelopes(conversationId: string, userId: string, afterSeq: number, take: number) {
+    await this.assertMember(conversationId, userId);
+    return this.prisma.e2eeEnvelope.findMany({
+      where:   { conversationId, seq: { gt: afterSeq } },
+      orderBy: { seq: 'asc' },
+      take,
+      select:  { id: true, seq: true, senderId: true, content: true, createdAt: true },
+    });
+  }
+
+  /**
+   * Move a participant's read mark forward. Only forward: a replayed or late
+   * receipt must not rewind their unread count.
+   */
+  async markE2eeRead(conversationId: string, userId: string, upToSeq: number) {
+    const membership = await this.assertMember(conversationId, userId);
+    if (!(upToSeq > membership.e2eeReadSeq)) return { count: 0 };
+    await this.prisma.conversationParticipant.update({
+      where: { id: membership.id },
+      data:  { e2eeReadSeq: upToSeq },
+    });
+    return { count: 1 };
   }
 }

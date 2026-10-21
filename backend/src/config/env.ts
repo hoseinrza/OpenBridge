@@ -88,6 +88,14 @@ export const E2EE_MAX_PACKAGE_CHARS = positiveInt('E2EE_MAX_PACKAGE_CHARS', 4096
 // surfaces.
 export const E2EE_CLAIM_LIMIT = positiveInt('E2EE_CLAIM_LIMIT', 20);
 export const E2EE_CLAIM_WINDOW_SECONDS = positiveInt('E2EE_CLAIM_WINDOW_SECONDS', 60);
+
+// Transport for encrypted conversations: one MLS message per envelope, carried
+// as base64. The cap is the existing 4000-character plaintext limit plus MLS
+// framing and headroom, and it stays well under the socket packet ceiling so a
+// client cannot make the delivery service buffer megabytes per message.
+export const E2EE_MAX_ENVELOPE_CHARS = positiveInt('E2EE_MAX_ENVELOPE_CHARS', 16384);
+// How many envelopes a reconnecting client may pull in one catch-up page.
+export const E2EE_ENVELOPE_PAGE = positiveInt('E2EE_ENVELOPE_PAGE', 200);
 export const E2EE_REGISTER_LIMIT = positiveInt('E2EE_REGISTER_LIMIT', 30);
 export const E2EE_REGISTER_WINDOW_SECONDS = positiveInt('E2EE_REGISTER_WINDOW_SECONDS', 600);
 

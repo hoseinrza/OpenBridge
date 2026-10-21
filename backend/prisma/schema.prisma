@@ -51,8 +51,31 @@ model User {
   reads          MessageRead[]
   sessions       Session[]
   devices        Device[]
+  envelopes      E2eeEnvelope[]
 
   @@map("users")
+}
+
+// The ciphertext stream of an end-to-end encrypted conversation: opaque MLS
+// messages in the order they were accepted. MLS is not order tolerant, so the
+// server's whole job here is a sequenced delivery service — `seq` is assigned
+// per conversation with no gaps, and `content` is a base64 blob the server never
+// decodes. It cannot tell a Welcome from a chat message and stores no plaintext.
+model E2eeEnvelope {
+  id             String   @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  // Which account submitted the blob. MLS authenticates the sender inside the
+  // ciphertext; this is delivery metadata only, and lets a client skip its own
+  // messages without decrypting them.
+  senderId       String
+  sender         User        @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  seq            Int
+  content        String      @db.Text
+  createdAt      DateTime    @default(now())
+
+  @@unique([conversationId, seq])
+  @@map("e2ee_envelopes")
 }
 
 // One row per installed app that can hold end-to-end encryption keys. The
@@ -133,9 +156,12 @@ model Session {
 
 // A conversation is either a 1-to-1 direct chat (isGroup = false, always
 // exactly 2 participants) or a group chat (isGroup = true, name/avatar set).
+// `e2ee` is one-way for now: turning a direct chat on never turns off, because
+// a silent downgrade is a security bug (design doc §7).
 model Conversation {
   id        String   @id @default(uuid())
   isGroup   Boolean  @default(false)
+  e2ee      Boolean  @default(false)
   name      String?
   avatar    String?
   createdAt DateTime @default(now())
@@ -143,6 +169,7 @@ model Conversation {
 
   participants ConversationParticipant[]
   messages     Message[]
+  envelopes    E2eeEnvelope[]
 
   @@map("conversations")
 }
@@ -155,6 +182,10 @@ model ConversationParticipant {
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   role           ParticipantRole @default(MEMBER)
   joinedAt       DateTime        @default(now())
+  // Read state for an encrypted chat is one high-water mark per participant,
+  // not a row per message: the transcript is ciphertext the server cannot count
+  // as read, and the client only ever needs "everything up to seq N".
+  e2eeReadSeq    Int             @default(0)
 
   @@unique([conversationId, userId])
   @@index([userId])

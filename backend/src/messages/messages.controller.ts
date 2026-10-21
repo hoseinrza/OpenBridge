@@ -3,10 +3,13 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UsersService } from '../users/users.service';
+import { E2EE_ENVELOPE_PAGE } from '../config/env';
 import { MessagesService } from './messages.service';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { AddParticipantDto } from './dto/add-participant.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
+import { DirectPeerDto } from './dto/direct-peer.dto';
+import { EnvelopeQueryDto } from './dto/envelope-query.dto';
 
 @Controller('messages')
 @UseGuards(JwtAuthGuard)
@@ -19,7 +22,7 @@ export class MessagesController {
   async listConversations(@Request() req) {
     const list  = await this.messages.listConversations(req.user.id);
     const users = await this.users.withOnlineStatus(list.map(c => c.user));
-    return list.map((c, i) => ({ user: users[i], unread: c.unread, updatedAt: c.updatedAt }));
+    return list.map((c, i) => ({ user: users[i], unread: c.unread, e2ee: c.e2ee, updatedAt: c.updatedAt }));
   }
 
   // ── Group chats ──────────────────────────────────────
@@ -62,6 +65,39 @@ export class MessagesController {
     @Param('userId', ParseUUIDPipe)  userId: string,
   ) {
     return this.messages.removeParticipant(conversationId, req.user.id, userId);
+  }
+
+  // ── Encrypted direct conversations ───────────────────────────
+  // Opt-in, idempotent, and one-way: a client calls this before it builds its
+  // MLS group. Nothing here turns encryption back off, so a downgrade can only
+  // ever be a visible user action, never something the transport does silently.
+  @Post('e2ee/direct')
+  enableDirectE2ee(@Request() req, @Body() dto: DirectPeerDto) {
+    return this.messages.enableDirectE2ee(req.user.id, dto.userId);
+  }
+
+  // Does a direct conversation already exist, and is it encrypted? Read-only:
+  // a client probing this must not create or flip anything.
+  @Get('e2ee/direct/:userId')
+  directE2eeState(@Request() req, @Param('userId', ParseUUIDPipe) userId: string) {
+    return this.messages.directE2eeState(req.user.id, userId);
+  }
+
+  // Opaque MLS envelopes in delivery order, for a client catching up after a
+  // reconnect. Returns exactly what was stored, byte for byte, and proves
+  // nothing about it.
+  @Get(':conversationId/envelopes')
+  listEnvelopes(
+    @Request()                          req,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Query()                            query: EnvelopeQueryDto,
+  ) {
+    return this.messages.listE2eeEnvelopes(
+      conversationId,
+      req.user.id,
+      query.afterSeq ?? 0,
+      query.take ?? E2EE_ENVELOPE_PAGE,
+    );
   }
 
   // ── Direct (1-to-1) chat ─────────────────────────────
