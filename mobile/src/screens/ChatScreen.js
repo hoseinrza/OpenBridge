@@ -152,6 +152,36 @@ export default function ChatScreen({ route }) {
               <Text style={[styles.bubbleText, isMine && styles.bubbleTextMine]}>{msg.text}</Text>
             )}
 
+            {pickerOpen && (
+              <View style={styles.tapbackRow} accessibilityRole="menu">
+                {REACTIONS.map(emoji => (
+                  <Pressable
+                    key={emoji}
+                    style={[
+                      styles.tapback,
+                      isMine && styles.tapbackOut,
+                      held.has(emoji) && styles.tapbackHeld,
+                      held.has(emoji) && isMine && styles.tapbackOutHeld,
+                    ]}
+                    onPress={() => onReact(msg.id, emoji)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: held.has(emoji) }}
+                    accessibilityLabel={held.has(emoji) ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                  >
+                    <Text style={styles.tapbackText}>{emoji}</Text>
+                  </Pressable>
+                ))}
+                <Pressable
+                  style={[styles.tapbackClose, isMine && styles.tapbackOut]}
+                  onPress={() => setReactionPicker(null)}
+                  accessibilityRole="button"
+                  accessibilityLabel="بستن واکنش‌ها"
+                >
+                  <FontAwesome6 name="xmark" size={11} color={isMine ? colors.onBubbleOut : colors.text2} />
+                </Pressable>
+              </View>
+            )}
+
             {reactions.length > 0 && (
               <View style={styles.reactions}>
                 {reactions.map(({ emoji, mine }) => (
@@ -186,31 +216,6 @@ export default function ChatScreen({ route }) {
               )}
             </View>
           </Pressable>
-
-          {pickerOpen && (
-            <View style={styles.tapbackRow} accessibilityRole="menu">
-              {REACTIONS.map(emoji => (
-                <Pressable
-                  key={emoji}
-                  style={[styles.tapback, held.has(emoji) && styles.tapbackHeld]}
-                  onPress={() => onReact(msg.id, emoji)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: held.has(emoji) }}
-                  accessibilityLabel={held.has(emoji) ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
-                >
-                  <Text style={styles.tapbackText}>{emoji}</Text>
-                </Pressable>
-              ))}
-              <Pressable
-                style={styles.tapbackClose}
-                onPress={() => setReactionPicker(null)}
-                accessibilityRole="button"
-                accessibilityLabel="بستن واکنش‌ها"
-              >
-                <FontAwesome6 name="xmark" size={11} color={colors.text2} />
-              </Pressable>
-            </View>
-          )}
         </View>
 
         {!isMine && (
@@ -440,24 +445,28 @@ function makeStyles(colors) {
     reactionChipOutHeld: { borderColor: '#FFE0DE', backgroundColor: 'rgba(255,255,255,0.30)' },
     reactionText: { color: colors.text1, fontFamily: fonts.regular, fontSize: type.sm },
 
-    tapbackRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 2, marginTop: 5 },
+    /* Inside the bubble, so the strip belongs to the message it acts on. On the
+       outgoing bubble it keeps the bubble's palette like the chips do. */
+    tapbackRow: { flexDirection: 'row-reverse', alignItems: 'center', flexWrap: 'wrap', gap: 2, marginTop: 2 },
     tapback: {
-      width: 36, height: 36,
+      width: 34, height: 34,
       borderRadius: radius.pill,
       borderWidth: 1,
       borderColor: colors.border,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.surface3,
       alignItems: 'center',
       justifyContent: 'center',
     },
     tapbackHeld: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-    tapbackText: { fontSize: 18 },
+    tapbackOut: { borderColor: 'rgba(255,255,255,0.32)', backgroundColor: 'rgba(255,255,255,0.16)' },
+    tapbackOutHeld: { borderColor: '#FFE0DE', backgroundColor: 'rgba(255,255,255,0.30)' },
+    tapbackText: { fontSize: 17 },
     tapbackClose: {
-      width: 28, height: 28, marginLeft: 4,
+      width: 26, height: 26,
       borderRadius: radius.pill,
       borderWidth: 1,
       borderColor: colors.border,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.surface3,
       alignItems: 'center',
       justifyContent: 'center',
     },

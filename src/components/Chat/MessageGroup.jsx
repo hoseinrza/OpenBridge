@@ -22,26 +22,27 @@ function Highlight({ text, query }) {
   );
 }
 
-function BubbleContent({ message, searchQuery, onOpenImage }) {
+/* Only the inside of a bubble. The bubble itself belongs to the message row so
+   that everything the message owns — media, picker, reaction chips, timestamp
+   and receipt — is laid out inside one surface. */
+function BubbleBody({ message, searchQuery, onOpenImage }) {
   if (message.type === 'image') {
     return (
-      <div className="bubble bubble-image">
-        <button
-          type="button"
-          className="msg-image-btn"
-          onClick={() => onOpenImage(message)}
-          aria-label="بازکردن تصویر در اندازه کامل"
-        >
-          <img src={message.src} alt={message.text || 'تصویر ارسالی'} className="msg-image" />
-        </button>
-      </div>
+      <button
+        type="button"
+        className="msg-image-btn"
+        onClick={onOpenImage}
+        aria-label="بازکردن تصویر در اندازه کامل"
+      >
+        <img src={message.src} alt={message.text || 'تصویر ارسالی'} className="msg-image" />
+      </button>
     );
   }
 
   if (message.type === 'file') {
     return (
       <a
-        className="bubble bubble-file"
+        className="bubble-file-link"
         href={message.src}
         download={message.name || undefined}
         target="_blank"
@@ -61,20 +62,18 @@ function BubbleContent({ message, searchQuery, onOpenImage }) {
   }
 
   return (
-    <div className="bubble">
+    <span className="bubble-text">
       <Highlight text={message.text} query={searchQuery} />
-    </div>
+    </span>
   );
 }
 
 export default function MessageGroup({
   message, first = true, last = true, isGroup = false, onReact, searchQuery,
 }) {
-  const [hovered, setHovered] = useState(false);
   const [barOpen, setBarOpen] = useState(false);
   const [lightbox, setLightbox] = useState(false);
   const isMine = message.side === 'mine';
-  const barVisible = hovered || barOpen;
   // Reactions live in the server's message table, and an encrypted message has
   // no row there to react to — so the affordance is not offered for it.
   const reactable = !message.encrypted;
@@ -87,33 +86,10 @@ export default function MessageGroup({
     setBarOpen(false);
   }
 
-  return (
-    <div
-      className={`msg-wrapper ${isMine ? 'mine' : 'other'} ${first ? 'first' : ''} ${last ? 'last' : ''}`}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onFocusCapture={() => setHovered(true)}
-      onBlurCapture={e => {
-        if (!e.currentTarget.contains(e.relatedTarget)) setHovered(false);
-      }}
-    >
-      {reactable && barVisible && (
-        <div className="reaction-bar" role="group" aria-label="انتخاب واکنش">
-          {REACTIONS.map(emoji => (
-            <button
-              key={emoji}
-              type="button"
-              className={`reaction-btn ${mine.has(emoji) ? 'active' : ''}`}
-              aria-pressed={mine.has(emoji)}
-              aria-label={`${emoji}، ${mine.has(emoji) ? 'واکنش تو — برای برداشتن بزن' : 'افزودن'}`}
-              onClick={() => pickReaction(emoji)}
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
-      )}
+  const bubbleClass = `bubble ${message.type === 'image' ? 'bubble-image' : ''}`;
 
+  return (
+    <div className={`msg-wrapper ${isMine ? 'mine' : 'other'} ${first ? 'first' : ''} ${last ? 'last' : ''}`}>
       <div className="msg-group">
         {!isMine && (
           last ? (
@@ -133,64 +109,83 @@ export default function MessageGroup({
             <div className="msg-sender">{message.sender || 'کاربر'}</div>
           )}
 
-          <BubbleContent
-            message={message}
-            searchQuery={searchQuery}
-            onOpenImage={() => setLightbox(true)}
-          />
+          <div className={bubbleClass}>
+            <BubbleBody
+              message={message}
+              searchQuery={searchQuery}
+              onOpenImage={() => setLightbox(true)}
+            />
 
-          <div className="msg-footer">
-            <time className="msg-time" dateTime={new Date(message.createdAt).toISOString()}>
-              {message.time}
-            </time>
-
-            {message.encrypted && (
-              <span className="msg-lock" title="این پیام فقط روی دستگاه شما و طرف مقابل رمزگشایی می‌شود">
-                <i className="fas fa-lock" aria-hidden="true" />
-                <span className="sr-only">رمزنگاری سرتاسری</span>
-              </span>
+            {reactable && barOpen && (
+              <div className="reaction-bar" role="group" aria-label="انتخاب واکنش">
+                {REACTIONS.map(emoji => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className={`reaction-btn ${mine.has(emoji) ? 'active' : ''}`}
+                    aria-pressed={mine.has(emoji)}
+                    aria-label={`${emoji}، ${mine.has(emoji) ? 'واکنش تو — برای برداشتن بزن' : 'افزودن'}`}
+                    onClick={() => pickReaction(emoji)}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
             )}
 
-            {reactable && (
-              <button
-                type="button"
-                className="msg-react-toggle"
-                aria-label="افزودن واکنش"
-                aria-expanded={barVisible}
-                onClick={() => setBarOpen(open => !open)}
-              >
-                <i className="far fa-face-smile" aria-hidden="true" />
-              </button>
+            {reactions.length > 0 && (
+              <div className="msg-reactions" role="group" aria-label="واکنش‌ها">
+                {reactions.map(({ emoji, mine: held }) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className={`msg-reaction ${held ? 'mine' : ''}`}
+                    onClick={() => pickReaction(emoji)}
+                    aria-pressed={held}
+                    aria-label={held ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                    title={held ? 'برای برداشتن واکنش دوباره بزن' : 'واکنش نشان بده'}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
             )}
 
-            {isMine && (
-              <span
-                className={`msg-receipt ${message.read ? 'read' : ''}`}
-                title={message.read ? 'خوانده شد' : 'ارسال شد'}
-              >
-                <i className={`fas ${message.read ? 'fa-check-double' : 'fa-check'}`} aria-hidden="true" />
-                <span className="sr-only">{message.read ? 'خوانده شد' : 'ارسال شد'}</span>
-              </span>
-            )}
-          </div>
+            <div className="msg-footer">
+              <time className="msg-time" dateTime={new Date(message.createdAt).toISOString()}>
+                {message.time}
+              </time>
 
-          {reactions.length > 0 && (
-            <div className="msg-reactions" role="group" aria-label="واکنش‌ها">
-              {reactions.map(({ emoji, mine: held }) => (
+              {message.encrypted && (
+                <span className="msg-lock" title="این پیام فقط روی دستگاه شما و طرف مقابل رمزگشایی می‌شود">
+                  <i className="fas fa-lock" aria-hidden="true" />
+                  <span className="sr-only">رمزنگاری سرتاسری</span>
+                </span>
+              )}
+
+              {reactable && (
                 <button
-                  key={emoji}
                   type="button"
-                  className={`msg-reaction ${held ? 'mine' : ''}`}
-                  onClick={() => pickReaction(emoji)}
-                  aria-pressed={held}
-                  aria-label={held ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
-                  title={held ? 'برای برداشتن واکنش دوباره بزن' : 'واکنش نشان بده'}
+                  className="msg-react-toggle"
+                  aria-label="افزودن واکنش"
+                  aria-expanded={barOpen}
+                  onClick={() => setBarOpen(open => !open)}
                 >
-                  {emoji}
+                  <i className="far fa-face-smile" aria-hidden="true" />
                 </button>
-              ))}
+              )}
+
+              {isMine && (
+                <span
+                  className={`msg-receipt ${message.read ? 'read' : ''}`}
+                  title={message.read ? 'خوانده شد' : 'ارسال شد'}
+                >
+                  <i className={`fas ${message.read ? 'fa-check-double' : 'fa-check'}`} aria-hidden="true" />
+                  <span className="sr-only">{message.read ? 'خوانده شد' : 'ارسال شد'}</span>
+                </span>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
 

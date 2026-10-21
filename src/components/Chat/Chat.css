@@ -345,17 +345,24 @@
 }
 
 /* ── Bubble ──────────────────────────────────────────────────── */
+/* The bubble is the whole message surface: media, reaction picker, reaction
+   chips, timestamp and receipt all live inside it. Only the sender's avatar
+   and name sit outside. */
 .bubble {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   padding: 8px 13px;
   border-radius: 14px;
   font-size: var(--text-base);
   line-height: 1.7;
   word-break: break-word;
   overflow-wrap: anywhere;
-  unicode-bidi: plaintext;
   max-width: 100%;
 }
+
+.bubble-text { unicode-bidi: plaintext; }
 
 .msg-wrapper.other .bubble {
   background: var(--bubble-in);
@@ -389,19 +396,26 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 1px var(--sp-1) 0;
+  align-self: flex-start;
+  padding: 0 1px;
   color: var(--text-3);
 }
 
-.msg-wrapper.mine .msg-footer { justify-content: flex-end; }
+.msg-wrapper.mine .msg-footer {
+  align-self: flex-end;
+  justify-content: flex-end;
+  color: rgba(255, 255, 255, 0.78);
+}
 
 .msg-time {
   font-size: 10.5px;
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
 }
 
 .msg-receipt { display: inline-flex; font-size: 10.5px; }
 .msg-receipt.read { color: var(--success); }
+.msg-wrapper.mine .msg-receipt.read { color: rgba(255, 255, 255, 0.95); }
 
 .msg-lock {
   display: inline-flex;
@@ -410,6 +424,8 @@
   color: var(--success);
   opacity: 0.8;
 }
+
+.msg-wrapper.mine .msg-lock { color: rgba(255, 255, 255, 0.9); opacity: 1; }
 
 .msg-react-toggle {
   display: inline-flex;
@@ -433,23 +449,35 @@
   color: var(--accent-text);
 }
 
-/* ── Hover reaction bar ──────────────────────────────────────── */
-.reaction-bar {
-  position: absolute;
-  top: -40px;
-  z-index: 15;
-  display: flex;
-  gap: 2px;
-  padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  box-shadow: var(--shadow-2);
+.msg-wrapper.mine .msg-react-toggle { color: rgba(255, 255, 255, 0.8); }
+
+.msg-wrapper.mine .msg-react-toggle:hover,
+.msg-wrapper.mine .msg-react-toggle[aria-expanded='true'] {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
 }
 
-.reaction-bar.bar-mine { right: 0; }
-.msg-wrapper.mine .reaction-bar  { right: 0; }
-.msg-wrapper.other .reaction-bar { left: 38px; }
+/* ── Reaction picker ─────────────────────────────────────────── */
+/* Opened from the footer toggle and drawn inside the bubble, so the strip
+   never sits in a different place than the message it acts on. */
+.reaction-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-self: flex-start;
+  width: max-content;
+  max-width: 100%;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+}
+
+.msg-wrapper.mine .reaction-bar {
+  align-self: flex-end;
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.26);
+}
 
 .reaction-btn {
   display: flex;
@@ -464,11 +492,18 @@
   transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 
-.reaction-btn:hover { background: var(--surface-2); transform: scale(1.12); }
+.reaction-btn:hover { background: var(--surface); transform: scale(1.12); }
 
 .reaction-btn.active {
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.msg-wrapper.mine .reaction-btn:hover { background: rgba(255, 255, 255, 0.22); }
+
+.msg-wrapper.mine .reaction-btn.active {
+  background: rgba(255, 255, 255, 0.3);
+  box-shadow: inset 0 0 0 2px #FFE0DE;
 }
 
 /* ── Inline reactions ────────────────────────────────────────── */
@@ -476,8 +511,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 3px;
+  align-self: flex-start;
+  max-width: 100%;
 }
+
+.msg-wrapper.mine .msg-reactions { align-self: flex-end; justify-content: flex-end; }
 
 .msg-reaction {
   display: inline-flex;
@@ -506,8 +544,31 @@
   color: var(--accent-text);
 }
 
+/* On the outgoing bubble a light chip would disappear, so it keeps the bubble's
+   own palette and only the border marks the reaction as yours. */
+.msg-wrapper.mine .msg-reaction {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.32);
+  color: var(--on-bubble-out);
+}
+
+.msg-wrapper.mine .msg-reaction:hover {
+  background: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.msg-wrapper.mine .msg-reaction.mine {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: #FFE0DE;
+  color: var(--on-bubble-out);
+}
+
 /* ── Images & files ──────────────────────────────────────────── */
-.bubble-image { padding: 3px; overflow: hidden; }
+.bubble-image { padding: 3px 3px 5px; }
+
+.bubble-image > .msg-footer,
+.bubble-image > .msg-reactions,
+.bubble-image > .reaction-bar { padding-inline: 8px; }
 
 .msg-image-btn {
   display: block;
@@ -528,19 +589,17 @@
   border-radius: 11px;
 }
 
-.bubble-file {
+.bubble-file-link {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  min-width: 210px;
-  max-width: 320px;
+  min-width: 200px;
+  max-width: 300px;
   text-decoration: none;
   color: inherit;
 }
 
-.msg-wrapper.mine .bubble-file { color: var(--on-bubble-out); }
-
-.bubble-file:hover .bubble-file-name { text-decoration: underline; }
+.bubble-file-link:hover .bubble-file-name { text-decoration: underline; }
 
 .bubble-file-icon {
   display: flex;
@@ -985,9 +1044,6 @@
   .msg-image { max-width: min(240px, 62vw); }
 
   .msg-react-toggle { opacity: 0.85; }
-
-  .reaction-bar { top: -38px; }
-  .msg-wrapper.other .reaction-bar { left: 0; }
 
   .composer {
     padding: var(--sp-2) var(--sp-3) calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
