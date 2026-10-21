@@ -362,39 +362,74 @@ content.** Consequences that must be designed in, not worked around:
 
 ### Envelope
 
+The Signal-shaped envelope below is what this section proposed before §3.6 chose
+MLS. MLS changes it in one important way: a group message is a single
+application message encrypted to the group's current epoch key, so the server
+stores **one blob per message for the whole conversation**, not one per recipient
+device. Per-device fan-out is only needed for `Welcome` messages, which arrive as
+opaque bytes inside the same stream and are decrypted only by the device whose
+KeyPackage they name. What landed is therefore this:
+
 ```json
-{
-  "v": 1,
-  "alg": "signal.v1",
-  "type": "prekey | whisper | sender-key",
-  "conversationId": "…",
-  "senderUserId": "…",
-  "senderDeviceId": "…",
-  "recipientDeviceId": "…",
-  "ciphertext": "base64…",
-  "clientSentAt": "…"
-}
+{ "id": "…", "conversationId": "…", "seq": 12, "senderId": "…",
+  "content": "base64 MLS PublicMessage / Welcome / Commit", "createdAt": "…" }
 ```
 
-The server validates envelope size (existing 256 KB cap), sender identity,
-conversation membership, and recipient device ownership. It does not attempt to
-parse or decrypt `ciphertext`. Message content columns stay nullable for legacy
-plaintext rows only; E2EE messages store no `text`.
+The server validates envelope size, base64 shape, and conversation membership.
+It does not parse, decode, or attempt to authenticate `content`, and it cannot:
+MLS authentication is bound to the sender's leaf credential, which the server
+never holds.
+
+### Phase 2a landed (2026-10-21): ordered opaque delivery
+
+An encrypted direct conversation is a pair of clients plus a sequencer. The
+transport half is in `backend/src/messages/` and `backend/src/chat/chat.gateway.ts`:
+
+| Surface | Effect |
+|---------|--------|
+| `POST /api/messages/e2ee/direct` | opt a direct chat into E2EE; idempotent, and one-way |
+| `GET /api/messages/e2ee/direct/:userId` | read-only `{conversationId, e2ee}`; never creates or flips anything |
+| `GET /api/messages/:conversationId/envelopes?afterSeq=&take=` | catch-up stream, oldest first, bounded page |
+| `e2ee:append` (socket) | store one blob at the next `seq`, then broadcast it to the participants |
+| `e2ee:read` (socket) | move the caller's own high-water mark forward; `{ok, moved}` |
+| `e2ee:envelope` (socket event) | the stored envelope, delivered in `seq` order |
+
+Properties asserted by `backend/test/security.e2e.cjs` (32/32):
+
+- **Order is the contract.** MLS refuses a ratchet generation it has not seen,
+  so sequence assignment and broadcast happen inside one per-conversation
+  critical section: an in-process queue plus a transaction-scoped
+  `pg_advisory_xact_lock(hashtext(conversationId))`, with
+  `@@unique([conversationId, seq])` as the backstop. Twelve concurrent appends
+  from two senders produce 1..12 with no gap and arrive ascending.
+- **`seq` is per conversation.** A second encrypted chat starts at 1; appending
+  to one never touches another, so the stream is not a cross-conversation counter.
+- **Plaintext has no path in.** `message:send` into an `e2ee` conversation is
+  refused on both the conversation-id and the peer-id routes; a flagged group
+  refuses envelopes *and* plaintext, which is why only Phase 3 may set the flag.
+- **Ciphertext is never re-labelled as content.** Envelopes live in their own
+  table and are never returned by the plaintext history endpoints.
+- **Membership is checked before state.** An outsider appending to a guessed
+  conversation id gets "you are not a member", never a hint about whether that
+  chat is encrypted.
+- **Read state is one forward-only mark** (`ConversationParticipant.e2eeReadSeq`)
+  per participant, not a row per message: the server cannot tell which
+  ciphertexts a client has read, and unread is "peer envelopes above my mark".
+  A replayed or nonsense mark cannot rewind it.
 
 ### New/changed tables
 
-- `devices`: `id`, `userId`, `identityKey`, `signedPrekey`, `signedPrekeySig`,
-  `registrationId`, `createdAt`, `lastSeenAt`, `revokedAt`.
-- `one_time_prekeys`: `id`, `deviceId`, `publicKey`, `usedAt` (consumed
-  atomically, never reused).
-- `message_envelopes`: `id`, `messageId`, `recipientDeviceId`,
-  `senderDeviceId`, `type`, `ciphertext`, unique on
-  `(messageId, recipientDeviceId)`. Keeping envelopes per device (instead of one
-  ciphertext per message) is required for Double Ratchet fan-out; Sender Key
-  group messages can reuse one ciphertext row per recipient device for routing
-  simplicity.
-- `conversations.encryptionMode`: `PLAINTEXT | E2EE`, plus `e2eeStartedAt`.
-  Once a conversation is E2EE, the server rejects plaintext sends in it.
+Landed: `devices`, `key_packages` (§4), `e2ee_envelopes`, `Conversation.e2ee`,
+`ConversationParticipant.e2eeReadSeq`.
+
+Still proposed, deliberately not built:
+
+- ~~`one_time_prekeys`~~ / per-recipient `message_envelopes`: superseded by MLS,
+  where one ciphertext serves the group and `KeyPackage` pooling covers the
+  X3DH-equivalent role. The single `e2ee_envelopes` stream replaces them.
+- `conversations.encryptionMode` as an enum plus `e2eeStartedAt`: a boolean is
+  enough while one-way opt-in is the only mode change; revisit if a conversation
+  ever needs a recorded start time.
 
 ### Attachments
 
@@ -435,7 +470,13 @@ plaintext rows only; E2EE messages store no `text`.
 3. **Phase 2 — direct E2EE on web and mobile.** New direct conversations are
    opt-in E2EE. Plaintext history stays labeled "sent before encryption".
    Unsupported clients cannot send into an E2EE conversation; the UI explains
-   why.
+   why. *The server half landed on 2026-10-21 (§6, "Phase 2a landed"): the
+   opt-in flag, the ordered opaque envelope stream, the catch-up read, the
+   forward-only read mark, and the refusal of plaintext inside an encrypted
+   chat.* **No client encrypts anything yet**, so every conversation in
+   production is still plaintext and §11 is the accurate statement of behavior.
+   What remains is the client: MLS identity + KeyPackage pool in the browser and
+   in Expo, a two-member group built from a claimed bundle, and decrypt-into-local-cache.
 4. **Phase 3 — groups.** MLS already models a group, so this is commit/welcome
    routing through the ordered delivery service, rekey on membership change,
    removal semantics (a removed leaf cannot open the new epoch), and per-device
@@ -508,3 +549,8 @@ Until every phase above is implemented and verified:
 - The server can read all message content and attachments.
 - Nothing in the UI may claim otherwise, and no field may be named "encrypted"
   unless it holds protocol ciphertext.
+- The key infrastructure (`/api/e2ee/*`) and the encrypted transport
+  (`/api/messages/e2ee/direct`, `e2ee:append`) are live and tested, but no
+  shipped client calls them. An `e2ee` conversation flag can today only be set
+  by an API request, never from the web or mobile app, so no user-visible chat
+  is encrypted.

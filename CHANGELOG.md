@@ -4,6 +4,59 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.4] - 2026-10-21
+
+### Added
+- **E2EE Phase 2a on the backend: the server can now deliver ciphertext it
+  cannot read. Messages are still not encrypted, because no client holds keys
+  yet.** `Conversation.e2ee` is a one-way opt-in flag set by `POST
+  /api/messages/e2ee/direct` (either side can set it, nothing turns it off, so a
+  downgrade can only ever be a visible user action), and `GET
+  /api/messages/e2ee/direct/:userId` answers `{conversationId, e2ee}` without
+  creating or changing anything — a client asks this every time it opens a chat.
+- New table `e2ee_envelopes`: one opaque base64 MLS blob per message plus a
+  per-conversation `seq`, unique on `(conversationId, seq)`. `e2ee:append`
+  numbers a blob and broadcasts `e2ee:envelope` to the participants inside one
+  critical section — an in-process per-conversation queue, a transaction-scoped
+  `pg_advisory_xact_lock(hashtext(conversationId))`, and the unique index as
+  backstop — because MLS refuses a ratchet generation it has not seen yet.
+- `GET /api/messages/:conversationId/envelopes?afterSeq=&take=` is the
+  reconnect catch-up: oldest first, page bounded by `E2EE_ENVELOPE_PAGE`,
+  returned byte for byte and never as message content.
+- Read state for an encrypted chat is one forward-only `e2eeReadSeq`
+  high-water mark per participant (`e2ee:read`, always answering `{ok, moved}`),
+  because the server cannot tell which ciphertexts a client has read. The chat
+  list now carries `e2ee` and computes unread as "peer envelopes above my mark".
+- `message:send` into an encrypted conversation is refused on both the
+  conversation-id and peer-id routes, and a flagged group refuses envelopes *and*
+  plaintext, so the flag can only be set where transport exists.
+- Caps in `backend/src/config/env.ts`: `E2EE_MAX_ENVELOPE_CHARS`,
+  `E2EE_ENVELOPE_PAGE` (documented in `backend/.env.example`).
+- Six e2e cases in `backend/test/security.e2e.cjs` (**32/32 pass locally**):
+  the 12-concurrent-append test asserts gapless numbering and strictly
+  ascending delivery; others cover the one-way flag, inert probing, plaintext
+  refusal, catch-up paging with membership checks, forward-only marks,
+  per-conversation sequence isolation, base64/size caps, and that an outsider
+  appending to a guessed conversation id is told only that they are not a member.
+- Verified on the running dev server, not only in the suite: the new routes
+  appear in the live Nest router log, unauthenticated calls return 401, and a
+  throwaway two-account session exercised opt-in, append, broadcast, catch-up
+  and read marks with the stored row byte-identical to what the client sent.
+
+### Changed
+- `docs/engineering/E2EE_DESIGN.md` §6 now describes the MLS transport that
+  landed instead of the Signal-shaped per-device envelope the first draft
+  proposed; `one_time_prekeys` and per-recipient envelope tables are marked
+  superseded. §7 records Phase 2's server half as landed and §11 states plainly
+  that no shipped client calls any of this, so no user-visible chat is encrypted.
+- `docs/engineering/OVERNIGHT_PROGRESS.md` gains the Phase 2a batch and a new
+  owed item: the envelope stream has no retention rule, because a high-water
+  mark records what one participant saw, not what all of them did.
+
+### Not encrypted yet
+- No product code imports `shared/e2ee`; web and mobile still send plaintext.
+  Turning the flag on requires an API call, never a UI action.
+
 ## [1.1.3] - 2026-10-21
 
 ### Added

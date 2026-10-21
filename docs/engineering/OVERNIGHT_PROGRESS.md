@@ -532,12 +532,65 @@ from design doc §4 enforced by the schema itself.
   for direct conversations, ordered envelope delivery) is where ciphertext
   appears, and a real phone and a real browser tab are still owed.
 
+## E2EE Phase 2a on the backend: ordered opaque delivery (2026-10-21)
+
+Still **no product encryption: every message a user can see is plaintext.** This
+batch is the transport the client will need, built so the server physically
+cannot read content.
+
+- `Conversation.e2ee` is a one-way flag set by `POST /api/messages/e2ee/direct`
+  (idempotent; either side can set it; nothing turns it off, so a downgrade can
+  only ever be a visible user action). `GET /api/messages/e2ee/direct/:userId`
+  answers `{conversationId, e2ee}` and is inert — a client asks this on every
+  chat open, so probing must never create or flip a conversation.
+- New table `e2ee_envelopes`: one opaque base64 blob per MLS message plus a
+  per-conversation `seq`, unique on `(conversationId, seq)`. Applied locally
+  with `prisma db push`.
+- `e2ee:append` (socket) stores a blob at the next `seq` and broadcasts
+  `e2ee:envelope` to the participants **inside one critical section**: an
+  in-process per-conversation queue, a transaction-scoped
+  `pg_advisory_xact_lock(hashtext(conversationId))` around numbering and insert,
+  and the unique index as backstop. MLS is not order tolerant, so this is the
+  server's entire job — a sequencer, not a postman that reorders.
+- `GET /api/messages/:conversationId/envelopes?afterSeq=&take=` is the
+  reconnect catch-up, oldest first, page bounded by `E2EE_ENVELOPE_PAGE`.
+- `e2ee:read` moves a `ConversationParticipant.e2eeReadSeq` high-water mark,
+  forward only, and always answers `{ok, moved}`. Read state cannot be a row per
+  message here: the server cannot see which ciphertexts a client read. Unread in
+  the chat list is now "peer envelopes above my mark", and the list carries
+  `e2ee` so the UI can label the conversation.
+- Format checks (`E2EE_MAX_ENVELOPE_CHARS`, base64 shape) run before anything
+  that could describe the conversation; membership runs before conversation
+  state, so an outsider appending to a guessed id learns only that they are not
+  a member.
+- `message:send` into an `e2ee` conversation is refused on both the
+  conversation-id and peer-id routes, and a flagged group refuses envelopes *and*
+  plaintext — which is why only Phase 3 may ever set the flag on a group. A
+  plaintext `Message` row and an `E2eeEnvelope` never mix in one conversation.
+- Six new e2e cases, including the one that matters most for correctness: 12
+  concurrent appends from two different sockets produce seqs 1..12 with no gap
+  and no duplicate, and the peer receives them strictly ascending.
+- Verified against the running server, not only the suite: routes mapped in the
+  live Nest log, a two-account session opted a chat in, appends/catch-up/read
+  marks behaved as described, and the stored row was byte-identical to the blob
+  the client sent. Probe accounts were deleted afterwards.
+- Not yet done: clients. Until web and mobile hold keys and build MLS groups, no
+  conversation can become `e2ee` from the UI, and nothing is encrypted.
+
 ## Validation actually run
 
-- `backend`: `npm run test:e2e` — **26/26 passed** on 2026-10-21 against the
-  real local PostgreSQL, including the seven E2EE Phase 1 cases above. The
-  counts in the bullets below belong to the batches that produced them (11
-  tests then, 19 after contact matching); the suite has only grown.
+- `backend`: `npm run test:e2e` — **32/32 passed** on 2026-10-21 against the
+  real local PostgreSQL: the 26 earlier cases plus six E2EE Phase 2a transport
+  cases (opt-in and one-way flag, plaintext refused inside an encrypted chat,
+  gapless strict-order numbering under 12 concurrent appends, catch-up paging
+  with membership checks, forward-only read marks, per-conversation isolation
+  and the group guard). The counts in the bullets below belong to the batches
+  that produced them (11 tests then, 19 after contact matching, 26 after
+  Phase 1); the suite has only grown.
+- Live check on the running dev server (`npm run start:dev`): every new route
+  appears in the Nest router log, unauthenticated calls return 401, and a
+  throwaway two-account session exercised opt-in, append, broadcast, catch-up
+  and read marks end to end. Scratch accounts were removed afterwards.
 
 - Root: `npm run test:e2ee` — 5/5 passed (MLS lifecycle on two ciphersuites,
   cross-provider interop both directions, and the same lifecycle with
@@ -588,8 +641,14 @@ from design doc §4 enforced by the schema itself.
   and was then closed (§3.6) with a pure-JS MLS provider now living in
   `shared/e2ee/` behind `npm run test:e2ee`. Phase 1 landed the same day: the
   backend registers devices and stores public KeyPackages only (design doc §4).
-  No product code imports `shared/e2ee`, no client calls `/api/e2ee`, and no
-  message is encrypted.
+  Phase 2a landed the same day too: an opt-in `e2ee` conversation flag plus an
+  ordered, opaque envelope transport the server cannot read (design doc §6). No
+  product code imports `shared/e2ee`, no client calls `/api/e2ee` or
+  `e2ee:append`, and no message is encrypted.
+- The envelope stream is unbounded: `e2ee_envelopes` rows are never deleted, and
+  an encrypted chat has no server-visible read state to prune against (a
+  high-water mark tells us what *one* participant has seen, not what all of them
+  have). Retention and multi-device pruning are owed before real traffic.
 - Consumed `KeyPackage` rows are never pruned: every claim leaves one row with
   `consumedAt` set, deleted only when the device is revoked. Harmless at current
   traffic, but a retention rule is owed before volume grows.
@@ -652,17 +711,20 @@ from design doc §4 enforced by the schema itself.
    one API instance.
 4. Add authorization tests for group membership changes (add/remove participant)
    and message edit/delete once those endpoints exist.
-5. E2EE Phase 2: put keys on the clients. Web and mobile generate their identity
+5. E2EE Phase 2b: put keys on the clients. Web and mobile generate their identity
    and KeyPackage pool locally, register through `/api/e2ee/devices`, refill it
    when the pool runs low, and turn a new direct conversation into a two-member
-   MLS group fed by `GET /api/e2ee/users/:id/key-packages`. The server side is
-   done and tested (Phase 1); what is left is client key persistence, the opaque
-   envelope transport with strictly ordered per-conversation delivery, a local
-   plaintext cache for search, and no plaintext send path into an encrypted
-   conversation. The custody rule is fixed and already encoded in the schema: no
-   escrow, no recovery, nothing at any access level can read message content
-   (design doc §4). What remains unproven is the provider on a real phone and a
-   real browser tab.
+   MLS group fed by `GET /api/e2ee/users/:id/key-packages`. The whole server side
+   is now done and tested (Phase 1 keys, Phase 2a transport: opt-in flag,
+   gapless per-conversation ordering, catch-up paging, forward-only read marks,
+   no plaintext path into an encrypted chat). What is left is client key
+   persistence (IndexedDB on web, AsyncStorage + `expo-crypto` on Expo, Metro
+   configured so `shared/e2ee` resolves on mobile), MLS group setup from a
+   claimed bundle, decrypt into a local plaintext cache for search, and the
+   "encrypted" / "sent before encryption" labels. The custody rule is fixed and
+   already encoded in the schema: no escrow, no recovery, nothing at any access
+   level can read message content (design doc §4). What remains unproven is the
+   provider on a real phone and a real browser tab.
 6. Add a web security review pass (CSP, token storage trade-off) and cover the
    signed-URL download path with a cross-user authorization test.
 7. Run the mobile app on a native emulator or device (RTL header, safe areas,
