@@ -57,6 +57,8 @@
   --chat-bg:      #FAF8F4;
   --bubble-in:    #FFFFFF;
   --bubble-out:   #C5161D;
+  --bubble-out-grad: linear-gradient(180deg, #CB1B22 0%, #A91118 100%);
+  --bubble-out-tail: #A91118;
   --on-bubble-out:#FFFFFF;
 
   --text-1: #211E1A;
@@ -139,6 +141,8 @@ html[data-theme='dark'] {
   --chat-bg:      #141210;
   --bubble-in:    #24211D;
   --bubble-out:   #B3161C;
+  --bubble-out-grad: linear-gradient(180deg, #C0181E 0%, #931015 100%);
+  --bubble-out-tail: #931015;
   --on-bubble-out:#FFFFFF;
 
   --text-1: #F2EEE6;

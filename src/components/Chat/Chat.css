@@ -335,7 +335,7 @@
 .msg-bubbles {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
   max-width: 100%;
 }
@@ -343,11 +343,11 @@
 .msg-wrapper.mine .msg-bubbles { align-items: flex-start; }
 
 .msg-sender {
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--text-2);
+  color: var(--accent-text);
   padding: 0 var(--sp-1);
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 }
 
 .msg-wrapper.other .msg-sender { text-align: left; }
@@ -360,11 +360,11 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 8px 13px;
-  border-radius: 14px;
+  gap: 2px;
+  padding: 6px 10px 7px;
+  border-radius: var(--r-md);
   font-size: var(--text-base);
-  line-height: 1.7;
+  line-height: 1.55;
   word-break: break-word;
   overflow-wrap: anywhere;
   max-width: 100%;
@@ -376,18 +376,39 @@
   background: var(--bubble-in);
   color: var(--text-1);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-1);
 }
 
-.msg-wrapper.other.last .bubble:last-of-type { border-bottom-left-radius: var(--r-xs); }
-
 .msg-wrapper.mine .bubble {
-  background: var(--bubble-out);
+  background: var(--bubble-out-grad);
   color: var(--on-bubble-out);
   border: 1px solid transparent;
 }
 
-.msg-wrapper.mine.last .bubble:last-of-type { border-bottom-right-radius: var(--r-xs); }
+/* The last bubble in a group gets Telegram's tail: the outer bottom corner
+   flattens and a small curved sliver continues the bubble outward. */
+.msg-wrapper.other.last .bubble:last-of-type { border-bottom-left-radius: 2px; }
+.msg-wrapper.mine.last .bubble:last-of-type  { border-bottom-right-radius: 2px; }
+
+.msg-wrapper.last .bubble:last-of-type::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  width: 10px;
+  height: 13px;
+  pointer-events: none;
+}
+
+.msg-wrapper.mine.last .bubble:last-of-type::after {
+  right: -9px;
+  background: var(--bubble-out-tail);
+  clip-path: path('M 0 0 C 0 7 4 11.5 10 13 L 0 13 Z');
+}
+
+.msg-wrapper.other.last .bubble:last-of-type::after {
+  left: -9px;
+  background: var(--bubble-in);
+  clip-path: path('M 10 0 C 10 7 6 11.5 0 13 L 10 13 Z');
+}
 
 .msg-wrapper.mine .bubble a { color: inherit; }
 
@@ -399,30 +420,35 @@
   font-weight: 600;
 }
 
-/* ── Footer & receipts ───────────────────────────────────────── */
+/* ── Footer, reactions & receipts ─────────────────────────────── */
+/* Telegram pins the clock to the inline end of the bubble on both sides; the
+   reaction pills share that line and sit at the inline start. */
+.msg-bottom {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 100%;
+}
+
 .msg-footer {
   display: flex;
   align-items: center;
-  gap: 5px;
-  align-self: flex-end;
-  justify-content: flex-end;
+  gap: 4px;
+  margin-inline-start: auto;
   padding: 0 1px;
   color: var(--text-3);
+  flex-shrink: 0;
 }
 
-.msg-wrapper.mine .msg-footer {
-  align-self: flex-start;
-  justify-content: flex-start;
-  color: rgba(255, 255, 255, 0.78);
-}
+.msg-wrapper.mine .msg-footer { color: rgba(255, 255, 255, 0.78); }
 
 .msg-time {
-  font-size: 10.5px;
-  line-height: 1.4;
+  font-size: 11px;
+  line-height: 1.3;
   font-variant-numeric: tabular-nums;
 }
 
-.msg-receipt { display: inline-flex; font-size: 10.5px; }
+.msg-receipt { display: inline-flex; font-size: 11px; }
 .msg-receipt.read { color: var(--success); }
 .msg-wrapper.mine .msg-receipt.read { color: rgba(255, 255, 255, 0.95); }
 
@@ -440,14 +466,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border: 0;
-  border-radius: var(--r-xs);
+  border-radius: 50%;
   background: transparent;
   color: var(--text-3);
-  font-size: 12px;
-  opacity: 0.65;
+  font-size: 11px;
+  opacity: 0.6;
   transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
@@ -473,8 +499,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  align-self: flex-end;
-  justify-content: flex-end;
+  align-self: flex-start;
+  justify-content: flex-start;
   width: max-content;
   max-width: 100%;
   padding: 3px;
@@ -484,8 +510,6 @@
 }
 
 .msg-wrapper.mine .reaction-bar {
-  align-self: flex-start;
-  justify-content: flex-start;
   background: rgba(255, 255, 255, 0.14);
   border-color: rgba(255, 255, 255, 0.26);
 }
@@ -494,12 +518,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border: 0;
   border-radius: 50%;
   background: transparent;
-  font-size: 16px;
+  font-size: 15px;
   transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 
@@ -521,31 +545,29 @@
 .msg-reactions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  align-self: flex-end;
-  justify-content: flex-end;
+  gap: 3px;
+  min-width: 0;
   max-width: 100%;
 }
-
-.msg-wrapper.mine .msg-reactions { align-self: flex-start; justify-content: flex-start; }
 
 .msg-reaction {
   display: inline-flex;
   align-items: center;
-  min-height: 26px;
-  padding: 2px 9px;
-  border: 1px solid var(--border);
+  justify-content: center;
+  min-width: 24px;
+  min-height: 22px;
+  padding: 1px 6px;
+  border: 1px solid transparent;
   border-radius: var(--r-pill);
-  background: var(--surface);
+  background: var(--surface-2);
   color: var(--text-2);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1;
   transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 
 .msg-reaction:hover {
   background: var(--accent-soft);
-  border-color: var(--accent);
 }
 
 /* The chip you are holding stays pressed; tapping it again is how you take it
@@ -559,14 +581,12 @@
 /* On the outgoing bubble a light chip would disappear, so it keeps the bubble's
    own palette and only the border marks the reaction as yours. */
 .msg-wrapper.mine .msg-reaction {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.18);
   color: var(--on-bubble-out);
 }
 
 .msg-wrapper.mine .msg-reaction:hover {
-  background: rgba(255, 255, 255, 0.24);
-  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.26);
 }
 
 .msg-wrapper.mine .msg-reaction.mine {
@@ -578,9 +598,8 @@
 /* ── Images & files ──────────────────────────────────────────── */
 .bubble-image { padding: 3px 3px 5px; }
 
-.bubble-image > .msg-footer,
-.bubble-image > .msg-reactions,
-.bubble-image > .reaction-bar { padding-inline: 8px; }
+.bubble-image > .msg-bottom,
+.bubble-image > .reaction-bar { padding-inline: 7px; }
 
 .msg-image-btn {
   display: block;
@@ -1051,7 +1070,7 @@
 
   .msg-group { max-width: 86%; }
 
-  .bubble { font-size: 14px; padding: 8px 12px; }
+  .bubble { font-size: 14px; padding: 6px 10px 7px; }
 
   .msg-image { max-width: min(240px, 62vw); }
 

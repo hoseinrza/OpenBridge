@@ -186,39 +186,48 @@ export default function ChatScreen({ route }) {
               </View>
             )}
 
-            {reactions.length > 0 && (
-              <View style={styles.reactions}>
-                {reactions.map(({ emoji, mine }) => (
-                  <Pressable
-                    key={emoji}
-                    style={[
-                      styles.reactionChip,
-                      isMine && styles.reactionChipOut,
-                      mine && styles.reactionChipHeld,
-                      mine && isMine && styles.reactionChipOutHeld,
-                    ]}
-                    onPress={() => onReact(msg.id, emoji)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: mine }}
-                    accessibilityLabel={mine ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
-                  >
-                    <Text style={styles.reactionText}>{emoji}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
-
-            <View style={[styles.metaRow, isMine ? styles.metaRowMine : styles.metaRowOther]}>
-              <Text style={[styles.time, isMine && styles.timeMine]}>{msg.time}</Text>
-              {isMine && (
-                <FontAwesome6
-                  name="check-double"
-                  size={10}
-                  color={msg.read ? '#FFE0DE' : 'rgba(255,255,255,0.68)'}
-                  accessibilityLabel={msg.read ? 'خوانده شد' : 'ارسال شد'}
-                />
+            <View style={styles.bottomRow}>
+              {reactions.length > 0 && (
+                <View style={styles.reactions}>
+                  {reactions.map(({ emoji, mine }) => (
+                    <Pressable
+                      key={emoji}
+                      style={[
+                        styles.reactionChip,
+                        isMine && styles.reactionChipOut,
+                        mine && styles.reactionChipHeld,
+                        mine && isMine && styles.reactionChipOutHeld,
+                      ]}
+                      onPress={() => onReact(msg.id, emoji)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: mine }}
+                      accessibilityLabel={mine ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                    >
+                      <Text style={styles.reactionText}>{emoji}</Text>
+                    </Pressable>
+                  ))}
+                </View>
               )}
+
+              <View style={styles.metaRow}>
+                <Text style={[styles.time, isMine && styles.timeMine]}>{msg.time}</Text>
+                {isMine && (
+                  <FontAwesome6
+                    name="check-double"
+                    size={10}
+                    color={msg.read ? '#FFE0DE' : 'rgba(255,255,255,0.68)'}
+                    accessibilityLabel={msg.read ? 'خوانده شد' : 'ارسال شد'}
+                  />
+                )}
+              </View>
             </View>
+
+            {last && (
+              <View
+                pointerEvents="none"
+                style={[styles.bubbleTail, isMine ? styles.bubbleTailMine : styles.bubbleTailOther]}
+              />
+            )}
           </Pressable>
         </View>
 
@@ -404,24 +413,38 @@ function makeStyles(colors) {
     bubbleCol: { maxWidth: '78%' },
     bubbleColMine: { alignItems: RTL ? 'flex-start' : 'flex-end' },
     bubbleColOther: { alignItems: RTL ? 'flex-end' : 'flex-start' },
-    sender: { color: colors.accentText, fontFamily: fonts.medium, fontSize: type.xs, marginBottom: 3, marginHorizontal: 4 },
+    sender: { color: colors.accentText, fontFamily: fonts.medium, fontSize: type.sm, marginBottom: 3, marginHorizontal: 4 },
 
     bubble: {
-      borderRadius: radius.lg,
-      paddingHorizontal: spacing.md + 2,
-      paddingVertical: spacing.sm + 2,
-      gap: 4,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.sm + 3,
+      paddingVertical: 7,
+      gap: 3,
       minWidth: 74,
     },
     bubbleOther: {
       backgroundColor: colors.bubbleIn,
       borderWidth: 1,
       borderColor: colors.border,
-      borderBottomLeftRadius: radius.xs,
     },
-    bubbleMine: { backgroundColor: colors.bubbleOut, borderBottomRightRadius: radius.xs },
-    bubbleOtherLast: { borderBottomLeftRadius: radius.xs },
-    bubbleMineLast: { borderBottomRightRadius: radius.xs },
+    bubbleMine: {
+      backgroundColor: colors.bubbleOut,
+      experimental_backgroundImage: colors.bubbleOutGrad,
+    },
+    bubbleOtherLast: { borderBottomLeftRadius: 2 },
+    bubbleMineLast: { borderBottomRightRadius: 2 },
+    // Telegram's tail is a curved sliver outside the flattened bottom corner.
+    bubbleTail: { position: 'absolute', bottom: 0, width: 10, height: 13 },
+    bubbleTailMine: {
+      right: -9,
+      backgroundColor: colors.bubbleOutTail,
+      borderBottomLeftRadius: 10,
+    },
+    bubbleTailOther: {
+      left: -9,
+      backgroundColor: colors.bubbleIn,
+      borderBottomRightRadius: 10,
+    },
 
     bubbleText: { color: colors.text1, fontFamily: fonts.regular, fontSize: type.base, lineHeight: 22 },
     bubbleTextMine: { color: colors.onBubbleOut },
@@ -435,21 +458,31 @@ function makeStyles(colors) {
     fileRowMine: {},
     fileName: { flex: 1, color: colors.accentText, fontFamily: fonts.medium, fontSize: type.sm },
 
-    reactions: { flexDirection: 'row-reverse', gap: 4, marginTop: 2 },
+    bottomRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: 6,
+      marginTop: 1,
+      maxWidth: '100%',
+    },
+    reactions: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, flexShrink: 1, minWidth: 0 },
     reactionChip: {
-      paddingHorizontal: 6, paddingVertical: 2,
+      minWidth: 24, minHeight: 22,
+      paddingHorizontal: 6, paddingVertical: 1,
       borderRadius: radius.pill,
       borderWidth: 1,
-      borderColor: colors.border,
+      borderColor: 'transparent',
       backgroundColor: colors.surface2,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     // Held by this device: pressed, so it reads as yours and taps lift it again.
     reactionChipHeld: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
     // On the outgoing red bubble a light chip would disappear, so it keeps the
     // bubble's own palette and only the border marks the reaction as yours.
-    reactionChipOut: { borderColor: 'rgba(255,255,255,0.32)', backgroundColor: 'rgba(255,255,255,0.16)' },
+    reactionChipOut: { backgroundColor: 'rgba(255,255,255,0.18)' },
     reactionChipOutHeld: { borderColor: '#FFE0DE', backgroundColor: 'rgba(255,255,255,0.30)' },
-    reactionText: { color: colors.text1, fontFamily: fonts.regular, fontSize: type.sm },
+    reactionText: { color: colors.text1, fontFamily: fonts.regular, fontSize: 14, lineHeight: 18 },
 
     /* Inside the bubble, so the strip belongs to the message it acts on. On the
        outgoing bubble it keeps the bubble's palette like the chips do. */
@@ -477,10 +510,8 @@ function makeStyles(colors) {
       justifyContent: 'center',
     },
 
-    metaRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, marginTop: 1 },
-    metaRowMine: { justifyContent: RTL ? 'flex-end' : 'flex-start' },
-    metaRowOther: { justifyContent: RTL ? 'flex-start' : 'flex-end' },
-    time: { color: colors.text3, fontFamily: fonts.regular, fontSize: 10 },
+    metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginStart: 'auto', flexShrink: 0 },
+    time: { color: colors.text3, fontFamily: fonts.regular, fontSize: 10.5 },
     timeMine: { color: 'rgba(255,255,255,0.78)' },
 
     typingRow: {

@@ -4,6 +4,60 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.9] - 2026-10-21
+
+### Changed
+- **Message bubbles now follow Telegram's geometry on both clients.** The radius
+  is 12px instead of 14px, padding and line-height are tighter, the incoming
+  bubble loses its drop shadow (a hairline border stays so it reads against the
+  warm background), and the last bubble in a group gets a small curved tail on
+  its outer bottom corner. Grouped bubbles are separated by 2px instead of 3px.
+- **Outgoing bubbles use the brand-red gradient.** Light theme runs from
+  `#CB1B22` to `#A91118`; dark theme from `#C0181E` to `#931015`; text stays
+  white. Incoming bubbles stay flat. The tail is painted in the gradient's end
+  colour so it joins the bottom edge without a seam. Mobile uses React Native's
+  built-in `experimental_backgroundImage` gradient with the solid `bubbleOut`
+  colour as the fallback for an older native build, and a positioned `View` for
+  the curved tail.
+- **Reactions sit on the bubble's bottom line.** Chips are compact pills at the
+  inline start and the clock/receipt block is pushed to the inline end, exactly
+  where Telegram places them. There are still no numeric counts. A chip you hold
+  keeps its accent outline; on the red bubble the equivalent is a light outline.
+  The in-bubble picker from 1.1.7 is unchanged and still opens from the smile
+  button in the bubble.
+- Sender names on group messages are now accent-coloured and 12.5px, matching
+  the bubble's red language instead of the old grey.
+
+### Tests
+- ESLint clean on the changed component; `npm run build` clean;
+  `npx expo export --platform android` exit 0. Root `npm run lint` was not used
+  as a gate because unrelated in-progress attachment work currently reports an
+  unused import.
+- Live local stack in headless Chrome at 1264px, light and dark: signed in as a
+  temporary account, opened a conversation containing messages from both test
+  accounts, and measured the rendered rows. Outgoing bubbles showed the gradient
+  (`linear-gradient(rgb(192,24,30), rgb(147,16,21))` in dark), incoming bubbles
+  were flat white/dark, the clock sat at the inline end, reaction chips sat at the
+  inline start, and the tail pseudo-element existed only on the last bubble of
+  each group (radius `12px 12px 2px` on outgoing, `12px 12px 12px 2px` on
+  incoming). A temporary green incoming colour confirmed the white tail shape
+  renders on the left edge.
+- Clicking the smile button opened a five-emoji picker; picking ❤️ changed the
+  stored reaction through the socket and redrew the chip; the same chip was then
+  removed by tapping it again. Both test accounts, their session, messages and
+  reactions were deleted after the run.
+- A 500px-wide dark render (device-metrics emulation with the chat pane opened)
+  confirmed the bubbles still clear both edges and the bottom row does not
+  overflow at the narrow layout.
+
+### Known limits of this release
+- Mobile was bundled, not rendered on a phone or emulator. The gradient depends
+  on the new-architecture background-image style; a legacy native build keeps
+  the solid brand red. The tail's exact curve is a React Native border-radius
+  approximation, not the web's SVG-like clip path.
+- The narrow web render was emulated at 500px in the same browser; it was not a
+  separate mobile browser/device pass.
+
 ## [1.1.8] - 2026-10-21
 
 ### Changed

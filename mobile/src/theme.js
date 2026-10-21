@@ -22,6 +22,8 @@ export const lightColors = {
   chat:      '#FAF8F4',
   bubbleIn:  '#FFFFFF',
   bubbleOut: '#C5161D',
+  bubbleOutGrad: 'linear-gradient(180deg, #CB1B22 0%, #A91118 100%)',
+  bubbleOutTail: '#A91118',
   onBubbleOut: '#FFFFFF',
 
   text1: '#211E1A',
@@ -57,6 +59,8 @@ export const darkColors = {
   chat:      '#141210',
   bubbleIn:  '#24211D',
   bubbleOut: '#B3161C',
+  bubbleOutGrad: 'linear-gradient(180deg, #C0181E 0%, #931015 100%)',
+  bubbleOutTail: '#931015',
   onBubbleOut: '#FFFFFF',
 
   text1: '#F2EEE6',

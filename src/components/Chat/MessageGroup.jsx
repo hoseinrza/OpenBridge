@@ -133,57 +133,59 @@ export default function MessageGroup({
               </div>
             )}
 
-            {reactions.length > 0 && (
-              <div className="msg-reactions" role="group" aria-label="واکنش‌ها">
-                {reactions.map(({ emoji, mine: held }) => (
+            <div className="msg-bottom">
+              {reactions.length > 0 && (
+                <div className="msg-reactions" role="group" aria-label="واکنش‌ها">
+                  {reactions.map(({ emoji, mine: held }) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      className={`msg-reaction ${held ? 'mine' : ''}`}
+                      onClick={() => pickReaction(emoji)}
+                      aria-pressed={held}
+                      aria-label={held ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                      title={held ? 'برای برداشتن واکنش دوباره بزن' : 'واکنش نشان بده'}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="msg-footer">
+                <time className="msg-time" dateTime={new Date(message.createdAt).toISOString()}>
+                  {message.time}
+                </time>
+
+                {message.encrypted && (
+                  <span className="msg-lock" title="این پیام فقط روی دستگاه شما و طرف مقابل رمزگشایی می‌شود">
+                    <i className="fas fa-lock" aria-hidden="true" />
+                    <span className="sr-only">رمزنگاری سرتاسری</span>
+                  </span>
+                )}
+
+                {reactable && (
                   <button
-                    key={emoji}
                     type="button"
-                    className={`msg-reaction ${held ? 'mine' : ''}`}
-                    onClick={() => pickReaction(emoji)}
-                    aria-pressed={held}
-                    aria-label={held ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
-                    title={held ? 'برای برداشتن واکنش دوباره بزن' : 'واکنش نشان بده'}
+                    className="msg-react-toggle"
+                    aria-label="افزودن واکنش"
+                    aria-expanded={barOpen}
+                    onClick={() => setBarOpen(open => !open)}
                   >
-                    {emoji}
+                    <i className="far fa-face-smile" aria-hidden="true" />
                   </button>
-                ))}
+                )}
+
+                {isMine && (
+                  <span
+                    className={`msg-receipt ${message.read ? 'read' : ''}`}
+                    title={message.read ? 'خوانده شد' : 'ارسال شد'}
+                  >
+                    <i className={`fas ${message.read ? 'fa-check-double' : 'fa-check'}`} aria-hidden="true" />
+                    <span className="sr-only">{message.read ? 'خوانده شد' : 'ارسال شد'}</span>
+                  </span>
+                )}
               </div>
-            )}
-
-            <div className="msg-footer">
-              <time className="msg-time" dateTime={new Date(message.createdAt).toISOString()}>
-                {message.time}
-              </time>
-
-              {message.encrypted && (
-                <span className="msg-lock" title="این پیام فقط روی دستگاه شما و طرف مقابل رمزگشایی می‌شود">
-                  <i className="fas fa-lock" aria-hidden="true" />
-                  <span className="sr-only">رمزنگاری سرتاسری</span>
-                </span>
-              )}
-
-              {reactable && (
-                <button
-                  type="button"
-                  className="msg-react-toggle"
-                  aria-label="افزودن واکنش"
-                  aria-expanded={barOpen}
-                  onClick={() => setBarOpen(open => !open)}
-                >
-                  <i className="far fa-face-smile" aria-hidden="true" />
-                </button>
-              )}
-
-              {isMine && (
-                <span
-                  className={`msg-receipt ${message.read ? 'read' : ''}`}
-                  title={message.read ? 'خوانده شد' : 'ارسال شد'}
-                >
-                  <i className={`fas ${message.read ? 'fa-check-double' : 'fa-check'}`} aria-hidden="true" />
-                  <span className="sr-only">{message.read ? 'خوانده شد' : 'ارسال شد'}</span>
-                </span>
-              )}
             </div>
           </div>
         </div>
