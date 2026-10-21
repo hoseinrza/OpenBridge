@@ -253,6 +253,10 @@ export function useChat(targetUser, currentUser, onIncoming) {
     socket.on('message:read', ({ by, conversationId }) => {
       const target = targetRef.current;
       if (!target) return;
+      // A receipt names the account that read. This tab's own mark reaches it
+      // too (group reads are broadcast to every participant), and it must not
+      // turn the sender's own ticks green.
+      if (by === currentUserRef.current?.id) return;
       if (isGroup(target) ? conversationId !== target.id : by !== target.id) return;
       setMessages(prev => prev.map(m => (m.side === 'mine' ? { ...m, read: true } : m)));
     });

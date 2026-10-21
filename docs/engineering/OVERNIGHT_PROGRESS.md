@@ -896,9 +896,20 @@ membership that is part of the cryptographic state. So a group is now encrypted
   run test:ci` passed **5 suites / 36 tests**, including the new
   `use-chat-lock.test.js` hook test; `npx expo export --platform android`
   bundled the app (2.5 MB). Root `npm run test:e2ee` 5/5, `npm run lint` clean,
-  `npm run build` clean (690 ms). **No live browser or device run was made for
-  this batch**: the group encryption switch, the group notices and mobile's
-  locked screens are verified by tests and markup, and no screenshot exists.
+  `npm run build` clean (690 ms). **Live web run on the local stack** with two
+  throwaway accounts on one origin: B signed in once (device registered, eight
+  KeyPackages uploaded) and signed out; A created «گروه آزمون» through the
+  new-group dialog with the encryption switch on and B selected, then sent two
+  messages; B signed in again and opened the group — offline during creation —
+  and decrypted both from the Welcome, with the sender name and group notice
+  correct. The database held `e2ee: true`, three envelopes (Welcome + two
+  messages), zero plaintext rows, no message text inside any envelope, and both
+  read marks at seq 3. The chat list showed the lock on both devices, with A's
+  preview from its own text and B's from «رمزنگاری‌شده» (not opened) to the
+  decrypted message. The same run found a read-receipt defect — a group's own
+  read mark turned the sender's ticks green — which is fixed in 1.1.13. Mobile's
+  locked screens were **not** run on a device or emulator and no screenshot
+  exists for them.
 - 1.1.11 batch, 2026-10-21: `backend` `npx tsc --noEmit` clean; `node
   test/e2ee-client.e2e.cjs` **8/8** (the two new attachment cases included);
   `npm run test:e2e` **32/32** in `security.e2e.cjs`; root `npm run test:e2ee`

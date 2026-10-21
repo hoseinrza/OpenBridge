@@ -4,6 +4,35 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.13] - 2026-10-22
+
+### Fixed
+- **A group's own read mark appeared to its author as a peer receipt.** Group
+  read marks are broadcast to every participant, so the sender's own
+  `message:read` event arrived with `by` equal to their account, and the web
+  client marked every outgoing message «خوانده شد» the moment it was sent. The
+  handler now ignores its own mark, so an outgoing group message stays «ارسال
+  شد» until somebody else reads it. Found by the live run below — the first
+  message rendered «خوانده شد» on the pre-fix build and the second stayed
+  «ارسال شد» after it.
+
+### Tests
+- Live web run on the local stack with two throwaway accounts on one origin:
+  B signed in once, which registered its device and uploaded eight KeyPackages;
+  B then signed out. A signed in, created «گروه آزمون» through the new-group
+  dialog with the encryption switch on and B selected, and sent two messages.
+  B signed in again and opened the group — it had been offline during creation —
+  and decrypted both messages from the Welcome, with the sender name and the
+  group notice correct. The database showed `e2ee: true`, three envelopes
+  (Welcome + two messages), zero plaintext rows, no message text inside any
+  envelope, and both read marks at seq 3. The chat list showed a lock on both
+  devices; A's preview was its own text, B's was «رمزنگاری‌شده» before opening
+  and the decrypted message after. The self-read receipt bug above was observed
+  and then fixed in the same run.
+- Root `npm run lint` clean and `npm run build` clean. No backend change in this
+  release; the parent commit's backend suite was 41/41 and the mobile suite
+  36/36.
+
 ## [1.1.12] - 2026-10-21
 
 E2EE Phase 3 on the web: a group created with the new encryption option is
@@ -85,10 +114,10 @@ chat as locked instead of failing a plaintext send.
   and cannot read it; there is no history sharing yet.
 - **No safety numbers / out-of-band verification** (trust-on-first-use only)
   and **no recovery**; losing every device loses the history.
-- Reactions remain unavailable in encrypted chats, search covers only the
-  local decrypted cache, and the new UI (the group switch, the group notices,
-  mobile's locked screens) is covered by tests and markup, not by a device run
-  or a screenshot.
+- Reactions remain unavailable in encrypted chats and search covers only the
+  local decrypted cache. The web side of this release was later exercised live
+  (see 1.1.13); mobile's locked screens are still covered by tests and markup
+  only, with no device run or screenshot.
 
 ## [1.1.11] - 2026-10-21
 
