@@ -4,6 +4,51 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.10] - 2026-10-21
+
+### Changed
+- **The bubble interior now has one clear hierarchy.** Group sender names live
+  inside the incoming bubble instead of floating above it; the footer holds
+  only the clock, a smaller E2EE lock and the outgoing receipt; reaction chips
+  moved to their own row along the bubble's lower edge. Image bubbles keep the
+  7px inset on both rows. The sender name is drawn once per sender run, so a
+  grouped second message does not repeat it.
+- **The reaction control no longer clutters every bubble.** The smile button is
+  a 24px circle pinned to the bubble's outer top corner: hidden at rest on
+  hover-capable pointers and revealed on hover, focus or while open, while
+  touch layouts keep it at 0.72 opacity. The picker floats above the bubble,
+  flips below when the bubble is near the top of the scroller, clamps
+  horizontally to the viewport, and closes on outside click, Escape (returning
+  focus to the button), scroll or resize. It no longer changes bubble height or
+  position.
+- **Mobile mirrors the same layout.** Sender inside the bubble, a metadata row
+  for time and ticks, chips on their own lower-edge row, the floating
+  long-press picker anchored to the bubble's side, dismissal on scroll, and
+  reduced bottom padding when chips are present.
+
+### Tests
+- `npm run build` clean on the final tree; ESLint clean on the changed web
+  component; `npx expo export --platform android` exit 0.
+- Live headless Chrome at 1264x900, dark theme: resting toggle opacity 0;
+  footer at the inline end and chips at the inline start on a lower row; picker
+  166px wide with five emoji; first emoji focused on open; bubble height and
+  top identical before and after opening; adding a reaction through the picker
+  round-tripped through the socket; Escape and outside click both closed it.
+  The light theme was confirmed applied through the DOM, a 500px-wide emulation
+  kept the picker inside the viewport, and the run logged no console errors.
+- Controlled 420px-tall viewport: scrolled a bubble to 10px below the scroller
+  top, opened the picker, and confirmed the `below` class, the picker 7px under
+  the bubble, fully inside the viewport, with no bubble reflow.
+- Three temporary fixture users, their conversations, sessions, messages,
+  reactions and reads were deleted after the run; scratch scripts and bundles
+  were removed.
+
+### Known limits
+- Mobile was bundled with `expo export`, not rendered on a device or emulator;
+  picker anchoring and chip spacing there were reviewed in code only.
+- The below-picker branch was exercised once in a scrolled short viewport, not
+  on a touch device.
+
 ## [1.1.9] - 2026-10-21
 
 ### Changed

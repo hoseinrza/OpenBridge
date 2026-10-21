@@ -342,15 +342,15 @@
 
 .msg-wrapper.mine .msg-bubbles { align-items: flex-start; }
 
+/* In groups the sender's name sits inside the bubble, above the body, while
+   the avatar stays on the outer edge of the row. */
 .msg-sender {
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--accent-text);
-  padding: 0 var(--sp-1);
-  margin-bottom: 3px;
+  margin-bottom: 1px;
+  text-align: start;
 }
-
-.msg-wrapper.other .msg-sender { text-align: left; }
 
 /* ── Bubble ──────────────────────────────────────────────────── */
 /* The bubble is the whole message surface: media, reaction picker, reaction
@@ -421,20 +421,15 @@
 }
 
 /* ── Footer, reactions & receipts ─────────────────────────────── */
-/* Telegram pins the clock to the inline end of the bubble on both sides; the
-   reaction pills share that line and sit at the inline start. */
-.msg-bottom {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  max-width: 100%;
-}
-
+/* The clock line is metadata only: time, the encryption mark and the delivery
+   ticks stay at the inline end. Reactions get their own row hugging the lower
+   edge, and the reaction button floats at the top corner, out of this line. */
 .msg-footer {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 4px;
-  margin-inline-start: auto;
+  align-self: flex-end;
   padding: 0 1px;
   color: var(--text-3);
   flex-shrink: 0;
@@ -455,63 +450,78 @@
 .msg-lock {
   display: inline-flex;
   align-items: center;
-  font-size: 9.5px;
+  font-size: 8.5px;
   color: var(--success);
-  opacity: 0.8;
+  opacity: 0.65;
 }
 
-.msg-wrapper.mine .msg-lock { color: rgba(255, 255, 255, 0.9); opacity: 1; }
+.msg-wrapper.mine .msg-lock { color: rgba(255, 255, 255, 0.9); opacity: 0.8; }
 
+/* ── Quick reaction button ───────────────────────────────────── */
+/* Telegram reveals the smiley at the message corner on hover; on touch screens
+   there is no hover, so it stays faintly visible and tappable. */
 .msg-react-toggle {
+  position: absolute;
+  top: -9px;
+  inset-inline-end: -9px;
+  z-index: 7;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
-  border: 0;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
   border-radius: 50%;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 11px;
-  opacity: 0.6;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  box-shadow: var(--shadow-1);
+  opacity: 0;
+  pointer-events: none;
   transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.bubble:hover > .msg-react-toggle,
+.bubble:focus-within > .msg-react-toggle,
+.msg-react-toggle:focus-visible,
+.msg-react-toggle[aria-expanded='true'] {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .msg-react-toggle:hover,
 .msg-react-toggle[aria-expanded='true'] {
-  opacity: 1;
   background: var(--surface-2);
   color: var(--accent-text);
 }
 
-.msg-wrapper.mine .msg-react-toggle { color: rgba(255, 255, 255, 0.8); }
-
-.msg-wrapper.mine .msg-react-toggle:hover,
-.msg-wrapper.mine .msg-react-toggle[aria-expanded='true'] {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
+@media (hover: none) {
+  .msg-react-toggle { opacity: 0.72; pointer-events: auto; }
 }
 
 /* ── Reaction picker ─────────────────────────────────────────── */
-/* Opened from the footer toggle and drawn inside the bubble, so the strip
-   never sits in a different place than the message it acts on. */
+/* Floats over the conversation so opening it never changes the bubble height.
+   It opens above the bubble, or below when there is no room above. */
 .reaction-bar {
+  position: absolute;
+  inset-inline-end: 0;
+  bottom: calc(100% + 8px);
+  z-index: 8;
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  align-self: flex-start;
-  justify-content: flex-start;
   width: max-content;
-  max-width: 100%;
+  max-width: min(calc(100vw - 32px), 240px);
   padding: 3px;
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-pill);
+  box-shadow: var(--shadow-2);
 }
 
-.msg-wrapper.mine .reaction-bar {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.26);
+.reaction-bar.below {
+  bottom: auto;
+  top: calc(100% + 8px);
 }
 
 .reaction-btn {
@@ -527,36 +537,35 @@
   transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 
-.reaction-btn:hover { background: var(--surface); transform: scale(1.12); }
+.reaction-btn:hover { background: var(--surface-2); transform: scale(1.12); }
 
 .reaction-btn.active {
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
-.msg-wrapper.mine .reaction-btn:hover { background: rgba(255, 255, 255, 0.22); }
-
-.msg-wrapper.mine .reaction-btn.active {
-  background: rgba(255, 255, 255, 0.3);
-  box-shadow: inset 0 0 0 2px #FFE0DE;
-}
-
 /* ── Inline reactions ────────────────────────────────────────── */
+/* Chips are their own row at the bubble's lower inline edge; they never share
+   space with the clock or push it around. */
 .msg-reactions {
   display: flex;
   flex-wrap: wrap;
+  align-self: flex-start;
   gap: 3px;
-  min-width: 0;
   max-width: 100%;
+  margin-top: 2px;
+  margin-bottom: -1px;
 }
+
+.bubble.has-reactions { padding-bottom: 4px; }
 
 .msg-reaction {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 24px;
-  min-height: 22px;
-  padding: 1px 6px;
+  min-height: 23px;
+  padding: 2px 7px;
   border: 1px solid transparent;
   border-radius: var(--r-pill);
   background: var(--surface-2);
@@ -598,8 +607,10 @@
 /* ── Images & files ──────────────────────────────────────────── */
 .bubble-image { padding: 3px 3px 5px; }
 
-.bubble-image > .msg-bottom,
-.bubble-image > .reaction-bar { padding-inline: 7px; }
+.bubble-image > .msg-footer,
+.bubble-image > .msg-reactions { padding-inline: 7px; }
+
+.bubble-image.has-reactions { padding-bottom: 3px; }
 
 .msg-image-btn {
   display: block;
@@ -1074,7 +1085,7 @@
 
   .msg-image { max-width: min(240px, 62vw); }
 
-  .msg-react-toggle { opacity: 0.85; }
+  .msg-react-toggle { opacity: 0.72; pointer-events: auto; }
 
   .composer {
     padding: var(--sp-2) var(--sp-3) calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));

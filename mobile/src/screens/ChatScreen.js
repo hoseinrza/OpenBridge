@@ -111,18 +111,20 @@ export default function ChatScreen({ route }) {
     return (
       <View style={[styles.msgRow, isMine ? styles.msgRowMine : styles.msgRowOther]}>
         <View style={[styles.bubbleCol, isMine ? styles.bubbleColMine : styles.bubbleColOther]}>
-          {isGroup && !isMine && first && (
-            <Text style={styles.sender} numberOfLines={1}>{msg.sender || 'کاربر'}</Text>
-          )}
-
           <Pressable
             style={[
               styles.bubble,
               isMine ? styles.bubbleMine : styles.bubbleOther,
               last && (isMine ? styles.bubbleMineLast : styles.bubbleOtherLast),
+              reactions.length > 0 && styles.bubbleHasReactions,
             ]}
             onLongPress={() => setReactionPicker(pickerOpen ? null : msg.id)}
+            onPress={() => { if (pickerOpen) setReactionPicker(null); }}
           >
+            {isGroup && !isMine && first && (
+              <Text style={styles.sender} numberOfLines={1}>{msg.sender || 'کاربر'}</Text>
+            )}
+
             {msg.type === 'image' && msg.src ? (
               <Pressable
                 onPress={() => openFile(msg)}
@@ -157,7 +159,10 @@ export default function ChatScreen({ route }) {
             )}
 
             {pickerOpen && (
-              <View style={styles.tapbackRow} accessibilityRole="menu">
+              <View
+                style={[styles.tapbackRow, isMine ? styles.tapbackRowMine : styles.tapbackRowOther]}
+                accessibilityRole="menu"
+              >
                 {REACTIONS.map(emoji => (
                   <Pressable
                     key={emoji}
@@ -186,41 +191,39 @@ export default function ChatScreen({ route }) {
               </View>
             )}
 
-            <View style={styles.bottomRow}>
-              {reactions.length > 0 && (
-                <View style={styles.reactions}>
-                  {reactions.map(({ emoji, mine }) => (
-                    <Pressable
-                      key={emoji}
-                      style={[
-                        styles.reactionChip,
-                        isMine && styles.reactionChipOut,
-                        mine && styles.reactionChipHeld,
-                        mine && isMine && styles.reactionChipOutHeld,
-                      ]}
-                      onPress={() => onReact(msg.id, emoji)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: mine }}
-                      accessibilityLabel={mine ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
-                    >
-                      <Text style={styles.reactionText}>{emoji}</Text>
-                    </Pressable>
-                  ))}
-                </View>
+            <View style={styles.metaRow}>
+              <Text style={[styles.time, isMine && styles.timeMine]}>{msg.time}</Text>
+              {isMine && (
+                <FontAwesome6
+                  name="check-double"
+                  size={10}
+                  color={msg.read ? '#FFE0DE' : 'rgba(255,255,255,0.68)'}
+                  accessibilityLabel={msg.read ? 'خوانده شد' : 'ارسال شد'}
+                />
               )}
-
-              <View style={styles.metaRow}>
-                <Text style={[styles.time, isMine && styles.timeMine]}>{msg.time}</Text>
-                {isMine && (
-                  <FontAwesome6
-                    name="check-double"
-                    size={10}
-                    color={msg.read ? '#FFE0DE' : 'rgba(255,255,255,0.68)'}
-                    accessibilityLabel={msg.read ? 'خوانده شد' : 'ارسال شد'}
-                  />
-                )}
-              </View>
             </View>
+
+            {reactions.length > 0 && (
+              <View style={styles.reactions}>
+                {reactions.map(({ emoji, mine }) => (
+                  <Pressable
+                    key={emoji}
+                    style={[
+                      styles.reactionChip,
+                      isMine && styles.reactionChipOut,
+                      mine && styles.reactionChipHeld,
+                      mine && isMine && styles.reactionChipOutHeld,
+                    ]}
+                    onPress={() => onReact(msg.id, emoji)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: mine }}
+                    accessibilityLabel={mine ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                  >
+                    <Text style={styles.reactionText}>{emoji}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
 
             {last && (
               <View
@@ -306,6 +309,7 @@ export default function ChatScreen({ route }) {
           }
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={() => setReactionPicker(null)}
         />
       )}
 
@@ -413,7 +417,7 @@ function makeStyles(colors) {
     bubbleCol: { maxWidth: '78%' },
     bubbleColMine: { alignItems: RTL ? 'flex-start' : 'flex-end' },
     bubbleColOther: { alignItems: RTL ? 'flex-end' : 'flex-start' },
-    sender: { color: colors.accentText, fontFamily: fonts.medium, fontSize: type.sm, marginBottom: 3, marginHorizontal: 4 },
+    sender: { color: colors.accentText, fontFamily: fonts.medium, fontSize: type.sm, marginBottom: 2 },
 
     bubble: {
       borderRadius: radius.md,
@@ -422,6 +426,7 @@ function makeStyles(colors) {
       gap: 3,
       minWidth: 74,
     },
+    bubbleHasReactions: { paddingBottom: 4 },
     bubbleOther: {
       backgroundColor: colors.bubbleIn,
       borderWidth: 1,
@@ -458,17 +463,13 @@ function makeStyles(colors) {
     fileRowMine: {},
     fileName: { flex: 1, color: colors.accentText, fontFamily: fonts.medium, fontSize: type.sm },
 
-    bottomRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      gap: 6,
-      marginTop: 1,
-      maxWidth: '100%',
+    reactions: {
+      flexDirection: 'row', flexWrap: 'wrap', alignSelf: 'flex-start',
+      gap: 3, maxWidth: '100%', marginTop: 2, marginBottom: -1,
     },
-    reactions: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, flexShrink: 1, minWidth: 0 },
     reactionChip: {
-      minWidth: 24, minHeight: 22,
-      paddingHorizontal: 6, paddingVertical: 1,
+      minWidth: 24, minHeight: 23,
+      paddingHorizontal: 7, paddingVertical: 2,
       borderRadius: radius.pill,
       borderWidth: 1,
       borderColor: 'transparent',
@@ -484,9 +485,31 @@ function makeStyles(colors) {
     reactionChipOutHeld: { borderColor: '#FFE0DE', backgroundColor: 'rgba(255,255,255,0.30)' },
     reactionText: { color: colors.text1, fontFamily: fonts.regular, fontSize: 14, lineHeight: 18 },
 
-    /* Inside the bubble, so the strip belongs to the message it acts on. On the
-       outgoing bubble it keeps the bubble's palette like the chips do. */
-    tapbackRow: { flexDirection: 'row-reverse', alignItems: 'center', flexWrap: 'wrap', gap: 2, marginTop: 2 },
+    /* Floats above the bubble instead of sitting in its flow, so opening it
+       never changes the bubble height or moves the conversation. Own messages
+       anchor to their right edge, incoming ones to their left, so the tray
+       always opens toward the middle of the screen. */
+    tapbackRow: {
+      position: 'absolute',
+      top: -44,
+      zIndex: 20,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 2,
+      paddingHorizontal: 3,
+      paddingVertical: 3,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface3,
+      shadowColor: '#000',
+      shadowOpacity: 0.18,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 8,
+    },
+    tapbackRowMine: { right: 0 },
+    tapbackRowOther: { left: 0 },
     tapback: {
       width: 34, height: 34,
       borderRadius: radius.pill,
@@ -510,7 +533,7 @@ function makeStyles(colors) {
       justifyContent: 'center',
     },
 
-    metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginStart: 'auto', flexShrink: 0 },
+    metaRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 4 },
     time: { color: colors.text3, fontFamily: fonts.regular, fontSize: 10.5 },
     timeMine: { color: 'rgba(255,255,255,0.78)' },
 
