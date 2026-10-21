@@ -49,6 +49,10 @@ chat as locked instead of failing a plaintext send.
   members decrypt it rather than «شما و دستگاه طرف مقابل», a plaintext group
   states that it is not encrypted instead of borrowing the direct-chat line, and
   group messages take sender name and avatar from the participant list.
+- **Chat-list rows read like conversations.** A direct row shows its last message
+  instead of `@username`, a group row prefixes the last message with its sender
+  instead of showing a member count, and the chip counting conversations next to
+  «گفتگوها» is gone.
 - `backend/.env.example` documents `E2EE_MAX_GROUP_MEMBERS` and the raised
   `E2EE_CLAIM_LIMIT` (40, so one window can cover a whole group's devices).
 
