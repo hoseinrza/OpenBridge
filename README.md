@@ -142,8 +142,24 @@ cd mobile && npx expo export --platform android
 ```
 
 The e2e suite boots the Nest app against the configured PostgreSQL database,
-creates temporary users and conversations, and cleans them up afterwards. Note
-that mobile has no automated test suite — screen QA is manual.
+creates temporary users and conversations, and cleans them up afterwards.
+
+Mobile has two automated layers:
+
+```bash
+cd mobile && npm test          # Jest + React Native Testing Library
+cd mobile && npm run test:ci   # the CI invocation
+```
+
+The unit/component suite covers phone normalization, the login and sign-up
+steps, the chat list (search, empty, error), and the chat surface (sides,
+sending, reactions). The on-device layer is a Maestro flow
+(`mobile/.maestro/auth-and-chat.yaml`) that runs against a real API-34 Android
+emulator in CI: it signs in with the CI-only seeded user, sends a message in
+`E2E Group`, and adds a reaction. Fixtures come from
+`backend/test/mobile-e2e-seed.mjs` and exist only in the disposable CI
+database. A local run needs an emulator, a backend, and the seed script; CI is
+the supported path.
 
 ## 🔁 CI & CD
 
@@ -152,8 +168,11 @@ the stage before it, so the slow jobs never start on code the fast jobs reject:
 
 | Stage | Job | What it proves |
 |-------|-----|----------------|
+| 0 · detect | `changes` | Path detection for PRs; main/schedule/manual always run the mobile E2E |
 | 1 · static | `web-lint`, `backend-check` | ESLint clean · Prisma schema valid · TypeScript compiles |
 | 2 · tests | `backend-e2e` | The 19 security tests pass against real PostgreSQL |
+| 2 · tests | `mobile-tests` | Jest + RNTL mobile behavior suite |
+| 2 · tests | `mobile-e2e` | Maestro on an API-34 emulator against a real PostgreSQL + NestJS backend (main, mobile PRs, nightly) |
 | 2b | `dependencies` | `npm audit` findings (reports, never blocks) |
 | 3 · artefacts | `web-build`, `mobile-bundle` | The Vite bundle builds · the Expo Hermes bundle builds |
 | 4 · ship path | `deploy-dry-run` | Both Docker images build, `docker compose up` serves the SPA, `/api/health` answers **through nginx**, and Socket.IO handshakes |
@@ -180,9 +199,11 @@ out the previous commit, rebuilds, and records the bad SHA in
 `.deploy-failed-sha` so the cron cannot crash-loop on it. Tune the wait with
 `HEALTH_DEADLINE` on very slow boxes.
 
-> The CI/CD pipelines themselves have not run on GitHub Actions yet — the
-> redeploy logic was verified against stubbed `docker`/`curl` in a throwaway
-> clone. Expect to tune the first few real runs.
+> Observed state (2026-10-21): CI runs on GitHub Actions and is green, including
+> the Docker compose smoke stage. `Deploy` is `skipped` because
+> `vars.DEPLOY_ENABLED` is not `true`; it stays inert until the SSH secrets
+> exist. No production deployment has been performed, and the redeploy/rollback
+> branch on a real VPS is still unverified.
 
 ## 🚀 Local development
 
