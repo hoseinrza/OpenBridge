@@ -101,9 +101,27 @@ jobs:
       # Builds first, then runs the suite against the real PostgreSQL instance.
       - run: npm run test:e2e
 
+  # The Phase 0 library gate from docs/engineering/E2EE_DESIGN.md, kept
+  # executable: the pure-JS provider must run MLS, interoperate with the
+  # WebCrypto path, and need no crypto.subtle (the Hermes condition).
+  e2ee-gate:
+    name: '2b · E2EE library gate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: web-lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run test:e2ee
+
   # Informational: reports without blocking the pipeline.
   dependencies:
-    name: '2b · Dependency audit'
+    name: '2c · Dependency audit'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     continue-on-error: true
@@ -218,12 +236,13 @@ jobs:
     name: 'CI gate'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [web-lint, backend-check, backend-e2e, web-build, mobile-bundle, deploy-dry-run]
+    needs: [web-lint, backend-check, backend-e2e, e2ee-gate, web-build, mobile-bundle, deploy-dry-run]
     if: always()
     steps:
       - name: Summarise
         run: |
           echo "backend-e2e: ${{ needs.backend-e2e.result }}"
+          echo "e2ee-gate:   ${{ needs.e2ee-gate.result }}"
           echo "web-build:   ${{ needs.web-build.result }}"
           echo "mobile:      ${{ needs.mobile-bundle.result }}"
           echo "dry-run:     ${{ needs.deploy-dry-run.result }}"
@@ -231,6 +250,7 @@ jobs:
           [ "${{ needs.web-lint.result }}" = "success" ] \
             && [ "${{ needs.backend-check.result }}" = "success" ] \
             && [ "${{ needs.backend-e2e.result }}" = "success" ] \
+            && [ "${{ needs.e2ee-gate.result }}" = "success" ] \
             && [ "${{ needs.web-build.result }}" = "success" ] \
             && [ "${{ needs.mobile-bundle.result }}" = "success" ] \
             && [ "${{ needs.deploy-dry-run.result }}" = "success" ]

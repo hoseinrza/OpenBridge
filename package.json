@@ -1,21 +1,28 @@
 {
   "name": "chatapp-react",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:e2ee": "node --test shared/e2ee/gate.test.mjs shared/e2ee/hermes-gate.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
     "@capacitor/core": "^6.2.1",
+    "@noble/ciphers": "^2.1.1",
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.4.0",
+    "@panva/hpke-noble": "^1.1.7",
+    "hpke": "^1.1.7",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.17.0",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "ts-mls": "^1.6.4"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.1",
