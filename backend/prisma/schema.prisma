@@ -231,15 +231,21 @@ model MessageRead {
   @@map("message_reads")
 }
 
+// One reaction per person per message, like a tapback: pressing again removes
+// it, pressing a different emoji replaces it. The uniqueness is on the pair
+// (user, message) and not on the emoji, because "one person reacted twice with
+// two emojis" is exactly what the product rule forbids — a database that allows
+// it would let the number on a chip exceed the number of people.
 model Reaction {
-  id        String  @id @default(uuid())
+  id        String   @id @default(uuid())
   emoji     String
+  createdAt DateTime @default(now())
   userId    String
   user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   messageId String
   message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, messageId, emoji])
+  @@unique([userId, messageId])
   @@index([messageId])
   @@map("reactions")
 }

@@ -432,7 +432,7 @@ test('non-members cannot read, write, react or type in a group', async () => {
   });
   assert.equal(send.ok, false, 'outsider send');
 
-  const reactionLeak = waitEvent(sockets.bob, 'reaction:added', 1000);
+  const reactionLeak = waitEvent(sockets.bob, 'reaction:changed', 1000);
   const reaction = await emitAck(sockets.eve, 'reaction:add', { messageId, emoji: '💥' });
   assert.equal(reaction.ok, false, 'outsider reaction');
   assert.equal(await reactionLeak, null, 'reaction not broadcast');
@@ -442,16 +442,57 @@ test('non-members cannot read, write, react or type in a group', async () => {
   assert.equal(await typingLeak, null, 'typing not relayed');
 });
 
-test('participants can react and receive the event', async () => {
-  const { alice } = global.__ctx;
+test('a reaction is one per person: tapping again lifts it, another emoji replaces it', async () => {
+  const { alice, bob } = global.__ctx;
 
-  const event = waitEvent(sockets.bob, 'reaction:added', 4000);
-  const reaction = await emitAck(sockets.alice, 'reaction:add', { messageId, emoji: '👍' });
-  assert.equal(reaction.ok, true);
-  const payload = await event;
-  assert.equal(payload?.emoji, '👍');
-  assert.equal(payload?.conversationId, group.id);
-  assert.equal(payload?.userId, alice.user.id);
+  // Adding sends the whole resulting list to every participant, never a delta,
+  // so no client can end up showing more than the people who reacted.
+  let changed = waitEvent(sockets.bob, 'reaction:changed', 4000);
+  let ack = await emitAck(sockets.alice, 'reaction:add', { messageId, emoji: '👍' });
+  assert.equal(ack.ok, true);
+  assert.deepEqual(
+    ack.reactions?.map(r => [r.userId, r.emoji]),
+    [[alice.user.id, '👍']],
+    'one row for one person',
+  );
+  const event = await changed;
+  assert.equal(event?.messageId, messageId, 'event names the message');
+  assert.equal(event?.conversationId, group.id, 'event names the conversation');
+  assert.deepEqual(event?.reactions, ack.reactions, 'broadcast carries the same list');
+
+  // Second tap of the same emoji removes it.
+  changed = waitEvent(sockets.bob, 'reaction:changed', 4000);
+  ack = await emitAck(sockets.alice, 'reaction:add', { messageId, emoji: '👍' });
+  assert.equal(ack.reactions?.length, 0, 'lifted');
+  assert.equal((await changed)?.reactions?.length, 0, 'everyone sees it lifted');
+
+  // A different emoji replaces the one held instead of stacking next to it.
+  await emitAck(sockets.alice, 'reaction:add', { messageId, emoji: '❤️' });
+  ack = await emitAck(sockets.alice, 'reaction:add', { messageId, emoji: '😂' });
+  const aliceRows = ack.reactions.filter(r => r.userId === alice.user.id);
+  assert.equal(aliceRows.length, 1, 'never more than one reaction per person');
+  assert.equal(aliceRows[0].emoji, '😂', 'replaced, not added to');
+
+  // Two people who both pick 😂 are two rows behind one chip — a count of taps
+  // can never be built out of one person.
+  for (const emoji of ['👍', '❤️', '😂', '👍', '❤️', '😂']) {
+    ack = await emitAck(sockets.alice, 'reaction:add', { messageId, emoji });
+  }
+  assert.equal(ack.reactions.filter(r => r.userId === alice.user.id).length, 1, 'spamming still one row');
+
+  changed = waitEvent(sockets.bob, 'reaction:changed', 4000);
+  ack = await emitAck(sockets.bob, 'reaction:add', { messageId, emoji: '😂' });
+  assert.equal(ack.reactions?.length, 2, 'two people, two rows');
+  assert.equal(ack.reactions.filter(r => r.emoji === '😂').length, 2, 'a chip with two people');
+  assert.ok((await changed) !== null, 'bob is told too');
+
+  // The database is the last word: even a write that skips the service cannot
+  // give one person a second reaction on the same message.
+  await assert.rejects(
+    prisma.reaction.create({ data: { userId: alice.user.id, messageId, emoji: '💯' } }),
+    (err) => err?.code === 'P2002',
+    'unique (userId, messageId)',
+  );
 });
 
 test('socket payloads are validated', async () => {

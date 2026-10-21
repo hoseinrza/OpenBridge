@@ -150,7 +150,12 @@ export class MessagesService {
     return { ...result, conversationId: conversation.id };
   }
 
-  async addReaction(messageId: string, userId: string, emoji: string) {
+  // A reaction is a tapback, not a tally: one person holds at most one reaction
+  // per message, so tapping the same emoji removes it, tapping another replaces
+  // it, and the answer is the message's whole reaction list. Clients render that
+  // list instead of adjusting a counter themselves, which is what let a number
+  // grow past the number of people when the old event was replayed.
+  async toggleReaction(messageId: string, userId: string, emoji: string) {
     const trimmedEmoji = typeof emoji === 'string' ? emoji.trim() : '';
     if (!messageId || typeof messageId !== 'string') {
       throw new BadRequestException('پیام نامعتبر است');
@@ -169,12 +174,34 @@ export class MessagesService {
     // ID supplied by the client.
     await this.assertMember(message.conversationId, userId);
 
-    const reaction = await this.prisma.reaction.upsert({
-      where:  { userId_messageId_emoji: { userId, messageId, emoji: trimmedEmoji } },
-      create: { messageId, userId, emoji: trimmedEmoji },
-      update: {},
+    const reactions = await this.prisma.$transaction(async (tx) => {
+      const mine = await tx.reaction.findUnique({
+        where: { userId_messageId: { userId, messageId } },
+        select: { id: true, emoji: true },
+      });
+
+      if (mine?.emoji === trimmedEmoji) {
+        await tx.reaction.delete({ where: { id: mine.id } });
+      } else if (mine) {
+        await tx.reaction.update({ where: { id: mine.id }, data: { emoji: trimmedEmoji } });
+      } else {
+        // Upsert rather than create: two taps that raced past the read above
+        // must still leave one row, which is the whole rule.
+        await tx.reaction.upsert({
+          where:  { userId_messageId: { userId, messageId } },
+          create: { messageId, userId, emoji: trimmedEmoji },
+          update: { emoji: trimmedEmoji },
+        });
+      }
+
+      return tx.reaction.findMany({
+        where:  { messageId },
+        select: { id: true, userId: true, emoji: true },
+        orderBy: { createdAt: 'asc' },
+      });
     });
-    return { reaction, conversationId: message.conversationId };
+
+    return { messageId, conversationId: message.conversationId, reactions };
   }
 
   // ── Group chat ───────────────────────────────────────────────────────

@@ -353,6 +353,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // ── Reactions ───────────────────────────────────────
+  // Tapback semantics: the same event adds, replaces or removes the caller's one
+  // reaction, and every participant is told the resulting list rather than a
+  // delta, so no client can drift into showing more than the people who reacted.
   @SubscribeMessage('reaction:add')
   async onReaction(
     @ConnectedSocket() s: Socket,
@@ -363,16 +366,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
-      const { reaction, conversationId } = await this.messages.addReaction(
+      const { messageId, conversationId, reactions } = await this.messages.toggleReaction(
         body?.messageId, s.data.userId, body?.emoji,
       );
       const participantIds = await this.messages.getConversationParticipantIds(conversationId);
-      this.server.to(participantIds).emit('reaction:added', {
-        messageId: body.messageId,
+      this.server.to(participantIds).emit('reaction:changed', {
+        messageId,
         conversationId,
-        ...reaction,
+        reactions,
       });
-      return { ok: true };
+      return { ok: true, reactions };
     } catch (err) {
       return this.failure(err, 'ثبت ری‌اکشن ناموفق بود');
     }
