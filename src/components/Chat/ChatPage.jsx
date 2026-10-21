@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChat } from '../../hooks/useChat.js';
 import { fetchConversations, fetchGroups, normalizeUser, normalizeGroup } from '../../services/api.js';
 import Sidebar from '../Sidebar/Sidebar.jsx';
@@ -19,6 +19,13 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const [chatsLoading, setChatsLoading]   = useState(true);
   const [chatsError, setChatsError]       = useState(false);
 
+  // A list refresh that is in flight when a message arrives can come back with
+  // an unread count for the chat that is on screen, because marking it read is
+  // a separate round trip. The chat being looked at is always read.
+  const activeUserIdRef = useRef(null);
+
+  useEffect(() => { activeUserIdRef.current = activeUser?.id ?? null; }, [activeUser?.id]);
+
   // New accounts start with an empty conversation list — people only show up
   // here once a message has actually been exchanged with them. Conversations
   // are started on demand by searching for a username (see NewChatModal).
@@ -27,7 +34,14 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
       .then(([directList, groupList]) => {
         const directs = directList
           .filter(c => c.user)
-          .map(c => ({ ...normalizeUser(c.user), unread: c.unread ?? 0, updatedAt: c.updatedAt }))
+          .map(c => ({
+            ...normalizeUser(c.user),
+            unread: c.unread ?? 0,
+            updatedAt: c.updatedAt,
+            // The server only says whether a conversation accepts envelopes;
+            // whether this device can read it is the chat hook's question.
+            encrypted: c.e2ee === true,
+          }))
           .filter(u => u.id);
         const groups = groupList.map(normalizeGroup).filter(Boolean);
 
@@ -36,7 +50,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           // yet) so they don't vanish from the list before the first message.
           const stillPending = prev.filter(u => u.pending && !directs.some(d => d.id === u.id));
           const chats = [...groups, ...directs]
-            .sort((a, b) => new Date(b.updatedAt ?? 0) - new Date(a.updatedAt ?? 0));
+            .sort((a, b) => new Date(b.updatedAt ?? 0) - new Date(a.updatedAt ?? 0))
+            .map(chat => (chat.id === activeUserIdRef.current ? { ...chat, unread: 0 } : chat));
           return [...stillPending, ...chats];
         });
         setChatsError(false);
@@ -54,6 +69,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const {
     messages, isTyping, typingPeer, connected,
     historyState, historyError, retryHistory,
+    encrypted, encryptionNote, blockedReason, attachmentBlocked,
     sendMessage, notifyTyping, addReaction, clearMessages,
   } = useChat(activeUser, currentUser, handleIncoming);
 
@@ -121,6 +137,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           <>
             <ChatHeader
               user={activeUser}
+              encrypted={encrypted}
+              encryptionNote={encryptionNote}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
               onOpenProfile={openPeerProfile}
@@ -154,7 +172,13 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
 
             <TypingIndicator isTyping={isTyping} user={typingPeer ?? activeUser} />
 
-            <InputArea onSend={sendMessage} onTyping={notifyTyping} connected={connected} />
+            <InputArea
+              onSend={sendMessage}
+              onTyping={notifyTyping}
+              connected={connected}
+              blocked={blockedReason}
+              attachmentBlocked={attachmentBlocked}
+            />
           </>
         ) : (
           <div className="empty-chat">

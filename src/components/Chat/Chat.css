@@ -108,6 +108,34 @@
   flex-shrink: 0;
 }
 
+/* ── Encryption state ─────────────────────────────────────────── */
+.e2ee-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.e2ee-chip.is-on {
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.e2ee-chip.is-off {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
 /* ── Search mode ─────────────────────────────────────────────── */
 .chat-search {
   display: flex;
@@ -256,6 +284,26 @@
   white-space: nowrap;
 }
 
+/* The point where one conversation stopped being readable by the server. It is
+   drawn once, from the messages themselves, so it cannot be claimed for a chat
+   that was never encrypted. */
+.secure-sep {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: var(--sp-4) auto var(--sp-3);
+  padding: 5px var(--sp-3);
+  max-width: min(420px, 90%);
+  border: 1px solid color-mix(in srgb, var(--success) 26%, var(--border));
+  border-radius: var(--r-pill);
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-align: center;
+}
+
 /* ════════ MESSAGE ROWS ════════ */
 .msg-wrapper {
   display: flex;
@@ -354,6 +402,14 @@
 
 .msg-receipt { display: inline-flex; font-size: 10.5px; }
 .msg-receipt.read { color: var(--success); }
+
+.msg-lock {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9.5px;
+  color: var(--success);
+  opacity: 0.8;
+}
 
 .msg-react-toggle {
   display: inline-flex;
@@ -650,6 +706,19 @@
 .composer-note.is-error {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+/* The chat is encrypted and this device cannot open it: writing is refused
+   rather than sent somewhere the peer can no longer read. */
+.composer-note.is-blocked {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.input-wrap textarea:disabled {
+  background: var(--surface-2);
+  color: var(--text-3);
+  cursor: not-allowed;
 }
 
 .composer-note-dismiss {

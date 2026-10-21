@@ -131,6 +131,13 @@ async function request(method, path, body, retry = true) {
   return data;
 }
 
+// The MLS client core is platform-agnostic, so it spells endpoints relative to
+// the API root and without a leading slash ("e2ee/devices"). This is the single
+// place that turns that spelling into this app's prefixed, authorised call.
+export function apiCall(path, { method = 'GET', body } = {}) {
+  return request(method, `/${String(path).replace(/^\/+/, '')}`, body);
+}
+
 // ── Auth ─────────────────────────────────────────────
 export function requestOtp(phone) {
   return request('POST', '/auth/otp/request', { phone });

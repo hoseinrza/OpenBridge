@@ -3,7 +3,9 @@ import EmojiPicker from './EmojiPicker.jsx';
 
 const MAX_TEXTAREA_HEIGHT = 132;
 
-export default function InputArea({ onSend, onTyping, connected = true }) {
+export default function InputArea({
+  onSend, onTyping, connected = true, blocked = null, attachmentBlocked = null,
+}) {
   const [text, setText]           = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [sending, setSending]     = useState(false);
@@ -75,6 +77,10 @@ export default function InputArea({ onSend, onTyping, connected = true }) {
     const file = e.target.files?.[0];
     if (!file || busy) return;
     e.target.value = '';
+    if (attachmentBlocked) {
+      setError(attachmentBlocked);
+      return;
+    }
     if (!connected) {
       setError('اتصال به سرور برقرار نیست؛ فایل ارسال نشد');
       return;
@@ -118,6 +124,13 @@ export default function InputArea({ onSend, onTyping, connected = true }) {
         onChange={handleFile}
       />
 
+      {blocked && (
+        <div className="composer-note is-blocked" role="status">
+          <i className="fas fa-lock" aria-hidden="true" />
+          <span>{blocked}</span>
+        </div>
+      )}
+
       {(busy || error) && (
         <div className={`composer-note ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>
           {busy ? (
@@ -144,12 +157,12 @@ export default function InputArea({ onSend, onTyping, connected = true }) {
         <button
           type="button"
           className="icon-btn attach-btn"
-          title="پیوست فایل"
+          title={attachmentBlocked ?? 'پیوست فایل'}
           aria-label="پیوست فایل"
-          disabled={busy}
+          disabled={busy || Boolean(attachmentBlocked)}
           onClick={() => fileRef.current?.click()}
         >
-          <i className="fas fa-paperclip" aria-hidden="true" />
+          <i className={`fas ${attachmentBlocked ? 'fa-lock' : 'fa-paperclip'}`} aria-hidden="true" />
         </button>
 
         <div className="input-wrap">
@@ -157,9 +170,10 @@ export default function InputArea({ onSend, onTyping, connected = true }) {
             ref={textareaRef}
             value={text}
             rows={1}
+            disabled={Boolean(blocked)}
             onChange={e => { setText(e.target.value); setError(''); onTyping?.(); }}
             onKeyDown={handleKey}
-            placeholder={connected ? 'پیامت را بنویس…' : 'در انتظار اتصال به سرور…'}
+            placeholder={blocked ?? (connected ? 'پیامت را بنویس…' : 'در انتظار اتصال به سرور…')}
             aria-label="متن پیام"
             autoComplete="off"
           />
@@ -180,9 +194,9 @@ export default function InputArea({ onSend, onTyping, connected = true }) {
         <button
           type="submit"
           className="send-btn"
-          title="ارسال پیام"
+          title={blocked ?? 'ارسال پیام'}
           aria-label="ارسال پیام"
-          disabled={!text.trim() || busy || !connected}
+          disabled={!text.trim() || busy || !connected || Boolean(blocked)}
         >
           {sending
             ? <i className="fas fa-spinner fa-spin" aria-hidden="true" />

@@ -3,7 +3,9 @@ import Avatar from '../ui/Avatar.jsx';
 
 const STATUS_TEXT = { online: 'آنلاین', idle: 'غیرفعال', dnd: 'مشغول', offline: 'آفلاین' };
 
-export default function ChatHeader({ user, searchQuery, onSearchChange, onOpenProfile, onBack }) {
+export default function ChatHeader({
+  user, encrypted = false, encryptionNote = null, searchQuery, onSearchChange, onOpenProfile, onBack,
+}) {
   const [searchOpen, setSearchOpen] = useState(false);
   const inputRef = useRef(null);
   const isGroup = user.kind === 'group';
@@ -31,7 +33,9 @@ export default function ChatHeader({ user, searchQuery, onSearchChange, onOpenPr
             value={searchQuery}
             onChange={e => onSearchChange(e.target.value)}
             onKeyDown={e => { if (e.key === 'Escape') closeSearch(); }}
-            placeholder="جستجو در پیام‌های این گفتگو…"
+            placeholder={encrypted
+              ? 'جستجو در پیام‌های این دستگاه…'
+              : 'جستجو در پیام‌های این گفتگو…'}
             aria-label="جستجو در پیام‌های این گفتگو"
           />
           {searchQuery && (
@@ -98,6 +102,21 @@ export default function ChatHeader({ user, searchQuery, onSearchChange, onOpenPr
           </div>
 
           <div className="chat-header-actions">
+            {encrypted && (
+              <span
+                className="e2ee-chip is-on"
+                title="متن پیام‌های این گفتگو فقط روی دستگاه شما و دستگاه طرف مقابل رمزگشایی می‌شود؛ سرور هیچ‌وقت آن را نمی‌بیند"
+              >
+                <i className="fas fa-lock" aria-hidden="true" />
+                رمزنگاری سرتاسری
+              </span>
+            )}
+            {!encrypted && !isGroup && encryptionNote && (
+              <span className="e2ee-chip is-off" title={encryptionNote}>
+                <i className="fas fa-lock-open" aria-hidden="true" />
+                بدون رمزنگاری
+              </span>
+            )}
             <button
               type="button"
               className="icon-btn"

@@ -9,6 +9,7 @@ function buildRows(messages) {
   const rows = [];
   let prevMsg = null;
   let prevDay = null;
+  let prevEncrypted = null;
 
   messages.forEach((msg, index) => {
     const day = dayKey(msg.createdAt);
@@ -17,6 +18,12 @@ function buildRows(messages) {
       prevMsg = null;
       prevDay = day;
     }
+    // One conversation crosses this line at most once, and only because the
+    // plaintext rows that came before it are still on this device.
+    if (msg.encrypted && prevEncrypted === false) {
+      rows.push({ type: 'secure', key: `secure-${msg.id}` });
+    }
+    prevEncrypted = msg.encrypted;
 
     const next = messages[index + 1];
     const samePrev = prevMsg
@@ -164,6 +171,11 @@ export default function MessageList({
           row.type === 'day' ? (
             <div key={`day-${row.key}`} className="date-sep">
               <span>{row.label}</span>
+            </div>
+          ) : row.type === 'secure' ? (
+            <div key={row.key} className="secure-sep">
+              <i className="fas fa-lock" aria-hidden="true" />
+              <span>از این پیام به بعد، متن فقط روی دستگاه شما و طرف مقابل رمزگشایی می‌شود</span>
             </div>
           ) : (
             <MessageGroup

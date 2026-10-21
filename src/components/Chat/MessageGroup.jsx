@@ -75,6 +75,9 @@ export default function MessageGroup({
   const [lightbox, setLightbox] = useState(false);
   const isMine = message.side === 'mine';
   const barVisible = hovered || barOpen;
+  // Reactions live in the server's message table, and an encrypted message has
+  // no row there to react to — so the affordance is not offered for it.
+  const reactable = !message.encrypted;
 
   const reactions = Object.entries(message.reactions ?? {});
 
@@ -93,7 +96,7 @@ export default function MessageGroup({
         if (!e.currentTarget.contains(e.relatedTarget)) setHovered(false);
       }}
     >
-      {barVisible && (
+      {reactable && barVisible && (
         <div className="reaction-bar" role="group" aria-label="انتخاب واکنش">
           {REACTIONS.map(emoji => (
             <button
@@ -139,15 +142,24 @@ export default function MessageGroup({
               {message.time}
             </time>
 
-            <button
-              type="button"
-              className="msg-react-toggle"
-              aria-label="افزودن واکنش"
-              aria-expanded={barVisible}
-              onClick={() => setBarOpen(open => !open)}
-            >
-              <i className="far fa-face-smile" aria-hidden="true" />
-            </button>
+            {message.encrypted && (
+              <span className="msg-lock" title="این پیام فقط روی دستگاه شما و طرف مقابل رمزگشایی می‌شود">
+                <i className="fas fa-lock" aria-hidden="true" />
+                <span className="sr-only">رمزنگاری سرتاسری</span>
+              </span>
+            )}
+
+            {reactable && (
+              <button
+                type="button"
+                className="msg-react-toggle"
+                aria-label="افزودن واکنش"
+                aria-expanded={barVisible}
+                onClick={() => setBarOpen(open => !open)}
+              >
+                <i className="far fa-face-smile" aria-hidden="true" />
+              </button>
+            )}
 
             {isMine && (
               <span
