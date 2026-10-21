@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChat } from '../../hooks/useChat.js';
-import { fetchConversations, fetchGroups, normalizeUser, normalizeGroup } from '../../services/api.js';
+import {
+  apiCall, fetchConversations, fetchGroups, normalizeUser, normalizeGroup,
+} from '../../services/api.js';
+import { initE2ee } from '../../services/e2ee.js';
 import Sidebar from '../Sidebar/Sidebar.jsx';
 import ChatHeader from './ChatHeader.jsx';
 import MessageList from './MessageList.jsx';
@@ -9,6 +12,60 @@ import InputArea from './InputArea.jsx';
 import ProfileModal from '../Profile/ProfileModal.jsx';
 import NewChatModal from '../NewChat/NewChatModal.jsx';
 import './Chat.css';
+
+function previewFromServer(lastMessage, myId) {
+  if (!lastMessage) return null;
+  return {
+    type:       (lastMessage.type ?? 'TEXT').toLowerCase(),
+    text:       lastMessage.text ?? '',
+    fileName:   lastMessage.fileName ?? null,
+    senderName: lastMessage.sender?.id === myId ? 'شما' : (lastMessage.sender?.name ?? null),
+  };
+}
+
+function previewFromEncrypted(message, chat, myId) {
+  if (!message) return null;
+  const attachment = message.attachment ?? null;
+  return {
+    type: attachment
+      ? (attachment.mime?.startsWith('image/') ? 'image' : 'file')
+      : 'text',
+    text:       message.text ?? '',
+    fileName:   attachment?.name ?? null,
+    senderName: message.mine || message.senderId === myId
+      ? 'شما'
+      : (chat.participants?.find(p => p.id === message.senderId)?.name ?? null),
+  };
+}
+
+async function directConversationId(peerId, cache) {
+  if (cache.has(peerId)) return cache.get(peerId);
+  try {
+    const state = await apiCall(`messages/e2ee/direct/${peerId}`);
+    if (state?.conversationId) cache.set(peerId, state.conversationId);
+    return state?.conversationId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// An encrypted transcript never reaches the server in readable form, so the
+// preview comes from this device's own decrypted history. Direct chats get
+// their conversation id from the same read-only probe the chat itself uses.
+async function addEncryptedPreviews(chats, myId, idCache) {
+  if (!chats.some(chat => chat.encrypted)) return chats;
+  const client = await initE2ee({ id: myId }).catch(() => null);
+  if (!client) return chats;
+  return Promise.all(chats.map(async (chat) => {
+    if (!chat.encrypted) return chat;
+    const conversationId = chat.kind === 'group'
+      ? chat.id
+      : await directConversationId(chat.id, idCache);
+    if (!conversationId) return chat;
+    const last = await client.lastMessage(conversationId).catch(() => null);
+    return last ? { ...chat, preview: previewFromEncrypted(last, chat, myId) } : chat;
+  }));
+}
 
 export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const [users, setUsers]                 = useState([]);
@@ -23,42 +80,55 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   // an unread count for the chat that is on screen, because marking it read is
   // a separate round trip. The chat being looked at is always read.
   const activeUserIdRef = useRef(null);
+  const directConversationIds = useRef(new Map());
 
   useEffect(() => { activeUserIdRef.current = activeUser?.id ?? null; }, [activeUser?.id]);
 
   // New accounts start with an empty conversation list — people only show up
   // here once a message has actually been exchanged with them. Conversations
   // are started on demand by searching for a username (see NewChatModal).
-  const loadChats = useCallback(() => {
-    Promise.all([fetchConversations(), fetchGroups()])
-      .then(([directList, groupList]) => {
-        const directs = directList
-          .filter(c => c.user)
-          .map(c => ({
-            ...normalizeUser(c.user),
-            unread: c.unread ?? 0,
-            updatedAt: c.updatedAt,
-            // The server only says whether a conversation accepts envelopes;
-            // whether this device can read it is the chat hook's question.
-            encrypted: c.e2ee === true,
-          }))
-          .filter(u => u.id);
-        const groups = groupList.map(normalizeGroup).filter(Boolean);
+  const loadChats = useCallback(async () => {
+    try {
+      const [directList, groupList] = await Promise.all([fetchConversations(), fetchGroups()]);
+      const directs = directList
+        .filter(c => c.user)
+        .map(c => ({
+          ...normalizeUser(c.user),
+          unread: c.unread ?? 0,
+          updatedAt: c.updatedAt,
+          // The server only says whether a conversation accepts envelopes;
+          // whether this device can read it is the chat hook's question.
+          encrypted: c.e2ee === true,
+          preview: previewFromServer(c.lastMessage, currentUser.id),
+        }))
+        .filter(u => u.id);
+      const groups = groupList
+        .map(normalizeGroup)
+        .filter(Boolean)
+        .map(group => ({ ...group, preview: previewFromServer(group.lastMessage, currentUser.id) }));
 
-        setUsers(prev => {
-          // Keep conversations the user just started locally (no messages sent
-          // yet) so they don't vanish from the list before the first message.
-          const stillPending = prev.filter(u => u.pending && !directs.some(d => d.id === u.id));
-          const chats = [...groups, ...directs]
-            .sort((a, b) => new Date(b.updatedAt ?? 0) - new Date(a.updatedAt ?? 0))
-            .map(chat => (chat.id === activeUserIdRef.current ? { ...chat, unread: 0 } : chat));
-          return [...stillPending, ...chats];
-        });
-        setChatsError(false);
-      })
-      .catch(() => setChatsError(true))
-      .finally(() => setChatsLoading(false));
-  }, []);
+      const chats = await addEncryptedPreviews(
+        [...groups, ...directs],
+        currentUser.id,
+        directConversationIds.current,
+      );
+
+      setUsers(prev => {
+        // Keep conversations the user just started locally (no messages sent
+        // yet) so they don't vanish from the list before the first message.
+        const stillPending = prev.filter(u => u.pending && !chats.some(d => d.id === u.id));
+        const ordered = chats
+          .sort((a, b) => new Date(b.updatedAt ?? 0) - new Date(a.updatedAt ?? 0))
+          .map(chat => (chat.id === activeUserIdRef.current ? { ...chat, unread: 0 } : chat));
+        return [...stillPending, ...ordered];
+      });
+      setChatsError(false);
+    } catch {
+      setChatsError(true);
+    } finally {
+      setChatsLoading(false);
+    }
+  }, [currentUser.id]);
 
   useEffect(() => { loadChats(); }, [loadChats]);
 
@@ -212,6 +282,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
 
       {newChatOpen && (
         <NewChatModal
+          currentUser={currentUser}
           onClose={() => setNewChatOpen(false)}
           onSelect={handleStartConversation}
           onGroupCreated={handleGroupCreated}

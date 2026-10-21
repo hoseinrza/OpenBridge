@@ -84,6 +84,12 @@ export function getE2ee() {
   return state?.client ?? null;
 }
 
+/** Creates a group whose first envelope is the Welcome that opens it. */
+export async function createEncryptedGroup(me, name, memberIds) {
+  const client = await initE2ee(me);
+  return client.createEncryptedGroupChat(name, memberIds);
+}
+
 export function e2eeConnected() {
   return Boolean(state?.socket?.connected);
 }

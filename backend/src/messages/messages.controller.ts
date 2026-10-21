@@ -22,7 +22,13 @@ export class MessagesController {
   async listConversations(@Request() req) {
     const list  = await this.messages.listConversations(req.user.id);
     const users = await this.users.withOnlineStatus(list.map(c => c.user));
-    return list.map((c, i) => ({ user: users[i], unread: c.unread, e2ee: c.e2ee, updatedAt: c.updatedAt }));
+    return list.map((c, i) => ({
+      user:      users[i],
+      unread:    c.unread,
+      e2ee:      c.e2ee,
+      updatedAt: c.updatedAt,
+      ...(c.e2ee ? {} : { lastMessage: c.lastMessage ?? null }),
+    }));
   }
 
   // ── Group chats ──────────────────────────────────────
@@ -81,6 +87,19 @@ export class MessagesController {
   @Get('e2ee/direct/:userId')
   directE2eeState(@Request() req, @Param('userId', ParseUUIDPipe) userId: string) {
     return this.messages.directE2eeState(req.user.id, userId);
+  }
+
+  // A group that is encrypted from its first message. Same rule as the direct
+  // opt-in: the flag is set once, never taken back off, and the client has
+  // already built the MLS group whose Welcome it is about to publish.
+  @Post('e2ee/group')
+  createEncryptedGroup(@Request() req, @Body() dto: CreateGroupDto) {
+    return this.messages.createEncryptedGroup(req.user.id, dto.name, dto.memberIds);
+  }
+
+  @Get('e2ee/group/:conversationId')
+  groupE2eeState(@Request() req, @Param('conversationId', ParseUUIDPipe) conversationId: string) {
+    return this.messages.groupE2eeState(req.user.id, conversationId);
   }
 
   // Opaque MLS envelopes in delivery order, for a client catching up after a

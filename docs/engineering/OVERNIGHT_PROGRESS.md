@@ -827,8 +827,78 @@ chat, so each live run needed a fresh account); and an encrypted message has no
 server row to hold a reaction.
 
 
+## E2EE Phase 3 on the web: encrypted groups (2026-10-21, shipped as 1.1.12)
+
+Groups were the last large plaintext surface on the web, and they could not reuse
+the direct-chat opt-in: a direct chat negotiates encryption on its first send,
+while a group has several devices, a Welcome that must fit one envelope, and
+membership that is part of the cryptographic state. So a group is now encrypted
+**from its first byte or not at all**.
+
+- **Creation with intent.** `POST /api/messages/e2ee/group` stores the
+  conversation with `e2ee: true` before any member sees it. The creator's client
+  builds the MLS group first (`createEncryptedGroupChat` in
+  `shared/e2ee/client.js`), claims one KeyPackage per active device of every
+  member and adds this account's other devices when it has more than one, and
+  publishes the Welcome as envelope 1. A creation that could not produce a
+  usable Welcome never happens: the client refuses locally with
+  `welcome-too-large`, and the server caps a group at `E2EE_MAX_GROUP_MEMBERS`
+  (16).
+- **Groups are never negotiated.** Opening a group calls the read-only `GET
+  /api/messages/e2ee/group/:conversationId` and either joins the existing MLS
+  group or renders the plaintext one. A group created without the tick stays
+  plaintext for its whole life; converting mid-history would leave the earlier
+  messages readable and make the group only look encrypted.
+- **The probe leaks nothing.** An unknown id, another account's group and a
+  group the caller does not belong to all answer `{ conversationId: null,
+  e2ee: false }`.
+- **Membership is frozen while it is cryptographic.** Adding or removing a
+  member of an encrypted group returns 400 until the commit/rekey path exists.
+  An MLS leaf cannot be changed by a database row: adding without a new epoch
+  would invite somebody who cannot decrypt, and removing without a rekey would
+  leave the old keys in the removed member's hands. The server refuses the
+  half-change instead of producing a group that only looks shared.
+- **Unread counts envelopes, not rows.** An encrypted group's badge is the
+  number of envelopes above the caller's `e2eeReadSeq`, because there are no
+  plaintext rows to count. The Welcome is marked read at join, so becoming a
+  member does not create a phantom unread. The wire shape now carries `e2ee` on
+  groups as well.
+- **Encrypted previews come from the device.** Plaintext conversations now lead
+  with a `lastMessage` preview. An encrypted direct chat is sent no preview
+  field at all, and an encrypted group's preview is null because it has no row
+  to read; the web chat list fills both from its own decrypted MLS history. A
+  chat this device has not opened has no preview, which is the truth rather than
+  a server-side guess.
+- **The web adapts its copy.** The notice and the header chip distinguish a
+  group from a direct chat, a plaintext group says so instead of borrowing the
+  direct-chat reassurance, and group messages take their sender name and avatar
+  from the participant list rather than from "the other side". The new-group
+  dialog has an explicit encryption switch that warns the creator that a member
+  without web keys — or on mobile — will not be able to open the group.
+- **Mobile stops failing silently.** The phone cannot decrypt an encrypted chat,
+  so it no longer offers to: opening one shows a locked composer and an
+  explanation that reading and sending happen in the web version; the chat list
+  labels the row with a lock and hides an unread count it could never clear; the
+  screen flips to locked live when an `e2ee:envelope` arrives for the chat on
+  screen (a chat that was plaintext when it was opened); sends, typing and read
+  marks are suppressed. `mobile/__tests__/use-chat-lock.test.js` drives that
+  live transition and asserts the send is refused.
+
 ## Validation actually run
 
+- 1.1.12 batch, 2026-10-21: `backend` `npm run test:e2e` **41/41** against the
+  real local PostgreSQL. The new encrypted-group case drives the real
+  `shared/e2ee/client.js` through creation, one Welcome reaching every invited
+  device (including two devices of one account), decryption on all of them,
+  ciphertext-only storage, the post-Welcome unread count, the refused plaintext
+  send, the frozen membership and the keyless-member refusal; the rewritten
+  security case asserts a flagged group carries envelopes only. `mobile` `npm
+  run test:ci` passed **5 suites / 36 tests**, including the new
+  `use-chat-lock.test.js` hook test; `npx expo export --platform android`
+  bundled the app (2.5 MB). Root `npm run test:e2ee` 5/5, `npm run lint` clean,
+  `npm run build` clean (690 ms). **No live browser or device run was made for
+  this batch**: the group encryption switch, the group notices and mobile's
+  locked screens are verified by tests and markup, and no screenshot exists.
 - 1.1.11 batch, 2026-10-21: `backend` `npx tsc --noEmit` clean; `node
   test/e2ee-client.e2e.cjs` **8/8** (the two new attachment cases included);
   `npm run test:e2e` **32/32** in `security.e2e.cjs`; root `npm run test:e2ee`
@@ -983,33 +1053,42 @@ server row to hold a reaction.
 
 ## Unresolved / known issues
 
-- **Encryption is live on web direct chats only.** Since Phase 2b landed
-  (2026-10-21), a direct conversation opened from the web app between two web
-  devices carries nothing but ciphertext the server cannot read — and since
-  Phase 4 landed the same day, that includes **files and pictures**, which are
-  sealed on the sender's device and stored as opaque blobs the server cannot
-  name, type, scan or open. Everything else is still plaintext and the server
-  still reads it: **groups on every client, including their attachments, mobile on
-  every client, and any existing direct chat nobody has opened from the web app
-  since the rollout** (negotiation is lazy, so an untouched chat stays
-  plaintext). Design doc §11 is the authoritative statement.
-- **Mobile is now the blocking gap, not an unfinished nice-to-have.** A chat a
-  web user encrypted locks the phone out of sending: the backend refuses
-  plaintext into an `e2ee` conversation with 400, and the mobile UI has no MLS
-  client and no explanation. Until Phase 2c ships, web users who chat with mobile
-  users can make that chat unusable for them. The mobile composer needs either
-  the protocol or a visible "this chat is encrypted — update the app" state.
+- **Encryption is live on web direct chats and on groups created from the web.**
+  Since Phase 2b landed (2026-10-21), a direct conversation opened from the web
+  app between two web devices carries nothing but ciphertext the server cannot
+  read — and since Phase 4 landed the same day, that includes **files and
+  pictures**, which are sealed on the sender's device and stored as opaque blobs
+  the server cannot name, type, scan or open. Phase 3 extends the same treatment
+  to groups created with the encryption switch, on every surface: no plaintext
+  rows, no preview, no server-readable attachments. Everything else is still
+  plaintext and the server still reads it: **groups created without the switch,
+  including every group created from mobile**, direct chats nobody has opened
+  from the web app since the rollout (negotiation is lazy), and mobile on every
+  client. Design doc §11 is the authoritative statement.
+- **Mobile is now locked out visibly, but still locked out.** A chat a web user
+  encrypted rejects the phone's plaintext sends with 400. The phone no longer
+  fails silently — it shows a locked composer, a locked chat-list row and says
+  that reading and sending happen in the web version — but it still has no MLS
+  client and cannot read or write the chat. Phase 2c is what closes it.
+- **An encrypted group's membership is frozen.** Add/remove participant returns
+  400 on an encrypted group; adding a member requires an MLS commit and a
+  Welcome routed through the ordered transport, and removing one requires a
+  rekey, neither of which exists yet. The member cap is 16 because every
+  member's devices ride inside the single Welcome envelope.
 - **No key verification yet.** Key adoption is trust-on-first-use: nothing shows
   safety numbers, so a key substituted by the server at first contact would not
   be detected. Phase 5.
 - **A device added after a conversation started cannot read it.** The Welcome
   addresses the devices that existed when the group was created, and there is no
   history sharing between devices, so a second browser or a reinstalled phone
-  joins an ongoing chat with a gap. Not solved by Phase 2b.
+  joins an ongoing chat with a gap. This now applies to encrypted groups as
+  well: a member who registered a new device after the group was created is in
+  the conversation but not in its MLS group.
 - **No recovery, by decision.** Losing every device loses the history; only a
   user-initiated passphrase-encrypted export is allowed and it is Phase 5 work.
-- **Attachments and reactions are blocked inside encrypted chats**, not encrypted
-  (Phase 4), and search there covers only this device's local cache.
+- **Reactions are blocked inside encrypted chats**, not encrypted, and search
+  there covers only this device's local cache. Encrypted attachments are fully
+  supported since Phase 4.
 - The envelope stream is unbounded: `e2ee_envelopes` rows are never deleted, and
   an encrypted chat has no server-visible read state to prune against (a
   high-water mark tells us what *one* participant has seen, not what all of them
@@ -1099,19 +1178,22 @@ server row to hold a reaction.
    before upload. Hermes has no `crypto.subtle`, so the authenticated-encryption
    binding has to be chosen and proved on a device — the descriptor itself is
    plain JSON plus base64 and needs nothing exotic.
-   **The interim hazard is user-visible and must be closed in the same batch:**
-   a chat a web user encrypted rejects the phone's plaintext sends with a bare
-   400, so until mobile speaks MLS the composer has to say "this chat is
-   encrypted — update the app" instead of failing silently.
+   **The interim hazard is now closed on the UI side:** the phone locks the
+   composer and the chat-list row and explains that the conversation lives in
+   the web version, so a plaintext send is no longer attempted and no longer
+   fails with a bare 400. It still cannot read or write encrypted chats, so
+   Phase 2c remains the priority.
    Custody rule unchanged and already encoded: no escrow, no recovery, nothing
    at any access level can read message content (design doc §4). The provider
    still has never run on a real phone.
-6. Then E2EE Phase 3 (groups): commit/welcome routing through the ordered
-   transport, rekey on membership change, removal semantics. Groups are the last
-   large plaintext surface, and only Phase 3 may set the flag on one. Group
-   attachments move in the same batch: the blob endpoint refuses a conversation
-   without the flag, so a group file is plaintext with a visible name and MIME
-   type until then, and the notice line says so on every group.
+6. Then E2EE Phase 3b (encrypted group membership): route the MLS commit and
+   Welcome through the ordered transport so surviving members advance the epoch
+   and the new member joins, implement removal with a rekey, and lift the
+   current 400 on add/remove. Also cover a member's new device joining an
+   existing group without losing the transcript (Welcome plus history sharing,
+   currently a permanent gap). Groups created without the encryption switch
+   remain the last large plaintext surface on web; the creation switch is how a
+   group opts in.
 7. Add a web security review pass (CSP, token storage trade-off) and cover the
    signed-URL download path with a cross-user authorization test.
 8. Run the mobile app on a native emulator or device (RTL header, safe areas,
@@ -1125,6 +1207,9 @@ server row to hold a reaction.
    for 1.1.7: the in-bubble footer, chips and picker strip were verified by
    measured bounding boxes, not by eye — the image-bubble padding and the
    34pt tapback row at 320pt width are the two places a real screen is most
-   likely to disagree with the maths.
+   likely to disagree with the maths. Phase 3 adds the new-group encryption
+   switch, the group-specific notice and chip, and mobile's locked composer and
+   locked chat-list row; they are covered by tests and markup assertions, and
+   none has been seen on a screen.
 9. Self-host Font Awesome so the web client can run without a CDN and under a
    strict CSP.

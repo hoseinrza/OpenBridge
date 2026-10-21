@@ -24,6 +24,7 @@ jest.mock('../src/services/api', () => ({
     memberCount: (group.participants ?? []).length,
     participants: group.participants ?? [],
     unread: group.unread ?? 0,
+    encrypted: group.e2ee === true,
     updatedAt: group.updatedAt,
   })),
 }));
@@ -75,6 +76,18 @@ test('renders direct and group rows with the unread badge', async () => {
   expect(view.getByText('تیم')).toBeTruthy();
   expect(view.getByLabelText('2 پیام خوانده‌نشده')).toBeTruthy();
   expect(view.getByText('2 عضو')).toBeTruthy();
+});
+
+test('marks an encrypted chat and hides an unread count it can never clear', async () => {
+  fetchConversations.mockResolvedValue([
+    { ...direct, unread: 7, e2ee: true },
+  ]);
+  fetchGroups.mockResolvedValue([{ ...group, e2ee: true }]);
+  const view = render(<ChatListScreen navigation={navigation} />);
+  expect(await view.findByText('رمزنگاری سرتاسری')).toBeTruthy();
+  expect(view.getByText('2 عضو · رمزنگاری سرتاسری')).toBeTruthy();
+  expect(view.queryByLabelText('7 پیام خوانده‌نشده')).toBeNull();
+  expect(view.getAllByLabelText('فقط در نسخهٔ وب قابل خواندن است')).toHaveLength(2);
 });
 
 test('filters rows by name and username', async () => {

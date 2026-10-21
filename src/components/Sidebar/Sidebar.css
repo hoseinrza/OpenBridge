@@ -104,26 +104,11 @@
 .sidebar-section {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: var(--sp-2) var(--sp-5) var(--sp-2);
   flex-shrink: 0;
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--text-3);
-}
-
-.sidebar-count {
-  min-width: 22px;
-  height: 20px;
-  padding: 0 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--r-pill);
-  background: var(--surface-3);
-  color: var(--text-2);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
 }
 
 /* ── Conversation list ───────────────────────────────────────── */

@@ -85,9 +85,18 @@ export const E2EE_MAX_PACKAGES_PER_DEVICE = positiveInt('E2EE_MAX_PACKAGES_PER_D
 export const E2EE_MAX_PACKAGE_CHARS = positiveInt('E2EE_MAX_PACKAGE_CHARS', 4096);
 // Handing out a KeyPackage tells the caller that the account has a registered
 // device, so the endpoint is rate limited per IP like the other enumeration
-// surfaces.
-export const E2EE_CLAIM_LIMIT = positiveInt('E2EE_CLAIM_LIMIT', 20);
+// surfaces. Opening an encrypted group claims one package per device of every
+// member, so the window has to cover a whole group, not just a single chat.
+export const E2EE_CLAIM_LIMIT = positiveInt('E2EE_CLAIM_LIMIT', 40);
 export const E2EE_CLAIM_WINDOW_SECONDS = positiveInt('E2EE_CLAIM_WINDOW_SECONDS', 60);
+
+// An encrypted group carries every member's devices inside the Welcome that
+// opens it, and one Welcome has to fit E2EE_MAX_ENVELOPE_CHARS. Measured with
+// the pure provider: about 470 base64 characters per device plus ~600 of
+// framing, so 16 members stays comfortably under the cap even when some of them
+// have several devices. The client refuses a group whose device total would push
+// the Welcome over the envelope limit before it asks the server for one.
+export const E2EE_MAX_GROUP_MEMBERS = positiveInt('E2EE_MAX_GROUP_MEMBERS', 16);
 
 // Transport for encrypted conversations: one MLS message per envelope, carried
 // as base64. The cap is the existing 4000-character plaintext limit plus MLS

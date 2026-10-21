@@ -38,6 +38,10 @@ export const DEFAULT_CIPHERSUITE = SUPPORTED_CIPHERSUITES[0];
 const GROUP_ID_BYTES = 8;
 const CLIENT_ID_BYTES = 16;
 const FETCH_PAGE = 50;
+// Mirrors E2EE_MAX_ENVELOPE_CHARS on the server. A Welcome carries the whole
+// ratchet tree, so an oversized one is refused here, before the conversation
+// exists, rather than after every member has already been added to it.
+const MAX_ENVELOPE_CHARS = 16384;
 const SEQ_WIDTH = 9;
 // How many of our own submitted envelope ids a device remembers, which is how
 // it tells its own echo apart from a sibling device that sends under the same
@@ -470,6 +474,100 @@ export async function createE2eeClient({
     return serialize(created.conversationId, () => createDirectGroup(created.conversationId, packages));
   }
 
+  /**
+   * Creates a group that is encrypted from its first envelope. Every member's
+   * devices are invited, plus this account's other devices, so the group is
+   * readable everywhere the account is signed in. A member with no key material
+   * is refused before the conversation exists: adding somebody the Welcome
+   * cannot reach would produce a group that silently excludes them.
+   */
+  async function createEncryptedGroupChat(name, memberIds) {
+    await ensureDevice();
+    const unique = [...new Set(Array.isArray(memberIds) ? memberIds : [])]
+      .filter((id) => typeof id === 'string' && id && id !== me.id);
+    if (!unique.length) throw fail('members', 'حداقل یک عضو دیگر انتخاب کن');
+
+    const packages = [];
+    for (const userId of unique) {
+      let claimed;
+      try {
+        claimed = await claimPackages(userId);
+      } catch (error) {
+        // The claim endpoint answers 404 for "no devices", "empty pool" and
+        // "unknown account" alike, so the specific reason a group cannot invite
+        // this member is only known here.
+        if (error?.status === 404) throw fail('no-keys', 'یکی از اعضا هنوز کلیدی برای دعوت شدن ندارد');
+        throw error;
+      }
+      if (!claimed.length) throw fail('no-keys', 'یکی از اعضا هنوز کلیدی برای دعوت شدن ندارد');
+      packages.push(...claimed);
+    }
+    const devices = await transport.api('e2ee/devices');
+    if (devices.length > 1) packages.push(...await claimPackages(me.id));
+
+    const own = await mintKeyPackage();
+    const groupId = impl.rng.randomBytes(GROUP_ID_BYTES);
+    const opened = await createGroup(groupId, publicOf(own), privateOf(own), [], impl);
+    const commit = await createCommit(
+      { state: opened, cipherSuite: impl },
+      {
+        extraProposals: packages.map((keyPackage) => ({ proposalType: 'add', add: { keyPackage } })),
+        ratchetTreeExtension: true,
+      },
+    );
+    commit.consumed.forEach(zeroOutUint8Array);
+
+    const welcome = pack(WELCOME(commit.welcome));
+    if (welcome.length > MAX_ENVELOPE_CHARS) {
+      throw fail('welcome-too-large', 'حجم دعوت این گروه از یک بسته بیشتر می‌شود؛ تعداد اعضا یا دستگاه‌ها را کم کن');
+    }
+
+    const conversation = await transport.api('messages/e2ee/group', {
+      method: 'POST',
+      body: { name, memberIds: unique },
+    });
+    await patchRecord(conversation.id, {
+      groupId: toBase64(groupId),
+      state: saveState(commit.newState),
+      members: membersOf(commit.newState),
+      // Kept until the append is acknowledged: an interrupted create still has
+      // the keys and the Welcome, so opening the group can finish the job.
+      welcomePending: welcome,
+    });
+    try {
+      await appendEnvelope(conversation.id, welcome);
+      await patchRecord(conversation.id, { welcomePending: null });
+    } catch {
+      // The conversation exists and is ours; openGroup retries the Welcome.
+    }
+
+    return { ...conversation, e2ee: true };
+  }
+
+  /** Opens an existing encrypted group, joining from its Welcome if needed. */
+  async function openGroup(conversationId) {
+    await ensureDevice();
+    const probe = await transport.api(`messages/e2ee/group/${conversationId}`);
+    if (!probe?.e2ee) return { conversationId, e2ee: false };
+
+    const record = await readRecord(conversationId);
+    if (record?.welcomePending) {
+      const existing = await transport.fetchEnvelopes(conversationId, 0, 1);
+      if (!existing.length) await appendEnvelope(conversationId, record.welcomePending);
+      await patchRecord(conversationId, { welcomePending: null });
+    }
+
+    const caught = await catchUp(conversationId);
+    const current = await status(conversationId);
+    return {
+      conversationId,
+      e2ee: true,
+      open: current.open,
+      appliedSeq: caught.appliedSeq,
+      error: caught.error,
+    };
+  }
+
   /** Encrypts `text` into the next envelope of a conversation and hands it to the server. */
   async function send(conversationId, text) {
     if (typeof text !== 'string' || !text.length) throw fail('empty', 'پیام خالی است');
@@ -566,6 +664,12 @@ export async function createE2eeClient({
     return entries.sort((a, b) => a.seq - b.seq);
   }
 
+  /** The newest decrypted message of a conversation, or null. For chat-list previews. */
+  async function lastMessage(conversationId) {
+    const entries = await store.list(MESSAGE_PREFIX + conversationId + '/');
+    return entries.reduce((latest, entry) => (latest === null || entry.seq > latest.seq ? entry : latest), null);
+  }
+
   /**
    * Every conversation this device holds a record for. A reconnect has to walk
    * all of them, not only the one on screen: MLS ratchets are per conversation,
@@ -626,11 +730,14 @@ export async function createE2eeClient({
       handlers.clear();
     },
     conversations,
+    createEncryptedGroupChat,
     devices,
     history,
+    lastMessage,
     markRead,
     onMessage,
     openDirect,
+    openGroup,
     ready,
     receive,
     reset,

@@ -65,6 +65,7 @@ export default function ChatListScreen({ navigation }) {
           .map(c => ({
             ...normalizeUser(c.user),
             unread: c.unread ?? 0,
+            encrypted: c.e2ee === true,
             updatedAt: c.updatedAt,
           })),
         ...groups.map(normalizeGroup).filter(Boolean),
@@ -83,9 +84,14 @@ export default function ChatListScreen({ navigation }) {
     if (!socket) return undefined;
     const refresh = () => load(true);
     socket.on('message:new', refresh);
+    // Encrypted chats never produce a plaintext row, so their list entry moves
+    // only when an envelope is announced. The phone does not read it; it just
+    // re-reads the list, which now carries the server's e2ee flag.
+    socket.on('e2ee:envelope', refresh);
     socket.on('connect', refresh);
     return () => {
       socket.off('message:new', refresh);
+      socket.off('e2ee:envelope', refresh);
       socket.off('connect', refresh);
     };
   }, [socket, load]);
@@ -107,13 +113,17 @@ export default function ChatListScreen({ navigation }) {
 
   function renderRow({ item }) {
     const isGroup = item.kind === 'group';
-    const unread = item.unread ?? 0;
+    const locked = item.encrypted === true;
+    // An encrypted chat is demoted to a signpost on this build: it cannot be
+    // decrypted here and its read mark only moves from a web client, so a count
+    // would never clear. The lock says what the row actually is.
+    const unread = locked ? 0 : (item.unread ?? 0);
     return (
       <Pressable
         style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
         onPress={() => navigation.navigate('Chat', { peer: item })}
         accessibilityRole="button"
-        accessibilityLabel={`${item.name}${unread ? `، ${unread} پیام خوانده‌نشده` : ''}`}
+        accessibilityLabel={`${item.name}${locked ? '، رمزنگاری‌شده؛ فقط در وب قابل خواندن است' : ''}${unread ? `، ${unread} پیام خوانده‌نشده` : ''}`}
       >
         <Avatar
           uri={item.avatar}
@@ -132,9 +142,15 @@ export default function ChatListScreen({ navigation }) {
 
           <View style={styles.rowBottom}>
             <Text style={styles.meta} numberOfLines={1}>
-              {isGroup ? `${item.memberCount ?? 0} عضو` : `@${item.username ?? ''}`}
+              {locked
+                ? (isGroup ? `${item.memberCount ?? 0} عضو · رمزنگاری سرتاسری` : 'رمزنگاری سرتاسری')
+                : (isGroup ? `${item.memberCount ?? 0} عضو` : `@${item.username ?? ''}`)}
             </Text>
-            {unread > 0 && (
+            {locked ? (
+              <View style={styles.lockBadge} accessibilityLabel="فقط در نسخهٔ وب قابل خواندن است">
+                <FontAwesome6 name="lock" size={9} color={colors.text2} />
+              </View>
+            ) : unread > 0 && (
               <View style={styles.badge} accessibilityLabel={`${unread} پیام خوانده‌نشده`}>
                 <Text style={styles.badgeText}>{unread.toLocaleString('fa-IR')}</Text>
               </View>
@@ -338,6 +354,11 @@ function makeStyles(colors) {
       alignItems: 'center', justifyContent: 'center',
     },
     badgeText: { color: colors.onAccent, fontFamily: fonts.semibold, fontSize: type.xs },
+    lockBadge: {
+      width: 20, height: 20, borderRadius: radius.pill,
+      backgroundColor: colors.surface2, borderWidth: 1, borderColor: colors.border,
+      alignItems: 'center', justifyContent: 'center',
+    },
 
     state: {
       flex: 1,

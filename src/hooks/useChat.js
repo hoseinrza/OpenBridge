@@ -58,6 +58,11 @@ function normalize(msg, myId) {
 function normalizeEncrypted(message, peer) {
   const created = new Date(message.at).getTime();
   const attachment = message.attachment ?? null;
+  // A group message names a participant, not the conversation; a direct one is
+  // always from the single peer on the other side.
+  const author = isGroup(peer)
+    ? peer?.participants?.find(p => p.id === message.senderId)
+    : peer;
   return {
     id:             `e2ee-${message.seq}`,
     type:           attachment ? (attachment.mime?.startsWith('image/') ? 'image' : 'file') : 'text',
@@ -68,8 +73,8 @@ function normalizeEncrypted(message, peer) {
     side:           message.mine ? 'mine' : 'other',
     senderId:       message.senderId,
     conversationId: message.conversationId,
-    sender:         message.mine ? undefined : peer?.name,
-    avatar:         message.mine ? null : (peer?.avatar ? resolveUrl(peer.avatar) : null),
+    sender:         message.mine ? undefined : author?.name,
+    avatar:         message.mine ? null : (author?.avatar ? resolveUrl(author.avatar) : null),
     time:           timeIn(created),
     createdAt:      created,
     encrypted:      true,
@@ -149,8 +154,10 @@ export function useChat(targetUser, currentUser, onIncoming) {
 
     encryptedSendRef.current = async (target, text) => {
       const client = await initE2ee({ id: currentUserRef.current.id });
-      const conversationId = secureRef.current?.conversationId
-        ?? (await client.openDirect(target.id)).conversationId;
+      const opened = secureRef.current?.conversationId
+        ? null
+        : await (isGroup(target) ? client.openGroup(target.id) : client.openDirect(target.id));
+      const conversationId = secureRef.current?.conversationId ?? opened.conversationId;
       await client.send(conversationId, text);
       const history = await client.history(conversationId);
       setSecure({ mode: 'open', conversationId, error: null });
@@ -165,8 +172,10 @@ export function useChat(targetUser, currentUser, onIncoming) {
     // the server, and the file is encrypted before anything is sent at all.
     attachmentSendRef.current = async (target, file) => {
       const client = await initE2ee({ id: currentUserRef.current.id });
-      const conversationId = secureRef.current?.conversationId
-        ?? (await client.openDirect(target.id)).conversationId;
+      const opened = secureRef.current?.conversationId
+        ? null
+        : await (isGroup(target) ? client.openGroup(target.id) : client.openDirect(target.id));
+      const conversationId = secureRef.current?.conversationId ?? opened.conversationId;
       const { id, key, iv } = await uploadEncrypted(file, conversationId);
       await client.send(conversationId, packAttachment({
         blob: id,
@@ -295,7 +304,7 @@ export function useChat(targetUser, currentUser, onIncoming) {
   // ── Decide how this conversation is carried, and join it if it is open ──
   useEffect(() => {
     const target = targetRef.current;
-    if (!target || isGroup(target) || !currentUserId) {
+    if (!target || !currentUserId) {
       setSecure(null);
       return undefined;
     }
@@ -306,27 +315,49 @@ export function useChat(targetUser, currentUser, onIncoming) {
 
     (async () => {
       const client = await initE2ee({ id: currentUserId });
-      const probe = await apiCall(`messages/e2ee/direct/${target.id}`);
-      if (cancelled) return;
-      if (!probe.e2ee || !probe.conversationId) {
-        setSecure({ mode: 'plain' });
-        return;
-      }
+      const group = isGroup(target);
       try {
-        // Reading the stream is what joins the group: the Welcome is envelope
-        // one, so a device that has never seen this chat needs nothing else.
-        await client.openDirect(target.id);
-        const caught = await client.catchUp(probe.conversationId);
+        let conversationId;
+        let streamError = null;
+
+        if (group) {
+          // A group is ciphertext for its whole life or not at all, so this is
+          // a read of an existing MLS group, never a negotiation.
+          const opened = await client.openGroup(target.id);
+          if (cancelled) return;
+          if (!opened.e2ee) {
+            setSecure({ mode: 'plain' });
+            return;
+          }
+          conversationId = opened.conversationId;
+          streamError = opened.error;
+          if (!opened.open && !streamError) {
+            throw new Error('این گروه هنوز روی این دستگاه باز نشده است');
+          }
+        } else {
+          const probe = await apiCall(`messages/e2ee/direct/${target.id}`);
+          if (cancelled) return;
+          if (!probe.e2ee || !probe.conversationId) {
+            setSecure({ mode: 'plain' });
+            return;
+          }
+          // Reading the stream is what joins the group: the Welcome is envelope
+          // one, so a device that has never seen this chat needs nothing else.
+          await client.openDirect(target.id);
+          conversationId = probe.conversationId;
+        }
+
+        const caught = await client.catchUp(conversationId);
         if (cancelled) return;
-        const history = await client.history(probe.conversationId);
+        const history = await client.history(conversationId);
         if (cancelled) return;
-        setSecure({ mode: 'open', conversationId: probe.conversationId, error: caught.error });
+        setSecure({ mode: 'open', conversationId, error: caught.error ?? streamError });
         setMessages(prev => mergeMessages(prev, history.map(m => normalizeEncrypted(m, target))));
       } catch (error) {
         if (cancelled) return;
         setSecure({
           mode: 'unavailable',
-          conversationId: probe.conversationId,
+          conversationId: target.id,
           reason: error.message || 'این گفتگو روی این دستگاه رمزگشایی نمی‌شود',
         });
       }
@@ -346,16 +377,16 @@ export function useChat(targetUser, currentUser, onIncoming) {
         stop = client.onMessage((incoming) => {
           const target = targetRef.current;
           const status = secureRef.current;
-          if (!isGroup(target)) {
-            if (status?.conversationId === incoming.conversationId) {
-              setMessages(prev => mergeMessages(prev, [normalizeEncrypted(incoming, target)]));
-              // Reading it here is the only fact behind a read mark.
-              if (!incoming.mine) getE2ee()?.markRead(incoming.conversationId).catch(() => {});
-            } else if (status?.mode === 'plain' && !openingRef.current) {
-              // The peer encrypted this chat a moment ago; re-probe so the
-              // header, the composer and the store agree about it.
-              setHistoryNonce(n => n + 1);
-            }
+          if (target && status?.conversationId === incoming.conversationId) {
+            setMessages(prev => mergeMessages(prev, [normalizeEncrypted(incoming, target)]));
+            // Reading it here is the only fact behind a read mark.
+            if (!incoming.mine) getE2ee()?.markRead(incoming.conversationId).catch(() => {});
+          } else if (status?.mode === 'plain' && !openingRef.current
+            && (!isGroup(target) || incoming.conversationId === target.id)) {
+            // The conversation was encrypted a moment ago (a direct chat by the
+            // first message, a group by its owner); re-probe so the header, the
+            // composer and the store agree about it.
+            setHistoryNonce(n => n + 1);
           }
           // Encrypted traffic never appears in the plaintext stream, so the
           // chat list is refreshed from here as well.
@@ -419,14 +450,15 @@ export function useChat(targetUser, currentUser, onIncoming) {
       // already have marked encrypted, which is a send the server must refuse.
       return { ok: false, error: 'لحظه‌ای صبر کن، وضعیت رمزنگاری این گفتگو در حال بررسی است' };
     }
-    // A direct text message is encrypted whenever this device can do it, and
-    // opening the group is what makes the conversation encrypted for good.
-    if (msg.type === 'text' && !isGroup(target)
-      && (status?.mode === 'open' || status?.mode === 'plain')) {
+    // Text is encrypted whenever this device holds the conversation's keys. A
+    // plaintext direct chat is negotiated into one by sending; a group is only
+    // ever encrypted by its creator, so a plaintext group stays plaintext.
+    if (msg.type === 'text' && (status?.mode === 'open'
+      || (!isGroup(target) && status?.mode === 'plain'))) {
       try {
         return await encryptedSendRef.current(target, msg.text.trim());
       } catch (error) {
-        if (!peerWithoutKeys(error)) {
+        if (!peerWithoutKeys(error) || isGroup(target)) {
           return { ok: false, error: error.message || 'رمزنگاری یا ارسال پیام ناموفق بود' };
         }
         setSecure(prev => ({ ...(prev ?? {}), mode: 'plain', reason: error.message }));
@@ -441,7 +473,7 @@ export function useChat(targetUser, currentUser, onIncoming) {
       try {
         return await attachmentSendRef.current(target, msg._file);
       } catch (error) {
-        if (!peerWithoutKeys(error)) {
+        if (!peerWithoutKeys(error) || isGroup(target)) {
           return { ok: false, error: error.message || 'رمزنگاری یا ارسال فایل ناموفق بود' };
         }
         setSecure(prev => ({ ...(prev ?? {}), mode: 'plain', reason: error.message }));

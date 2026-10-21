@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { searchUsers, createGroup, normalizeUser } from '../../services/api.js';
+import { createEncryptedGroup } from '../../services/e2ee.js';
 import Avatar from '../ui/Avatar.jsx';
 import Modal from '../ui/Modal.jsx';
 import ContactsPanel from './ContactsPanel.jsx';
 import './NewChatModal.css';
 
-export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
+export default function NewChatModal({ currentUser, onClose, onSelect, onGroupCreated }) {
   const [mode,     setMode]     = useState('direct');
   const [source,   setSource]   = useState('search');
   const [query,    setQuery]    = useState('');
@@ -14,6 +15,7 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
   const [error,    setError]    = useState('');
   const [groupName, setGroupName] = useState('');
   const [selected,  setSelected]  = useState([]);
+  const [secureGroup, setSecureGroup] = useState(false);
   const [creating,  setCreating]  = useState(false);
   const [createError, setCreateError] = useState('');
   const inputRef    = useRef(null);
@@ -78,10 +80,18 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
       return;
     }
 
+    if (secureGroup && !currentUser?.id) {
+      setCreateError('برای رمزنگاری باید وارد حساب خود شده باشی');
+      return;
+    }
+
     setCreating(true);
     setCreateError('');
     try {
-      const conversation = await createGroup(name, selected.map(s => s.id));
+      const memberIds = selected.map(s => s.id);
+      const conversation = secureGroup
+        ? await createEncryptedGroup({ id: currentUser.id }, name, memberIds)
+        : await createGroup(name, memberIds);
       onGroupCreated?.(conversation);
     } catch (err) {
       setCreateError(err.message || 'ساخت گروه ناموفق بود');
@@ -157,6 +167,23 @@ export default function NewChatModal({ onClose, onSelect, onGroupCreated }) {
                 ))}
               </div>
             )}
+            <label className={`newchat-secure ${secureGroup ? 'is-on' : ''}`}>
+              <input
+                type="checkbox"
+                checked={secureGroup}
+                onChange={e => { setSecureGroup(e.target.checked); setCreateError(''); }}
+                disabled={creating}
+              />
+              <span className="newchat-secure-icon" aria-hidden="true">
+                <i className={`fas ${secureGroup ? 'fa-lock' : 'fa-lock-open'}`} />
+              </span>
+              <span className="newchat-secure-text">
+                <span className="newchat-secure-title">رمزنگاری سرتاسری</span>
+                <span className="newchat-secure-note">
+                  پیام‌ها فقط روی دستگاه اعضا رمزگشایی می‌شوند. عضوی که هنوز روی وب کلید نساخته، یا نسخهٔ موبایل، نمی‌تواند این گروه را باز کند.
+                </span>
+              </span>
+            </label>
           </div>
         )}
 

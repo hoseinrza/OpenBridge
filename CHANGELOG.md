@@ -4,6 +4,88 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.12] - 2026-10-21
+
+E2EE Phase 3 on the web: a group created with the new encryption option is
+end-to-end encrypted from its first byte, and mobile now presents an encrypted
+chat as locked instead of failing a plaintext send.
+
+### Added
+- **Encrypted groups on the web.** The new-group dialog has an encryption
+  switch. When it is on, the client builds the MLS group first — it claims one
+  KeyPackage per active device of every member, adds the creator's other devices
+  when there are any, and publishes the Welcome as envelope 1 — and only then
+  calls `POST /api/messages/e2ee/group`. The group is ciphertext for its whole
+  life: no plaintext row, no server-readable attachment, no server-side preview.
+  The server caps it at `E2EE_MAX_GROUP_MEMBERS` (16), and the client refuses a
+  Welcome that would not fit one 16 384-character envelope (`welcome-too-large`)
+  before creating anything.
+- **`GET /api/messages/e2ee/group/:conversationId`**, the read-only probe the
+  group screen uses. It is member-scoped: an unknown id, another account's group
+  and a non-member's guess all answer `{ conversationId: null, e2ee: false }`.
+- **Chat-list previews without a server-side transcript.** Plaintext
+  conversations now carry a last-message preview and `GET /api/messages/groups`
+  carries `e2ee`. An encrypted direct chat is sent no preview field at all, and
+  an encrypted group's preview is null because it has no row to read, so the web
+  list fills those rows from its own decrypted MLS history; a chat this device
+  has not opened shows none.
+- **Unread the only way an encrypted group can count it.** The badge is the
+  number of envelopes above the caller's `e2eeReadSeq`, and the Welcome is
+  consumed at join so it never appears as an unread message.
+
+### Changed
+- **Encrypted group membership is frozen.** Adding or removing a participant
+  returns 400 until an MLS commit/rekey path exists. A database-only change
+  would leave a new member unable to decrypt and a removed member holding the
+  old epoch, so the server refuses the half-change rather than producing a group
+  that only looks shared.
+- **Mobile marks an encrypted chat as locked instead of trying.** The state is
+  probed when the chat opens and flips live when an `e2ee:envelope` arrives; the
+  composer is disabled with an explanation that reading and sending happen in
+  the web version, the chat list shows a lock in place of an unread count it
+  could never clear, and typing and read marks are suppressed. No plaintext send
+  is attempted, so the user no longer meets a bare 400.
+- **Group-aware wording on web.** The notice and the header chip say the group's
+  members decrypt it rather than «شما و دستگاه طرف مقابل», a plaintext group
+  states that it is not encrypted instead of borrowing the direct-chat line, and
+  group messages take sender name and avatar from the participant list.
+- `backend/.env.example` documents `E2EE_MAX_GROUP_MEMBERS` and the raised
+  `E2EE_CLAIM_LIMIT` (40, so one window can cover a whole group's devices).
+
+### Tests
+- `backend`: `npm run test:e2e` — 41/41 against the real local PostgreSQL,
+  including a group case that drives the real `shared/e2ee/client.js`: the
+  Welcome opens the group for every invited device (one account with two devices
+  included), a message decrypts on all of them, the database holds exactly two
+  opaque envelopes and zero plaintext rows, only the post-Welcome envelope is
+  unread, plaintext sends are refused, add/remove answer 400, an outsider's
+  probe learns nothing, and a keyless member is refused before any conversation
+  is created. The security suite's obsolete "groups are out of scope" case now
+  asserts the flagged-group rules instead.
+- `mobile`: `npm run test:ci` — 5 suites, 36 tests, including a new hook test
+  that proves an open plaintext chat flips to locked on the first envelope and
+  refuses to send.
+- Root `npm run test:e2ee` 5/5, `npm run lint` clean, `npm run build` clean,
+  and `npx expo export --platform android` bundled the Android app (2.5 MB).
+
+### Known limits
+- **Mobile still has no MLS client.** It can neither read nor send in an
+  encrypted chat; the lock is an honest signpost, not a fix. Phase 2c.
+- **An encrypted group's membership cannot change**, and the group is capped at
+  16 members because every member's devices ride inside the single Welcome.
+  Lifting either needs the commit/rekey path.
+- **Groups created without the switch — including every group created from
+  mobile — remain plaintext**, as do direct chats no web client has opened
+  since the rollout.
+- **A device registered after the group was created is not in its MLS group**
+  and cannot read it; there is no history sharing yet.
+- **No safety numbers / out-of-band verification** (trust-on-first-use only)
+  and **no recovery**; losing every device loses the history.
+- Reactions remain unavailable in encrypted chats, search covers only the
+  local decrypted cache, and the new UI (the group switch, the group notices,
+  mobile's locked screens) is covered by tests and markup, not by a device run
+  or a screenshot.
+
 ## [1.1.11] - 2026-10-21
 
 E2EE Phase 4 on the web client: attachments are now encrypted on the sender's

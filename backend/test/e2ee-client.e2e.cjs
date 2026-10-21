@@ -624,3 +624,111 @@ test('a conversation that is not encrypted cannot be used as a file host', async
   assert.equal(trespass.status, 403, 'a stranger cannot write into a conversation');
   assert.equal(await prisma.encryptedBlob.count({ where: { conversationId } }), 0, 'and left no blob behind');
 });
+
+test('an encrypted group opens for every invited device and only carries ciphertext', async () => {
+  const owner = await makeClient(await createUser('gowner'));
+  const first = await makeClient(await createUser('gfirst'));
+  const second = await makeClient(await createUser('gsecond'));
+  // One account with two devices: the single Welcome has to reach both of them.
+  const secondPhone = await makeClient(second.session);
+  await Promise.all([
+    owner.client.ready(),
+    first.client.ready(),
+    second.client.ready(),
+    secondPhone.client.ready(),
+  ]);
+
+  const chat = await owner.client.createEncryptedGroupChat(
+    'تیم امن',
+    [first.session.user.id, second.session.user.id],
+  );
+  assert.match(chat.id, /-/g, 'the encrypted group is a real conversation');
+  assert.equal(chat.e2ee, true, 'and it says so on the wire');
+
+  for (const handle of [first, second, secondPhone]) {
+    const opened = await handle.client.openGroup(chat.id);
+    assert.equal(opened.e2ee, true, 'the member sees an encrypted group');
+    assert.equal(opened.open, true, 'and holds its keys after reading the Welcome');
+    const status = await handle.client.status(chat.id);
+    assert.deepEqual(
+      status.members.sort(),
+      [owner.session.user.id, first.session.user.id, second.session.user.id].sort(),
+      'the tree knows all three accounts, once each',
+    );
+  }
+
+  const text = 'این گروه از پیام اول رمزنگاری شده است';
+  await owner.client.send(chat.id, text);
+  for (const handle of [owner, first, second, secondPhone]) {
+    const received = await waitUntil(async () => {
+      const history = await handle.client.history(chat.id);
+      return history.find(message => message.text === text) ?? null;
+    }, 'every device of the group to decrypt the message');
+    assert.equal(received.senderId, owner.session.user.id, 'the sender is the account in the tree');
+  }
+
+  // What the server can see: one Welcome, one opaque message, and not a single
+  // readable row in the message table.
+  const envelopes = await prisma.e2eeEnvelope.findMany({
+    where: { conversationId: chat.id }, orderBy: { seq: 'asc' },
+  });
+  assert.deepEqual(envelopes.map(envelope => envelope.seq), [1, 2], 'the Welcome opens the stream');
+  for (const envelope of envelopes) {
+    const raw = Buffer.from(envelope.content, 'base64');
+    assert.equal(raw.includes(text, 'utf8'), false, `envelope ${envelope.seq} carries no text`);
+    assert.equal(raw.includes('گروه', 'utf8'), false, `envelope ${envelope.seq} carries no group name`);
+  }
+  assert.equal(await prisma.message.count({ where: { conversationId: chat.id } }), 0,
+    'a group message never becomes a plaintext row');
+
+  // The unread badge of an encrypted group counts envelopes above the member's
+  // own high-water mark. The Welcome is consumed at the moment of joining, so
+  // only the message sent afterwards is unread. Reading it, which only a device
+  // holding the keys can report, clears the rest.
+  const listed = await api('/messages/groups', { token: first.session.token });
+  const entry = listed.data.find(group => group.id === chat.id);
+  assert.equal(entry.e2ee, true, 'the group list marks it encrypted');
+  assert.equal(entry.unread, 1, 'the message, not the Welcome it joined from, is unread');
+  await first.client.markRead(chat.id);
+  const afterRead = await api('/messages/groups', { token: first.session.token });
+  assert.equal(afterRead.data.find(group => group.id === chat.id).unread, 0, 'the member\'s mark clears the badge');
+
+  // A plaintext send into the group is refused, because it would be the one
+  // readable message in a conversation everyone else reads as ciphertext.
+  const plain = await emitAck(first.socket, 'message:send', {
+    conversationId: chat.id, type: 'TEXT', text: 'readable',
+  });
+  assert.equal(plain.ok, false, 'the plaintext path is closed');
+  assert.equal(await prisma.message.count({ where: { conversationId: chat.id } }), 0, 'and wrote nothing');
+
+  // Membership is an MLS commit: the database row alone would leave a new member
+  // unable to decrypt and a removed member still holding the old keys.
+  const fourth = await createUser('gfourth');
+  const add = await api(`/messages/groups/${chat.id}/participants`, {
+    method: 'POST', token: owner.session.token, body: { userId: fourth.user.id },
+  });
+  assert.equal(add.status, 400, 'adding to an encrypted group is refused until a rekey exists');
+  const remove = await api(`/messages/groups/${chat.id}/participants/${second.session.user.id}`, {
+    method: 'DELETE', token: owner.session.token,
+  });
+  assert.equal(remove.status, 400, 'and so is removing a member');
+
+  // No membership hint for someone outside: the probe answers like an id that
+  // does not exist.
+  const outsider = await createUser('goutsider');
+  const outsiderProbe = await api(`/messages/e2ee/group/${chat.id}`, { token: outsider.token });
+  assert.equal(outsiderProbe.status, 200, 'the probe itself answers');
+  assert.deepEqual(outsiderProbe.data, { conversationId: null, e2ee: false }, 'without revealing the group');
+
+  // A member with no registered device cannot be invited, and the refusal comes
+  // before a conversation exists, so there is no half-built group to clean up.
+  const keyless = await createUser('gkeyless');
+  const before = await api('/messages/groups', { token: owner.session.token });
+  await assert.rejects(
+    () => owner.client.createEncryptedGroupChat('بدون کلید', [keyless.user.id]),
+    /کلیدی/,
+    'a keyless member is refused',
+  );
+  const after = await api('/messages/groups', { token: owner.session.token });
+  assert.equal(after.data.length, before.data.length, 'and no group was created');
+});

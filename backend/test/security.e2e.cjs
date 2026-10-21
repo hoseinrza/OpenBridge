@@ -1445,7 +1445,7 @@ test('read state in an encrypted chat is one mark that only moves forward', asyn
   );
 });
 
-test('bad blobs are rejected, streams stay separate, and groups are still out of scope', async () => {
+test('bad blobs are rejected, streams stay separate, and a flagged group carries envelopes only', async () => {
   const { alice, bob, eve } = global.__ctx;
   const conversationId = await encryptedDirect(alice, bob);
 
@@ -1483,17 +1483,38 @@ test('bad blobs are rejected, streams stay separate, and groups are still out of
     'appending to one chat never touches another',
   );
 
-  // Groups have no encrypted transport yet. Flipping the flag ahead of Phase 3
-  // would lock them, so it is refused rather than half-supported.
+  // A flagged group is the same transport with a different membership set:
+  // members may append, plaintext stays closed, and an outsider still learns
+  // only that they are not a member.
   await prisma.conversation.update({ where: { id: group.id }, data: { e2ee: true } });
   try {
-    const groupAppend = await emitAck(sockets.alice, 'e2ee:append', { conversationId: group.id, content: fakeEnvelope('group') });
-    assert.equal(groupAppend.ok, false, 'a group commit needs welcome routing first');
-    assert.match(groupAppend.error, /گروه/);
-    assert.equal(await prisma.e2eeEnvelope.count({ where: { conversationId: group.id } }), 0, 'nothing was stored');
-    const groupPlaintext = await emitAck(sockets.alice, 'message:send', { conversationId: group.id, type: 'text', text: 'flagged group' });
-    assert.equal(groupPlaintext.ok, false, 'a flagged group accepts nothing at all, which is why only Phase 3 may set it');
+    const groupAppend = await emitAck(sockets.alice, 'e2ee:append', {
+      conversationId: group.id,
+      content:        fakeEnvelope('group'),
+    });
+    assert.equal(groupAppend.ok, true, 'a member may append to an encrypted group');
+    assert.equal(
+      await prisma.e2eeEnvelope.count({ where: { conversationId: group.id } }),
+      1,
+      'the group stream stores the opaque blob',
+    );
+    const groupOutsider = await emitAck(sockets.eve, 'e2ee:append', {
+      conversationId: group.id,
+      content:        fakeEnvelope('group-outsider'),
+    });
+    assert.equal(groupOutsider.ok, false, 'an outsider still cannot append');
+    assert.match(groupOutsider.error, /عضو/);
+    const groupPlaintext = await emitAck(sockets.alice, 'message:send', {
+      conversationId: group.id, type: 'text', text: 'flagged group',
+    });
+    assert.equal(groupPlaintext.ok, false, 'a flagged group accepts no plaintext');
+    assert.equal(
+      await prisma.message.count({ where: { conversationId: group.id, text: 'flagged group' } }),
+      0,
+      'and wrote no readable row',
+    );
   } finally {
+    await prisma.e2eeEnvelope.deleteMany({ where: { conversationId: group.id } });
     await prisma.conversation.update({ where: { id: group.id }, data: { e2ee: false } });
   }
   const reopened = await emitAck(sockets.alice, 'message:send', { conversationId: group.id, type: 'text', text: 'back to plaintext' });

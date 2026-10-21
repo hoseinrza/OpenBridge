@@ -222,6 +222,74 @@
 
 .newchat-chip button:hover { background: var(--surface-3); color: var(--danger); }
 
+.newchat-secure {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 2px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.newchat-secure.is-on {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-2));
+}
+
+.newchat-secure input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.newchat-secure-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.newchat-secure.is-on .newchat-secure-icon {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.newchat-secure-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.newchat-secure-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.newchat-secure-note {
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+.newchat-secure input:focus-visible ~ .newchat-secure-icon {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .newchat-search {
   position: relative;
   display: flex;

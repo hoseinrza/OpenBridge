@@ -18,6 +18,9 @@
   process, so a single API instance is assumed)
 - 😀 Message reactions
 - 📎 Private file & image uploads behind signed, expiring URLs (optional ClamAV scan)
+- 🔐 **End-to-end encrypted web direct chats and web-created groups** (MLS): text,
+  images and files are sealed on the device; the server stores opaque envelopes
+  and blobs. Mobile holds no keys yet and shows those chats as locked.
 - 🔎 User search by name/username, plus an in-conversation message filter
 - 📇 **Contact matching**: check which of your phone's contacts already have an
   account — device address book on mobile, Contact Picker or pasted numbers on web
@@ -34,9 +37,12 @@
   `NODE_ENV=production` it answers `503` («ارسال پیامک هنوز فعال نشده است») and
   creates no code. Sign-up therefore works only in development until a gateway
   is integrated.
-- 🔓 Not end-to-end encrypted — the server stores message content in plaintext.
-  See [docs/SECURITY.md](docs/SECURITY.md) and
-  [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md).
+- 🔓 **Not every conversation is end-to-end encrypted.** Web direct chats and
+  groups created with the encryption option are; plaintext chats, groups
+  created without it, pre-encryption history and all mobile clients are not.
+  See [docs/SECURITY.md](docs/SECURITY.md) for the exact boundary and
+  [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md) for the
+  design.
 - 📹 Video calls are not wired to any UI. Signalling events exist in the gateway
   and orphaned components sit in `src/components/VideoCall/`, but neither client
   can start a call.
@@ -117,9 +123,16 @@ numbers already has an account?* — without turning the server into a phone boo
 
 ## 🔒 Security
 
-OpenBridge is **not end-to-end encrypted**; the server stores message content in
-plaintext. See [docs/SECURITY.md](docs/SECURITY.md) for the confidentiality model,
-implemented controls, threat model, and known limitations.
+Web direct chats and groups created with the web encryption option are
+**end-to-end encrypted with MLS**: the server stores ciphertext envelopes and
+opaque attachments, never a private key, and there is no escrow or recovery.
+Everything else is still plaintext on the server — plaintext direct chats,
+groups created without the option, pre-encryption history and all mobile
+clients. Mobile shows encrypted conversations as locked instead of sending
+plaintext into them. See [docs/SECURITY.md](docs/SECURITY.md) for the
+confidentiality model, implemented controls, threat model, and known
+limitations; [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md)
+§11 is the authoritative statement of what is and is not encrypted today.
 
 The API requires `JWT_SECRET` and refuses to start without it. In production it
 must be at least 32 characters. Cross-origin browser access is deny-by-default
@@ -135,7 +148,8 @@ no numbers. `users.phone` remains excluded from every other user response.
 ## 🧪 Tests & checks
 
 ```bash
-cd backend && npm run test:e2e     # 19 tests: OTP signup, sessions, uploads, CORS, socket, contacts
+cd backend && npm run test:e2e     # 41 tests: OTP signup, sessions, uploads, CORS, socket, contacts, E2EE
+npm run test:e2ee                  # MLS library gate, including the no-WebCrypto (Hermes) run
 npm run lint                       # web ESLint
 npm run build                      # web production build
 cd mobile && npx expo export --platform android

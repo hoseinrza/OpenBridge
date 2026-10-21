@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchGroupMessages, fetchMessages, resolveUrl } from '../services/api';
+import { fetchE2eeState, fetchGroupMessages, fetchMessages, resolveUrl } from '../services/api';
 import { useSocket } from '../context/SocketContext';
 
 // One row per person per message: a chip has to know whether this device holds
@@ -60,6 +60,7 @@ export function useChat(peer, currentUser, onIncoming) {
   const [typingName, setTypingName] = useState('');
   const [historyState, setHistoryState] = useState('idle');
   const [historyError, setHistoryError] = useState('');
+  const [locked, setLocked] = useState(peer?.encrypted === true);
   const typingTimerRef = useRef(null);
   const peerRef        = useRef(peer);
   const currentUserRef = useRef(currentUser);
@@ -172,6 +173,18 @@ export function useChat(peer, currentUser, onIncoming) {
       )));
     };
 
+    // A chat can become encrypted while it is open on this screen: the web peer
+    // sends its first envelope and the server flips the conversation. The phone
+    // cannot decrypt it, so it must stop offering a composer that would send
+    // plaintext into a conversation the server now refuses.
+    const onEnvelope = () => {
+      const p = peerRef.current;
+      if (!p) return;
+      fetchE2eeState(p)
+        .then(state => { if (state?.e2ee === true) setLocked(true); })
+        .catch(() => {});
+    };
+
     const onConnect = () => refreshHistoryRef.current();
 
     socket.on('message:new', onMessage);
@@ -179,6 +192,7 @@ export function useChat(peer, currentUser, onIncoming) {
     socket.on('typing:start', onTypingStart);
     socket.on('typing:stop', onTypingStop);
     socket.on('reaction:changed', onReaction);
+    socket.on('e2ee:envelope', onEnvelope);
     socket.on('connect', onConnect);
 
     return () => {
@@ -187,15 +201,29 @@ export function useChat(peer, currentUser, onIncoming) {
       socket.off('typing:start', onTypingStart);
       socket.off('typing:stop', onTypingStop);
       socket.off('reaction:changed', onReaction);
+      socket.off('e2ee:envelope', onEnvelope);
       socket.off('connect', onConnect);
     };
   }, [socket]);
 
+  // An encrypted chat has no plaintext rows for this build to read, and a
+  // plaintext read mark cannot clear its unread counter, so the probe decides
+  // whether the screen and composer may act at all.
+  useEffect(() => {
+    let cancelled = false;
+    setLocked(peer?.encrypted === true);
+    if (!peer) return undefined;
+    fetchE2eeState(peer)
+      .then(state => { if (!cancelled) setLocked(state?.e2ee === true); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [peer?.id, peer?.encrypted]);
+
   // Mark the open conversation as read (also runs once the socket is ready).
   useEffect(() => {
-    if (!peer || !socket) return;
+    if (!peer || !socket || locked) return;
     socket.emit('messages:read', isGroup ? { conversationId: peer.id } : { fromId: peer.id });
-  }, [peer?.id, isGroup, socket]);
+  }, [peer?.id, isGroup, socket, locked]);
 
   // ── Load history ──────────────────────────────────────
   useEffect(() => {
@@ -210,6 +238,9 @@ export function useChat(peer, currentUser, onIncoming) {
   const sendMessage = useCallback(async (text) => {
     const trimmed = text?.trim();
     if (!trimmed) return { ok: false, error: 'متن پیام خالی است' };
+    if (locked) {
+      return { ok: false, error: 'این گفتگو سرتاسری رمزنگاری شده؛ نوشتن در آن فقط از نسخهٔ وب ممکن است' };
+    }
     if (!socket || !connected || !peer) {
       return { ok: false, error: 'اتصال به سرور برقرار نیست؛ دوباره تلاش کن' };
     }
@@ -227,17 +258,17 @@ export function useChat(peer, currentUser, onIncoming) {
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  }, [socket, connected, peer?.id, peer?.kind]);
+  }, [socket, connected, peer?.id, peer?.kind, locked]);
 
   // ── Typing notification ──────────────────────────────
   const notifyTyping = useCallback(() => {
-    if (!socket || !peer) return;
+    if (!socket || !peer || locked) return;
     socket.emit('typing:start', peer.kind === 'group' ? { conversationId: peer.id } : { toId: peer.id });
     clearTimeout(typingTimerRef.current);
     typingTimerRef.current = setTimeout(() => {
       socket.emit('typing:stop', peer.kind === 'group' ? { conversationId: peer.id } : { toId: peer.id });
     }, 2000);
-  }, [socket, peer?.id, peer?.kind]);
+  }, [socket, peer?.id, peer?.kind, locked]);
 
   // ── Reaction ─────────────────────────────────────────
   // One tap adds, a second tap on the same emoji removes it, and a different
@@ -250,7 +281,7 @@ export function useChat(peer, currentUser, onIncoming) {
   }, [socket]);
 
   return {
-    messages, isTyping, typingName, connected,
+    messages, isTyping, typingName, connected, locked,
     historyState, historyError, retryHistory,
     sendMessage, notifyTyping, toggleReaction,
   };

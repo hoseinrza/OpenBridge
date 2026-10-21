@@ -46,7 +46,7 @@ export default function ChatScreen({ route }) {
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
   const {
-    messages, isTyping, typingName, connected,
+    messages, isTyping, typingName, connected, locked,
     historyState, historyError, retryHistory,
     sendMessage, notifyTyping, toggleReaction,
   } = useChat(peer, currentUser);
@@ -73,7 +73,7 @@ export default function ChatScreen({ route }) {
 
   const onSend = useCallback(async () => {
     const value = text.trim();
-    if (!value || sending) return;
+    if (!value || sending || locked) return;
     setSending(true);
     setError('');
     const result = await sendMessage(value);
@@ -83,13 +83,13 @@ export default function ChatScreen({ route }) {
       return;
     }
     setText('');
-  }, [text, sending, sendMessage]);
+  }, [text, sending, sendMessage, locked]);
 
   function openFile(msg) {
     if (msg.src) Linking.openURL(msg.src).catch(() => setError('باز کردن فایل ناموفق بود'));
   }
 
-  const canSend = !!text.trim() && !sending && connected;
+  const canSend = !!text.trim() && !sending && connected && !locked;
 
   function renderItem({ item }) {
     if (item.type === 'day') {
@@ -252,7 +252,11 @@ export default function ChatScreen({ route }) {
     <View style={styles.intro}>
       <Avatar name={peer?.name} group size={64} />
       <Text style={styles.introName}>{peer?.name}</Text>
-      <Text style={styles.introMeta}>گروه شامل {(peer?.memberCount ?? 0).toLocaleString('fa-IR')} عضو</Text>
+      <Text style={styles.introMeta}>
+        {locked
+          ? `گروه رمزنگاری‌شده · ${(peer?.memberCount ?? 0).toLocaleString('fa-IR')} عضو`
+          : `گروه شامل ${(peer?.memberCount ?? 0).toLocaleString('fa-IR')} عضو`}
+      </Text>
       {peer?.participants?.length > 0 && (
         <Text style={styles.introMembers} numberOfLines={3}>
           {peer.participants.map(p => p.name).join('، ')}
@@ -264,8 +268,9 @@ export default function ChatScreen({ route }) {
       <Avatar uri={peer?.avatar} name={peer?.name} size={64} status={peer?.status} />
       <Text style={styles.introName}>{peer?.name}</Text>
       <Text style={styles.introMeta}>
-        {peer?.status === 'online' ? 'آنلاین' : 'آفلاین'}
-        {peer?.username ? ` · @${peer.username}` : ''}
+        {locked
+          ? 'رمزنگاری سرتاسری · فقط در نسخهٔ وب قابل خواندن'
+          : `${peer?.status === 'online' ? 'آنلاین' : 'آفلاین'}${peer?.username ? ` · @${peer.username}` : ''}`}
       </Text>
     </View>
   );
@@ -279,6 +284,15 @@ export default function ChatScreen({ route }) {
       {!connected && (
         <View style={styles.offlineBar}>
           <Text style={styles.offlineText}>در حال اتصال به سرور…</Text>
+        </View>
+      )}
+
+      {locked && (
+        <View style={styles.lockedBar} accessibilityRole="alert">
+          <FontAwesome6 name="lock" size={11} color={colors.text2} />
+          <Text style={styles.lockedText}>
+            این گفتگو سرتاسری رمزنگاری شده؛ خواندن و فرستادن پیام در آن فقط از نسخهٔ وب ممکن است.
+          </Text>
         </View>
       )}
 
@@ -307,7 +321,11 @@ export default function ChatScreen({ route }) {
           ListFooterComponent={header}
           ListEmptyComponent={
             <View style={styles.centerState}>
-              <Text style={styles.stateText}>هنوز پیامی رد و بدل نشده — اولین پیام را بنویس.</Text>
+              <Text style={styles.stateText}>
+                {locked
+                  ? 'پیام‌های این گفتگو فقط روی دستگاه اعضا رمزگشایی می‌شوند؛ برای خواندنشان از نسخهٔ وب استفاده کن.'
+                  : 'هنوز پیامی رد و بدل نشده — اولین پیام را بنویس.'}
+              </Text>
             </View>
           }
           keyboardDismissMode="interactive"
@@ -339,10 +357,13 @@ export default function ChatScreen({ route }) {
 
       <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
         <TextInput
-          style={styles.input}
+          style={[styles.input, locked && styles.inputLocked]}
           value={text}
           onChangeText={(value) => { setText(value); setError(''); notifyTyping(); }}
-          placeholder={connected ? 'پیامت را بنویس…' : 'در انتظار اتصال…'}
+          editable={!locked}
+          placeholder={locked
+            ? 'نوشتن در این گفتگو فقط از نسخهٔ وب ممکن است'
+            : (connected ? 'پیامت را بنویس…' : 'در انتظار اتصال…')}
           placeholderTextColor={colors.text3}
           multiline
           maxLength={4000}
@@ -374,6 +395,15 @@ function makeStyles(colors) {
 
     offlineBar: { backgroundColor: colors.surface2, paddingVertical: 5, alignItems: 'center' },
     offlineText: { color: colors.text2, fontFamily: fonts.regular, fontSize: type.xs },
+    lockedBar: {
+      flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,
+      paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+      backgroundColor: colors.surface2, borderBottomWidth: 1, borderBottomColor: colors.border,
+    },
+    lockedText: {
+      flex: 1, color: colors.text2, fontFamily: fonts.regular, fontSize: type.xs,
+      textAlign: 'right', lineHeight: 18,
+    },
 
     centerState: {
       flex: 1,
@@ -580,6 +610,7 @@ function makeStyles(colors) {
       fontSize: type.base,
       textAlign: 'right',
     },
+    inputLocked: { backgroundColor: colors.surface2, color: colors.text3 },
     sendBtn: {
       width: 44, height: 44, borderRadius: radius.md,
       backgroundColor: colors.accent,

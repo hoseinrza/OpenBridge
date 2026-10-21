@@ -7,6 +7,16 @@ import './Sidebar.css';
 
 const STATUS_TEXT = { online: 'آنلاین', idle: 'غیرفعال', dnd: 'مشغول', offline: 'آفلاین' };
 
+function previewText(preview) {
+  switch (preview.type) {
+    case 'image': return 'عکس';
+    case 'video': return 'ویدیو';
+    case 'audio': return 'پیام صوتی';
+    case 'file':  return preview.fileName || 'فایل';
+    default:      return preview.text || 'پیام';
+  }
+}
+
 export default function Sidebar({
   users,
   activeUserId,
@@ -80,7 +90,6 @@ export default function Sidebar({
 
       <div className="sidebar-section">
         <span>گفتگوها</span>
-        <span className="sidebar-count" aria-label={`${users.length} گفتگو`}>{users.length}</span>
       </div>
 
       {error && (
@@ -111,9 +120,10 @@ export default function Sidebar({
         {filtered.map(user => {
           const isGroup = user.kind === 'group';
           const active = activeUserId === user.id;
-          const meta = isGroup
-            ? `${user.memberCount ?? 0} عضو`
-            : (user.username ? `@${user.username}` : (STATUS_TEXT[user.status] ?? ''));
+          const preview = user.preview ? previewText(user.preview) : '';
+          const meta = preview
+            ? (isGroup && user.preview.senderName ? `${user.preview.senderName}: ${preview}` : preview)
+            : (isGroup ? 'هنوز پیامی نیست' : (STATUS_TEXT[user.status] ?? ''));
 
           return (
             <button
@@ -148,7 +158,7 @@ export default function Sidebar({
                   )}
                 </span>
                 <span className="user-item-bottom">
-                  <span className="user-meta">{meta}</span>
+                  <span className="user-meta" title={meta}>{meta}</span>
                   {user.unread > 0 && (
                     <span className="badge" aria-label={`${user.unread} پیام خوانده‌نشده`}>
                       {user.unread > 99 ? '۹۹+' : user.unread}

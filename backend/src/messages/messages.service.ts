@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { isBase64 } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
-import { E2EE_MAX_ENVELOPE_CHARS } from '../config/env';
+import { E2EE_MAX_ENVELOPE_CHARS, E2EE_MAX_GROUP_MEMBERS } from '../config/env';
 import { signedFileUrl } from '../uploads/file-urls';
 
 const WITH_RELATIONS = {
@@ -10,6 +10,21 @@ const WITH_RELATIONS = {
 };
 
 const PARTNER_SELECT = { id: true, username: true, displayName: true, avatar: true, bio: true, status: true };
+
+const LAST_MESSAGE_SELECT = {
+  type: true,
+  text: true,
+  fileName: true,
+  createdAt: true,
+  sender: { select: { id: true, username: true, displayName: true } },
+};
+
+const LAST_MESSAGE_INCLUDE = {
+  where:   { deletedAt: null },
+  orderBy: { createdAt: 'desc' as const },
+  take:    1,
+  select:  LAST_MESSAGE_SELECT,
+};
 
 @Injectable()
 export class MessagesService {
@@ -60,10 +75,24 @@ export class MessagesService {
     };
   }
 
-  private toWireGroup(group: any, unread = 0) {
+  private toWirePreview(message: any) {
+    if (!message) return null;
+    return {
+      type:      message.type,
+      text:      message.text ?? null,
+      fileName:  message.fileName ?? null,
+      createdAt: message.createdAt,
+      sender:    message.sender
+        ? { id: message.sender.id, name: message.sender.displayName || message.sender.username }
+        : null,
+    };
+  }
+
+  private toWireGroup(group: any, unread = 0, lastMessage: any = null) {
     return {
       id:           group.id,
       name:         group.name,
+      e2ee:         group.e2ee,
       avatar:       signedFileUrl(group.avatar),
       createdAt:    group.createdAt,
       updatedAt:    group.updatedAt,
@@ -73,6 +102,7 @@ export class MessagesService {
         role:   p.role,
       })),
       unread,
+      lastMessage,
     };
   }
 
@@ -101,6 +131,7 @@ export class MessagesService {
       orderBy: { updatedAt: 'desc' },
       include: {
         participants: { where: { userId: { not: myId } }, include: { user: { select: PARTNER_SELECT } } },
+        messages:     LAST_MESSAGE_INCLUDE,
       },
     });
 
@@ -130,7 +161,15 @@ export class MessagesService {
         : await this.prisma.message.count({
           where: { conversationId: c.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
         });
-      return { user: c.participants[0].user, unread, e2ee: c.e2ee, updatedAt: c.updatedAt };
+      return {
+        user:        c.participants[0].user,
+        unread,
+        e2ee:        c.e2ee,
+        updatedAt:   c.updatedAt,
+        // An encrypted transcript has no readable row to preview, and the chat
+        // list is not allowed to carry message-shaped fields for it at all.
+        ...(c.e2ee ? {} : { lastMessage: this.toWirePreview(c.messages[0]) }),
+      };
     }));
   }
 
@@ -206,7 +245,15 @@ export class MessagesService {
 
   // ── Group chat ───────────────────────────────────────────────────────
 
-  async createGroup(creatorId: string, name: string, memberIds: string[]) {
+  // One insert for both group kinds: they differ only in whether the
+  // conversation accepts envelopes from its first byte, and in how many members
+  // an encrypted one may carry.
+  async createGroup(
+    creatorId: string,
+    name: string,
+    memberIds: string[],
+    options: { e2ee?: boolean; memberCap?: number } = {},
+  ) {
     const trimmedName = name?.trim();
     if (!trimmedName || trimmedName.length < 2) {
       throw new BadRequestException('نام گروه باید حداقل ۲ کاراکتر باشد');
@@ -218,6 +265,11 @@ export class MessagesService {
     const uniqueMembers = [...new Set([creatorId, ...memberIds])];
     if (uniqueMembers.length < 2) {
       throw new BadRequestException('حداقل یک عضو دیگر انتخاب کنید');
+    }
+    // The cap is what keeps the Welcome that opens an encrypted group inside one
+    // envelope: every device of every member goes into that single message.
+    if (options.memberCap && uniqueMembers.length > options.memberCap) {
+      throw new BadRequestException(`حداکثر ${options.memberCap} عضو برای یک گروه رمزنگاری‌شده مجاز است`);
     }
 
     const existing = await this.prisma.user.findMany({
@@ -231,7 +283,8 @@ export class MessagesService {
     const group = await this.prisma.conversation.create({
       data: {
         isGroup: true,
-        name: trimmedName,
+        e2ee:    options.e2ee ?? false,
+        name:    trimmedName,
         participants: {
           create: uniqueMembers.map(userId => ({
             userId,
@@ -248,20 +301,66 @@ export class MessagesService {
     const groups = await this.prisma.conversation.findMany({
       where:   { isGroup: true, participants: { some: { userId: myId } } },
       orderBy: { updatedAt: 'desc' },
-      include: { participants: { include: { user: { select: PARTNER_SELECT } } } },
+      include: {
+        participants: { include: { user: { select: PARTNER_SELECT } } },
+        messages:     LAST_MESSAGE_INCLUDE,
+      },
     });
+    if (!groups.length) return [];
+
+    const myRows = await this.prisma.conversationParticipant.findMany({
+      where:  { userId: myId, conversationId: { in: groups.map(group => group.id) } },
+      select: { conversationId: true, e2eeReadSeq: true },
+    });
+    const readSeq = new Map(myRows.map(row => [row.conversationId, row.e2eeReadSeq]));
 
     return Promise.all(groups.map(async (group) => {
-      const unread = await this.prisma.message.count({
-        where: { conversationId: group.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
-      });
-      return this.toWireGroup(group, unread);
+      // An encrypted group keeps no plaintext rows, so its badge counts what the
+      // high-water mark has not covered yet instead of counting messages.
+      const unread = group.e2ee
+        ? await this.prisma.e2eeEnvelope.count({
+          where: {
+            conversationId: group.id,
+            senderId:       { not: myId },
+            seq:            { gt: readSeq.get(group.id) ?? 0 },
+          },
+        })
+        : await this.prisma.message.count({
+          where: { conversationId: group.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
+        });
+      return this.toWireGroup(group, unread, this.toWirePreview(group.messages[0]));
     }));
+  }
+
+  // A group that is encrypted from its first byte. The client builds the MLS
+  // group before it calls this and refuses the create when the Welcome would not
+  // fit one envelope, so a conversation never exists in a state nobody can open.
+  createEncryptedGroup(creatorId: string, name: string, memberIds: string[]) {
+    return this.createGroup(creatorId, name, memberIds, {
+      e2ee:       true,
+      memberCap:  E2EE_MAX_GROUP_MEMBERS,
+    });
+  }
+
+  // Membership is an MLS commit, not a database row: adding or removing a leaf
+  // without a new epoch would leave the new member unable to decrypt, and a
+  // removed member still holding the old keys. Until that rekey path exists,
+  // the server refuses the half-change instead of creating a group that only
+  // looks shared.
+  private async assertMembershipEditable(conversationId: string) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where:  { id: conversationId },
+      select: { e2ee: true },
+    });
+    if (conversation?.e2ee) {
+      throw new BadRequestException('اعضای گروه رمزنگاری‌شده فعلاً قابل تغییر نیستند');
+    }
   }
 
   async addParticipant(conversationId: string, requesterId: string, userId: string) {
     const requester = await this.assertMember(conversationId, requesterId);
     if (requester.role === 'MEMBER') throw new ForbiddenException('فقط مالک یا ادمین می‌تواند عضو اضافه کند');
+    await this.assertMembershipEditable(conversationId);
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
     if (!user) throw new NotFoundException('کاربر پیدا نشد');
     return this.prisma.conversationParticipant.upsert({
@@ -276,6 +375,7 @@ export class MessagesService {
     if (requester.role === 'MEMBER' && requesterId !== userId) {
       throw new ForbiddenException('فقط مالک یا ادمین می‌تواند عضو حذف کند');
     }
+    await this.assertMembershipEditable(conversationId);
     return this.prisma.conversationParticipant.delete({
       where: { conversationId_userId: { conversationId, userId } },
     });
@@ -404,6 +504,17 @@ export class MessagesService {
     return { conversationId: conversation?.id ?? null, e2ee: conversation?.e2ee ?? false };
   }
 
+  // The group half of the same probe. Scoped to conversations the caller
+  // participates in, so somebody else's group id answers exactly like an id that
+  // does not exist — no hint about which groups are encrypted.
+  async groupE2eeState(myId: string, conversationId: string) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where:  { id: conversationId, isGroup: true, participants: { some: { userId: myId } } },
+      select: { id: true, e2ee: true },
+    });
+    return { conversationId: conversation?.id ?? null, e2ee: conversation?.e2ee ?? false };
+  }
+
   /**
    * Store one opaque MLS message at the next sequence number of an encrypted
    * conversation. The caller in the gateway emits it inside the same
@@ -426,13 +537,9 @@ export class MessagesService {
 
     const conversation = await this.prisma.conversation.findUnique({
       where:  { id: conversationId },
-      select: { e2ee: true, isGroup: true },
+      select: { e2ee: true },
     });
     if (!conversation.e2ee) throw new BadRequestException('این گفتگو رمزنگاری سرتاسری ندارد');
-    // Group commits need welcome routing for members who join after the
-    // conversation exists; that is Phase 3, and accepting bytes now would be a
-    // half-implemented version of it.
-    if (conversation.isGroup) throw new BadRequestException('گفتگوهای گروهی هنوز رمزنگاری سرتاسری ندارند');
 
     const [envelope] = await this.prisma.$transaction(async tx => {
       // Transaction-scoped advisory lock: sequence assignment stays gapless

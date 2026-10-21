@@ -54,6 +54,7 @@ export function normalizeGroup(g) {
     memberCount:  g.participants?.length ?? 0,
     participants: (g.participants ?? []).map(normalizeUser).filter(Boolean),
     unread:       g.unread ?? 0,
+    encrypted:    g.e2ee === true,
     updatedAt:    g.updatedAt,
     status:       'group',
   };
@@ -192,6 +193,15 @@ export function fetchConversations() {
 
 export function fetchGroups() {
   return request('GET', '/messages/groups');
+}
+
+// Read-only probe: an encrypted conversation is known to the server even when
+// this build cannot decrypt it, so the screen must ask rather than guess from
+// whatever the chat list happened to carry.
+export function fetchE2eeState(peer) {
+  return peer?.kind === 'group'
+    ? request('GET', `/messages/e2ee/group/${peer.id}`)
+    : request('GET', `/messages/e2ee/direct/${peer.id}`);
 }
 
 export function createGroup(name, memberIds) {

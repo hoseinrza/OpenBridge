@@ -57,7 +57,9 @@ export function normalizeGroup(group) {
     participants,
     memberCount:  participants.length,
     unread:       group.unread ?? 0,
+    encrypted:    group.e2ee === true,
     updatedAt:    group.updatedAt,
+    lastMessage:  group.lastMessage ?? null,
   };
 }
 

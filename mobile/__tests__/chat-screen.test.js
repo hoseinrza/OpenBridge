@@ -64,6 +64,18 @@ test('sends the composer text and clears the input', async () => {
   expect(view.getByLabelText('متن پیام').props.value).toBe('');
 });
 
+test('locks the composer of an encrypted chat instead of offering a send', () => {
+  const chat = makeChat({ messages: [], locked: true });
+  const view = renderChat();
+  expect(view.getByText(/این گفتگو سرتاسری رمزنگاری شده/)).toBeTruthy();
+  expect(view.getByText(/برای خواندنشان از نسخهٔ وب استفاده کن/)).toBeTruthy();
+  const input = view.getByLabelText('متن پیام');
+  expect(input.props.editable).toBe(false);
+  expect(input.props.placeholder).toBe('نوشتن در این گفتگو فقط از نسخهٔ وب ممکن است');
+  fireEvent.press(view.getByLabelText('ارسال پیام'));
+  expect(chat.sendMessage).not.toHaveBeenCalled();
+});
+
 test('keeps the text and shows the error when sending fails', async () => {
   makeChat({ sendMessage: jest.fn(async () => ({ ok: false, error: 'ارسال پیام ناموفق بود' })) });
   const view = renderChat();

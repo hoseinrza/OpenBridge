@@ -1,50 +1,79 @@
 # OpenBridge Security Model
 
-Last updated: 2026-10-19
+Last updated: 2026-10-21
 
-## E2EE status: not implemented
+## E2EE status: web direct chats and web-created groups
 
-OpenBridge is **not end-to-end encrypted**. Message text and attachments are
-stored in plaintext in PostgreSQL/on the API server. The server (and anyone
-with database or server access) can read every message. TLS protects traffic
-in transit only; it is not a substitute for E2EE.
+OpenBridge encrypts two kinds of conversation end to end, both from the web
+client:
 
-No custom cryptography has been introduced. If E2EE is added later, it must be
-built on a maintained protocol implementation, with client-side key storage,
-multi-device support, key verification, and an explicit migration path for
-existing plaintext history. A protocol evaluation and phased design proposal
-(no implementation) is in `docs/engineering/E2EE_DESIGN.md`.
+- a **direct chat** opened from the web app between two web devices, which is
+  negotiated into MLS on its first message, and
+- a **group** created with the web client's encryption option, which is MLS
+  from its first envelope.
+
+For these, message text, attachment bytes, attachment names and MIME types are
+readable only on the devices that hold the MLS keys. The server stores opaque
+`e2ee_envelopes` rows and opaque `enc-<uuid>.bin` blobs; it never receives a
+private key or client state, and there is no escrow or recovery path at any
+access level. Group name and membership, conversation participants, timing and
+message sizes remain server-visible metadata.
+
+Everything else is still plaintext on the server:
+
+- plaintext direct chats that no web client has opened since the E2EE rollout,
+- groups created without the encryption option,
+- all mobile clients, which hold no keys; they show encrypted chats as locked
+  and refuse to send plaintext into them,
+- history written before a conversation was encrypted.
+
+The authoritative behavior statement is `docs/engineering/E2EE_DESIGN.md` §11.
+No custom cryptography has been introduced: `shared/e2ee/provider.js` is glue
+over `ts-mls`, `hpke` and `@panva/hpke-noble`, and the library gate runs as
+`npm run test:e2ee`.
 
 ## Confidentiality model
 
 | Data                         | Where it lives                  | Who can read it                          |
 |------------------------------|---------------------------------|------------------------------------------|
-| Message text                 | PostgreSQL `messages.text`      | Server operators and DB access           |
-| Attachments                  | API server `uploads/` directory | Server operators / disk access           |
+| Encrypted message text       | PostgreSQL `e2ee_envelopes`     | Devices holding the conversation key only |
+| Plaintext message text       | PostgreSQL `messages.text`      | Server operators and DB access           |
+| Encrypted attachments        | API server `encrypted_blobs/`   | Devices holding the conversation key only |
+| Plaintext attachments        | API server `uploads/` directory | Server operators / disk access           |
+| Group name, membership, timestamps, sizes | PostgreSQL         | Server operators and DB access           |
 | Usernames, display names     | PostgreSQL                      | Any authenticated user (`/api/users`)    |
-| Password hashes (bcrypt)     | PostgreSQL                      | Server operators                         |
 | JWTs                         | Browser localStorage / SecureStore (mobile) | User's device; bearer of the session |
 
-The API never returns password hashes. User search exposes username, display
-name, avatar, bio, status, and creation date to any authenticated user.
+The API never returns password hashes (there are no passwords). User search
+exposes username, display name, avatar, bio, status, and creation date to any
+authenticated user.
+
 
 ## Authentication
 
-- Passwords are hashed with bcrypt (cost 10); plaintext passwords are never stored.
-- JWTs are HS256, signed with `JWT_SECRET`, and expire after `JWT_EXPIRES_IN` (default 7 days).
-- `JWT_SECRET` is required. The API refuses to start without it and, in
-  production, requires at least 32 characters. There is no predictable fallback.
+- There are no passwords. Sign-in is a phone number plus a 6-digit one-time
+  code, returned in the response only outside production (`OTP_TEST_MODE`)
+  until an SMS provider is integrated. Codes are stored only as an HMAC-SHA256
+  digest keyed with `JWT_SECRET`, compared in constant time, single-use, expire
+  after `OTP_TTL_SECONDS`, and are locked after `OTP_MAX_ATTEMPTS` wrong tries.
+- A new number receives a short-lived HS256 signup token (`pur: 'signup'`) and
+  finishes on `POST /auth/signup` with a unique username and name parts. A
+  signup token is not an access token, and vice versa.
+- Access JWTs are HS256, signed with `JWT_SECRET`, expire after
+  `JWT_EXPIRES_IN`, and carry both the user id (`sub`) and the server-side
+  session id (`sid`). `JWT_SECRET` is required; the API refuses to start without
+  it and, in production, requires at least 32 characters.
 - HTTP uses `Authorization: Bearer <token>`; Socket.IO uses the same token in
   the handshake `auth.token`.
-- Token claims are limited to `sub`; the user is loaded from the database on
-  every authenticated request, so deleted accounts lose access immediately.
-- Login and registration are throttled per client IP and per username
-  (defaults: 10 logins/15 min per IP, 5 per username, 5 registrations/hour per
-  IP). `TRUST_PROXY` must be set when behind a reverse proxy so the real client
-  IP is used.
-- Every login creates a server-side `Session` row. Access JWTs carry its id
-  and are rejected as soon as the row is revoked, so logout invalidates the
-  token immediately instead of waiting for JWT expiry.
+- The user is loaded from the database on every authenticated request, so
+  deleted accounts lose access immediately, and a token whose session row is
+  revoked is rejected even before EXP.
+- OTP requests are throttled per client IP and per phone number with 429 and
+  `Retry-After`. `TRUST_PROXY` must be set behind a reverse proxy so the real
+  client IP is used.
+- Every sign-in creates a server-side `Session` row; logout and device
+  revocation stamp it, which invalidates the access token immediately instead
+  of waiting for JWT expiry.
 - Refresh tokens are 48 random bytes, stored only as SHA-256 hashes, rotate on
   every use, and expire after `REFRESH_TOKEN_TTL_DAYS` (default 30). Clients
   refresh transparently on a 401.
@@ -111,30 +140,39 @@ name, avatar, bio, status, and creation date to any authenticated user.
 |-----------------------------------|---------------------------------|
 | Passive network observer          | Cannot read traffic if TLS is enabled. |
 | Malicious authenticated client    | Cannot read/join conversations they are not part of; cannot forge senders or roles; cannot upload active content; cannot react to foreign messages. |
-| Compromised server / DB           | Can read all message content and attachments. E2EE does not exist. |
-| Stolen unlocked device            | Has the active session until it is revoked or expires; the owner can list and revoke sessions from another signed-in device. |
-| XSS or malicious same-origin JS   | Can read plaintext and the token from localStorage and act as the user. This is a fundamental limitation of web E2EE as well. |
-| Removed group member             | Loses access to future messages and API events; previously issued signed attachment URLs remain valid until they expire. |
+| Compromised server / DB           | Can read plaintext conversations, metadata and all group membership. Cannot read encrypted direct chats or encrypted groups, but can see their ciphertext, routing and sizes, and can substitute keys during the TOFU window. |
+| Stolen unlocked device            | Has the active session until it is revoked or expires; the owner can list and revoke sessions from another signed-in device. It also holds that device's E2EE keys. |
+| XSS or malicious same-origin JS   | Can read plaintext and the token from localStorage and act as the user, and can use any E2EE keys available to the page. This is a fundamental limitation of web E2EE as well. |
+| Removed group member             | For plaintext groups, loses access to future messages and API events; previously issued signed attachment URLs remain valid until they expire. Encrypted groups do not allow membership changes yet, so removal is not possible there. |
 
 ## Known limitations
 
-- No E2EE; the server can read message content.
+- **Not every conversation is encrypted.** Plaintext direct chats that no web
+  client has opened since the rollout, groups created without the encryption
+  option, all mobile clients, and pre-encryption history remain readable by the
+  server. `docs/engineering/E2EE_DESIGN.md` §11 is the exact statement.
+- No safety numbers or out-of-band verification: key adoption is TOFU.
+- There is no key escrow or recovery. Losing every device loses encrypted
+  history.
+- An encrypted group's membership is fixed at creation; adding or removing a
+  member is refused until an MLS rekey path exists.
+- Mobile holds no E2EE keys and shows encrypted conversations as locked.
 - Refresh-token reuse detection is not implemented: a replayed old refresh
   token is rejected but does not automatically revoke its session. Web stores
   both tokens in `localStorage`, so XSS can exfiltrate them; mobile keeps them
   in SecureStore.
-- HTTP auth throttling is in-memory and per-process (10 logins/15 min per IP,
-  5 per username, 5 registrations/hour per IP by default), so multi-instance
+- HTTP auth throttling is in-memory and per-process, so multi-instance
   deployments would need a shared store such as Redis.
 - Socket rate limiting and presence are in-memory, so they are per-process and
   reset on restart; a multi-instance deployment needs a shared store.
 - Signed attachment URLs are bearer capabilities: anyone with the URL can use it
   until expiry. Authorization is enforced when the URL is issued, not on each
   download. Removed members may retain valid URLs for up to the TTL.
-- Malware scanning is disabled unless a clamd instance is configured; the
-  default deployment does not scan uploads.
+- Malware scanning is disabled unless a clamd instance is configured; encrypted
+  attachments cannot be scanned server-side by design.
 - Message edit/delete and account deletion workflows are not implemented.
-- Database rows and attachment files are stored unencrypted at rest.
+- Plaintext database rows and plaintext attachment files are stored unencrypted
+  at rest; encrypted conversations store only ciphertext.
 - Web lint is clean and CI runs lint plus the production build alongside the
   backend security suite. The CI database is ephemeral; no deployment is
   performed by CI.
