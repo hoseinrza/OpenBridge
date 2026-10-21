@@ -70,7 +70,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     messages, isTyping, typingPeer, connected,
     historyState, historyError, retryHistory,
     encrypted, encryptionNote, blockedReason, attachmentBlocked,
-    sendMessage, notifyTyping, addReaction, clearMessages,
+    sendMessage, notifyTyping, toggleReaction, clearMessages,
   } = useChat(activeUser, currentUser, handleIncoming);
 
   // Catch up on chats that changed while the socket was disconnected.
@@ -163,7 +163,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               key={activeUser.id}
               messages={filteredMessages}
               activeUser={activeUser}
-              onReact={addReaction}
+              onReact={toggleReaction}
               searchQuery={searchQuery}
               historyState={historyState}
               historyError={historyError}

@@ -187,6 +187,14 @@ button, input, textarea {
 button { cursor: pointer; }
 button:disabled { cursor: default; }
 
+/* Emoji are drawn by the operating system's own colour font: an iPhone or Mac
+   gets Apple's kit, Windows gets Segoe UI Emoji, Android gets Noto. Apple's font
+   is licensed to Apple devices only, so it cannot be shipped with the app — the
+   codepoints are stored once and each device draws them with its own artwork. */
+.reaction-btn, .msg-reaction, .emoji-opt {
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', sans-serif;
+}
+
 a { color: var(--accent-text); }
 
 img { max-width: 100%; }

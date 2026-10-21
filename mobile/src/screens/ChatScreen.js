@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, FlatList, Image, KeyboardAvoidingView, Linking, Platform,
   Pressable, StyleSheet, Text, TextInput, View,
@@ -12,6 +12,7 @@ import { dayKey, formatDayLabel } from '../utils/time';
 import Avatar from '../components/Avatar';
 
 const GROUP_GAP = 5 * 60 * 1000;
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢'];
 
 function buildRows(messages) {
   const rows = [];
@@ -43,16 +44,28 @@ export default function ChatScreen({ route }) {
   const {
     messages, isTyping, typingName, connected,
     historyState, historyError, retryHistory,
-    sendMessage, notifyTyping,
+    sendMessage, notifyTyping, toggleReaction,
   } = useChat(peer, currentUser);
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
+  const [reactionPicker, setReactionPicker] = useState(null);
   const listRef = useRef(null);
 
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const isGroup = peer?.kind === 'group';
   const rows = useMemo(() => buildRows(messages).reverse(), [messages]);
+
+  useEffect(() => { setReactionPicker(null); }, [peer?.id]);
+
+  // Tap once to react, tap the same emoji again to take it back; the server
+  // answers with the finished list and the chips redraw from that.
+  const onReact = useCallback((msgId, emoji) => {
+    setReactionPicker(null);
+    if (!toggleReaction(msgId, emoji)) {
+      setError('اتصال به سرور برقرار نیست؛ واکنش ثبت نشد');
+    }
+  }, [toggleReaction]);
 
   const onSend = useCallback(async () => {
     const value = text.trim();
@@ -87,7 +100,9 @@ export default function ChatScreen({ route }) {
 
     const { msg, first, last } = item;
     const isMine = msg.side === 'mine';
-    const reactions = Object.entries(msg.reactions ?? {}).filter(([, count]) => count > 0);
+    const reactions = msg.reactions ?? [];
+    const held = new Set(reactions.filter(r => r.mine).map(r => r.emoji));
+    const pickerOpen = reactionPicker === msg.id;
 
     return (
       <View style={[styles.msgRow, isMine ? styles.msgRowMine : styles.msgRowOther]}>
@@ -96,13 +111,21 @@ export default function ChatScreen({ route }) {
             <Text style={styles.sender} numberOfLines={1}>{msg.sender || 'کاربر'}</Text>
           )}
 
-          <View style={[
-            styles.bubble,
-            isMine ? styles.bubbleMine : styles.bubbleOther,
-            last && (isMine ? styles.bubbleMineLast : styles.bubbleOtherLast),
-          ]}>
+          <Pressable
+            style={[
+              styles.bubble,
+              isMine ? styles.bubbleMine : styles.bubbleOther,
+              last && (isMine ? styles.bubbleMineLast : styles.bubbleOtherLast),
+            ]}
+            onLongPress={() => setReactionPicker(pickerOpen ? null : msg.id)}
+          >
             {msg.type === 'image' && msg.src ? (
-              <Pressable onPress={() => openFile(msg)} accessibilityRole="imagebutton" accessibilityLabel="باز کردن تصویر">
+              <Pressable
+                onPress={() => openFile(msg)}
+                onLongPress={() => setReactionPicker(pickerOpen ? null : msg.id)}
+                accessibilityRole="imagebutton"
+                accessibilityLabel="باز کردن تصویر"
+              >
                 <Image
                   source={{ uri: msg.src }}
                   style={styles.image}
@@ -114,6 +137,7 @@ export default function ChatScreen({ route }) {
               <Pressable
                 style={[styles.fileRow, isMine && styles.fileRowMine]}
                 onPress={() => openFile(msg)}
+                onLongPress={() => setReactionPicker(pickerOpen ? null : msg.id)}
                 accessibilityRole="button"
                 accessibilityLabel={`دانلود ${msg.name || 'فایل'}`}
               >
@@ -130,10 +154,22 @@ export default function ChatScreen({ route }) {
 
             {reactions.length > 0 && (
               <View style={styles.reactions}>
-                {reactions.map(([emoji, count]) => (
-                  <View key={emoji} style={[styles.reactionChip, isMine && styles.reactionChipMine]}>
-                    <Text style={styles.reactionText}>{emoji} {count}</Text>
-                  </View>
+                {reactions.map(({ emoji, mine }) => (
+                  <Pressable
+                    key={emoji}
+                    style={[
+                      styles.reactionChip,
+                      isMine && styles.reactionChipOut,
+                      mine && styles.reactionChipHeld,
+                      mine && isMine && styles.reactionChipOutHeld,
+                    ]}
+                    onPress={() => onReact(msg.id, emoji)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: mine }}
+                    accessibilityLabel={mine ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                  >
+                    <Text style={styles.reactionText}>{emoji}</Text>
+                  </Pressable>
                 ))}
               </View>
             )}
@@ -149,7 +185,32 @@ export default function ChatScreen({ route }) {
                 />
               )}
             </View>
-          </View>
+          </Pressable>
+
+          {pickerOpen && (
+            <View style={styles.tapbackRow} accessibilityRole="menu">
+              {REACTIONS.map(emoji => (
+                <Pressable
+                  key={emoji}
+                  style={[styles.tapback, held.has(emoji) && styles.tapbackHeld]}
+                  onPress={() => onReact(msg.id, emoji)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: held.has(emoji) }}
+                  accessibilityLabel={held.has(emoji) ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                >
+                  <Text style={styles.tapbackText}>{emoji}</Text>
+                </Pressable>
+              ))}
+              <Pressable
+                style={styles.tapbackClose}
+                onPress={() => setReactionPicker(null)}
+                accessibilityRole="button"
+                accessibilityLabel="بستن واکنش‌ها"
+              >
+                <FontAwesome6 name="xmark" size={11} color={colors.text2} />
+              </Pressable>
+            </View>
+          )}
         </View>
 
         {!isMine && (
@@ -365,12 +426,41 @@ function makeStyles(colors) {
 
     reactions: { flexDirection: 'row-reverse', gap: 4, marginTop: 2 },
     reactionChip: {
-      paddingHorizontal: 6, paddingVertical: 1,
+      paddingHorizontal: 6, paddingVertical: 2,
       borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
       backgroundColor: colors.surface2,
     },
-    reactionChipMine: { backgroundColor: 'rgba(255,255,255,0.18)' },
-    reactionText: { color: colors.text1, fontFamily: fonts.regular, fontSize: type.xs },
+    // Held by this device: pressed, so it reads as yours and taps lift it again.
+    reactionChipHeld: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+    // On the outgoing red bubble a light chip would disappear, so it keeps the
+    // bubble's own palette and only the border marks the reaction as yours.
+    reactionChipOut: { borderColor: 'rgba(255,255,255,0.32)', backgroundColor: 'rgba(255,255,255,0.16)' },
+    reactionChipOutHeld: { borderColor: '#FFE0DE', backgroundColor: 'rgba(255,255,255,0.30)' },
+    reactionText: { color: colors.text1, fontFamily: fonts.regular, fontSize: type.sm },
+
+    tapbackRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 2, marginTop: 5 },
+    tapback: {
+      width: 36, height: 36,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    tapbackHeld: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+    tapbackText: { fontSize: 18 },
+    tapbackClose: {
+      width: 28, height: 28, marginLeft: 4,
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
     metaRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, marginTop: 1 },
     metaRowMine: { justifyContent: 'flex-start' },

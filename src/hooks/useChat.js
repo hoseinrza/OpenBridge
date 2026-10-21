@@ -12,6 +12,21 @@ import { connectSocket, emitWithAck } from '../services/socket.js';
 //   unavailable  the conversation is encrypted but this device holds no keys
 const timeIn = (value) => new Date(value).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
 
+// Reactions arrive as the rows behind them, one per person per message, because
+// a chip has to know whether *this* device is one of the people holding it:
+// tapping your own reaction removes it and tapping a different emoji replaces
+// it. Grouping by emoji keeps the set equal to the people who reacted, never to
+// the number of taps — and no count is shown, so a tap can't "add" anything.
+function groupReactions(rows, myId) {
+  const byEmoji = new Map();
+  for (const row of rows ?? []) {
+    const entry = byEmoji.get(row.emoji) ?? { emoji: row.emoji, mine: false };
+    if (row.userId === myId) entry.mine = true;
+    byEmoji.set(row.emoji, entry);
+  }
+  return [...byEmoji.values()];
+}
+
 function normalize(msg, myId) {
   return {
     id:           msg.id,
@@ -30,10 +45,7 @@ function normalize(msg, myId) {
     createdAt:    new Date(msg.createdAt).getTime(),
     read:         msg.read,
     encrypted:    false,
-    reactions: (msg.reactions ?? []).reduce(
-      (acc, r) => ({ ...acc, [r.emoji]: (acc[r.emoji] ?? 0) + 1 }),
-      {},
-    ),
+    reactions:    groupReactions(msg.reactions, myId),
   };
 }
 
@@ -53,7 +65,7 @@ function normalizeEncrypted(message, peer) {
     time:           timeIn(created),
     createdAt:      created,
     encrypted:      true,
-    reactions:      {},
+    reactions:      [],
   };
 }
 
@@ -225,13 +237,12 @@ export function useChat(targetUser, currentUser, onIncoming) {
       }
     });
 
-    socket.on('reaction:added', ({ messageId, emoji }) => {
-      setMessages(prev => prev.map(m => {
-        if (m.id !== messageId) return m;
-        const r = { ...m.reactions };
-        r[emoji] = (r[emoji] ?? 0) + 1;
-        return { ...m, reactions: r };
-      }));
+    // The server sends the whole set of rows for the message, never a delta,
+    // so removing and replacing a reaction look like every other change.
+    socket.on('reaction:changed', ({ messageId, reactions }) => {
+      setMessages(prev => prev.map(m => (
+        m.id === messageId ? { ...m, reactions: groupReactions(reactions, currentUserId) } : m
+      )));
     });
 
     return () => {
@@ -445,7 +456,10 @@ export function useChat(targetUser, currentUser, onIncoming) {
   }, [targetUser]);
 
   // ── Reaction ─────────────────────────────────────────
-  const addReaction = useCallback((msgId, emoji) => {
+  // One tap adds, a second tap on the same emoji removes it, and a different
+  // emoji replaces it. The server makes that decision and broadcasts the
+  // resulting rows back to every participant, this device included.
+  const toggleReaction = useCallback((msgId, emoji) => {
     if (!socketRef.current) return;
     socketRef.current.emit('reaction:add', {
       messageId: msgId,
@@ -479,6 +493,6 @@ export function useChat(targetUser, currentUser, onIncoming) {
     encryptionNote: secure?.mode === 'plain' ? (secure.reason ?? null) : null,
     blockedReason: unavailable,
     attachmentBlocked: open ? 'پیوست فایل در گفتگوهای رمزنگاری‌شده هنوز رمزنگاری نمی‌شود' : null,
-    sendMessage, notifyTyping, addReaction, clearMessages,
+    sendMessage, notifyTyping, toggleReaction, clearMessages,
   };
 }

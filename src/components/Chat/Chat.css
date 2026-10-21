@@ -466,6 +466,11 @@
 
 .reaction-btn:hover { background: var(--surface-2); transform: scale(1.12); }
 
+.reaction-btn.active {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
 /* ── Inline reactions ────────────────────────────────────────── */
 .msg-reactions {
   display: flex;
@@ -477,14 +482,14 @@
 .msg-reaction {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
   min-height: 26px;
   padding: 2px 9px;
   border: 1px solid var(--border);
   border-radius: var(--r-pill);
   background: var(--surface);
   color: var(--text-2);
-  font-size: 13px;
+  font-size: 15px;
+  line-height: 1;
   transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 
@@ -493,9 +498,12 @@
   border-color: var(--accent);
 }
 
-.msg-reaction span {
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
+/* The chip you are holding stays pressed; tapping it again is how you take it
+   back, so it must not look like somebody else's reaction. */
+.msg-reaction.mine {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* ── Images & files ──────────────────────────────────────────── */

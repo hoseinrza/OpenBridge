@@ -79,7 +79,8 @@ export default function MessageGroup({
   // no row there to react to — so the affordance is not offered for it.
   const reactable = !message.encrypted;
 
-  const reactions = Object.entries(message.reactions ?? {});
+  const reactions = message.reactions ?? [];
+  const mine = new Set(reactions.filter(r => r.mine).map(r => r.emoji));
 
   function pickReaction(emoji) {
     onReact?.(message.id, emoji);
@@ -102,8 +103,9 @@ export default function MessageGroup({
             <button
               key={emoji}
               type="button"
-              className="reaction-btn"
-              aria-label={`واکنش ${emoji}`}
+              className={`reaction-btn ${mine.has(emoji) ? 'active' : ''}`}
+              aria-pressed={mine.has(emoji)}
+              aria-label={`${emoji}، ${mine.has(emoji) ? 'واکنش تو — برای برداشتن بزن' : 'افزودن'}`}
               onClick={() => pickReaction(emoji)}
             >
               {emoji}
@@ -174,15 +176,17 @@ export default function MessageGroup({
 
           {reactions.length > 0 && (
             <div className="msg-reactions" role="group" aria-label="واکنش‌ها">
-              {reactions.map(([emoji, count]) => (
+              {reactions.map(({ emoji, mine: held }) => (
                 <button
                   key={emoji}
                   type="button"
-                  className="msg-reaction"
-                  onClick={() => onReact?.(message.id, emoji)}
-                  aria-label={`واکنش ${emoji}، ${count} نفر`}
+                  className={`msg-reaction ${held ? 'mine' : ''}`}
+                  onClick={() => pickReaction(emoji)}
+                  aria-pressed={held}
+                  aria-label={held ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                  title={held ? 'برای برداشتن واکنش دوباره بزن' : 'واکنش نشان بده'}
                 >
-                  {emoji} <span>{count}</span>
+                  {emoji}
                 </button>
               ))}
             </div>

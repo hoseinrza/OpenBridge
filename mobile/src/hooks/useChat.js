@@ -2,6 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchGroupMessages, fetchMessages, resolveUrl } from '../services/api';
 import { useSocket } from '../context/SocketContext';
 
+// One row per person per message: a chip has to know whether this device holds
+// it, because tapping your own reaction removes it and a different emoji
+// replaces it. Grouping the rows is what keeps the set equal to the people who
+// reacted, never to the number of taps.
+function groupReactions(rows, myId) {
+  const byEmoji = new Map();
+  for (const row of rows ?? []) {
+    const entry = byEmoji.get(row.emoji) ?? { emoji: row.emoji, mine: false };
+    if (row.userId === myId) entry.mine = true;
+    byEmoji.set(row.emoji, entry);
+  }
+  return [...byEmoji.values()];
+}
+
 function normalize(msg, myId) {
   return {
     id:             msg.id,
@@ -19,10 +33,7 @@ function normalize(msg, myId) {
     time:           new Date(msg.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
     createdAt:      new Date(msg.createdAt).getTime(),
     read:           msg.read,
-    reactions:      (msg.reactions ?? []).reduce(
-      (acc, r) => ({ ...acc, [r.emoji]: (acc[r.emoji] ?? 0) + 1 }),
-      {},
-    ),
+    reactions:      groupReactions(msg.reactions, myId),
   };
 }
 
@@ -152,13 +163,13 @@ export function useChat(peer, currentUser, onIncoming) {
       if (matches) setIsTyping(false);
     };
 
-    const onReaction = ({ messageId, emoji }) => {
-      setMessages(prev => prev.map(m => {
-        if (m.id !== messageId) return m;
-        const r = { ...m.reactions };
-        r[emoji] = (r[emoji] ?? 0) + 1;
-        return { ...m, reactions: r };
-      }));
+    // The server sends the whole set of rows for the message, never a delta, so
+    // removing and replacing a reaction look like every other change.
+    const onReaction = ({ messageId, reactions }) => {
+      const myId = currentUserRef.current?.id;
+      setMessages(prev => prev.map(m => (
+        m.id === messageId ? { ...m, reactions: groupReactions(reactions, myId) } : m
+      )));
     };
 
     const onConnect = () => refreshHistoryRef.current();
@@ -167,7 +178,7 @@ export function useChat(peer, currentUser, onIncoming) {
     socket.on('message:read', onRead);
     socket.on('typing:start', onTypingStart);
     socket.on('typing:stop', onTypingStop);
-    socket.on('reaction:added', onReaction);
+    socket.on('reaction:changed', onReaction);
     socket.on('connect', onConnect);
 
     return () => {
@@ -175,7 +186,7 @@ export function useChat(peer, currentUser, onIncoming) {
       socket.off('message:read', onRead);
       socket.off('typing:start', onTypingStart);
       socket.off('typing:stop', onTypingStop);
-      socket.off('reaction:added', onReaction);
+      socket.off('reaction:changed', onReaction);
       socket.off('connect', onConnect);
     };
   }, [socket]);
@@ -229,13 +240,18 @@ export function useChat(peer, currentUser, onIncoming) {
   }, [socket, peer?.id, peer?.kind]);
 
   // ── Reaction ─────────────────────────────────────────
-  const addReaction = useCallback((msgId, emoji) => {
-    socket?.emit('reaction:add', { messageId: msgId, emoji });
+  // One tap adds, a second tap on the same emoji removes it, and a different
+  // emoji replaces it — the server owns that decision and answers with the
+  // resulting rows, so this device learns the truth like everyone else does.
+  const toggleReaction = useCallback((msgId, emoji) => {
+    if (!socket) return false;
+    socket.emit('reaction:add', { messageId: msgId, emoji });
+    return true;
   }, [socket]);
 
   return {
     messages, isTyping, typingName, connected,
     historyState, historyError, retryHistory,
-    sendMessage, notifyTyping, addReaction,
+    sendMessage, notifyTyping, toggleReaction,
   };
 }
