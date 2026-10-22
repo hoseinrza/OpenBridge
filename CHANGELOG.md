@@ -4,6 +4,71 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.24] - 2026-10-22
+
+### Changed
+- **حذف، حباب را با خودش می‌برد.** A message deleted for everyone no longer
+  stays behind as «این پیام حذف شد». The row collapses from the height it had on screen
+  to nothing and the list drops it, so the messages around it slide up into the gap and
+  nothing at all is drawn where the message was. «حذف برای من» goes the same way, because
+  from here both scopes mean one thing to the person looking at the chat: the bubble
+  is gone.
+- **حباب در جای خودش جمع می‌شود.** The exiting row measures itself and animates
+  height, bottom margin and opacity to zero over one `--dur` (۱۸۰ms) with the
+  easing the rest of the chat uses, and the list keeps it mounted for ۲۴۰ms so the
+  collapse is always finished before the row is dropped. A device that animates nothing —
+  reduced motion, or a tab that never gets a frame — still loses the row on that same
+  timer, so the two cannot drift apart.
+- **ردیف حذف‌شده همان‌جا که خوانده می‌شود دور ریخته می‌شود.** The server still
+  answers a history request with the row and `deleted: true`; the client now filters it
+  out before it reaches the list. A reload of a chat therefore gives back the timeline it
+  had before that message existed, with no placeholder and no empty bubble in it — which
+  is also what the phone was drawing for every row deleted on the web, since it has no
+  menu of its own yet. A delete that arrives live takes the row out there too.
+- **یک بریدهٔ ارتفاع‌دار، ارتفاعش را به اسکرول‌دهنده نمی‌بازد.** The message
+  pane is a scrollable flex column that is always shorter than the thread it scrolls, and
+  a row becomes a scroll container the moment the collapse clips it — which floors its
+  automatic minimum size at nothing, and made the row report zero height before the first
+  frame of its own animation. The exiting row is pinned against shrinking, so only the
+  animation decides how tall it is.
+
+### Removed
+- The `bubble-deleted` style and the tombstone branch of the bubble. `deleted` is no
+  longer part of a message on this client at all: a row it holds is a row it shows, and
+  `leaving` is the only thing that can be true of one that is going.
+
+### Notes on what this does not do
+- Nothing moved on the server: `message:delete`, the `deleted` flag on the wire and the
+  tombstone a history request still returns are exactly as the last release left them,
+  and the message-actions end-to-end test asserts them at that level. It was not re-run
+  here.
+- The phone drops the row without an animation. Its list is a `FlatList`, and a measured
+  collapse there is its own piece of work; no mobile device was touched for this batch.
+
+Verified with `npm run lint` and `npm run build` clean on the web client, and `npx jest`
+green in `mobile/` (7 suites, 48 tests). Everything below was driven in the running app
+against the local seeded database through real DOM events, because the in-app browser on
+this machine reports a hidden surface where neither a pointer tool nor a screenshot
+works: these are numbers read off the live DOM, not pictures. In a seeded group, a
+bubble 79px tall was deleted for everyone from the right-click menu; the row took the
+`leaving` class 67ms after the menu click, and its live animation reported keyframes of
+79px to 0px with margin-bottom 8px to 0px and opacity 1 to 0, duration 180ms, easing
+cubic-bezier(0.2, 0, 0, 1) and fill forwards. Seeking that animation read heights 79,
+31, 10, 2 and 0 against opacity 1.00, 0.39, 0.12, 0.02 and 0.00 — the collapse
+interpolates instead of jumping, and the neighbour below it moved as it went. The row
+then detached and the list went from 8 rows to 7, and the sidebar preview of that group
+moved on to the next message. Delete for me on a peer’s 53px bubble behaved the same
+(keyframes 53px to 0px, row gone). No text «این پیام حذف شد» appeared on screen during
+either run, and none appears after a reload: the direct chat whose history the server
+still answers with 5 rows, 3 of them `deleted: true`, renders 2. A chat whose every row
+is deleted shows the empty-conversation line rather than a stack of blank bubbles.
+Reactions still add and clear, a seeded photo still renders (naturalWidth 480) and its
+viewer still opens and closes.
+Two things that proof does not cover: the frames of the collapse were read by pausing
+the live animation and seeking it, because a hidden page produces no frames; and the
+extra tombstones and hides now sitting in the local database are rows this run deleted
+while testing — the fixture is a dev seed, and `npm run seed:dev` rebuilds it.
+
 ## [1.1.23] - 2026-10-22
 
 ### Changed

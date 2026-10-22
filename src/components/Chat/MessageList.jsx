@@ -101,9 +101,10 @@ export default function MessageList({
   const isGroup = activeUser.kind === 'group';
 
   const rows = useMemo(() => buildRows(messages), [messages]);
-  // The viewer walks the pictures of this thread, so a deleted one is not one of
-  // them: its bytes are gone and its row is a tombstone, not a page.
-  const images = useMemo(() => messages.filter(msg => msg.type === 'image' && !msg.deleted), [messages]);
+  // The viewer walks the pictures of this thread, so a picture on its way out is
+  // no longer one of them: walking the thread must not land on a page that is
+  // already gone.
+  const images = useMemo(() => messages.filter(msg => msg.type === 'image' && !msg.leaving), [messages]);
   const viewerIndex = images.findIndex(img => img.id === openImageId);
   const notice = e2eeNotice({
     encrypted,

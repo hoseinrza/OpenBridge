@@ -317,6 +317,21 @@
 .msg-wrapper.other { align-items: flex-end; }
 .msg-wrapper.last  { margin-bottom: var(--sp-2); }
 
+/* A message that is deleted leaves the timeline rather than being rewritten in
+   place: nothing is drawn where it stood, and the row collapses to nothing while
+   the list counts down to dropping it (see the bubble's exit animation). All
+   that is left for CSS is to clip the row as it shrinks and stop it answering
+   taps on the way out. The clip is also what would take the row's own height
+   away before the animation ever starts: a scrollable flex column floors an
+   item's size at nothing once it becomes a scroll container, and the thread is
+   always taller than the pane it scrolls in, so the row is pinned against
+   shrinking here and left to the animation to decide its height. */
+.msg-wrapper.leaving {
+  overflow: hidden;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
 .msg-group {
   display: flex;
   align-items: flex-end;
@@ -378,18 +393,6 @@
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-
-/* What is left of a message deleted for everyone: the row keeps its place in
-   the timeline and its own shape, and gives up everything else — including
-   being selectable, since there is nothing in it left to take. */
-.bubble-deleted {
-  unicode-bidi: plaintext;
-  color: var(--text-3);
-  font-style: italic;
-  user-select: none;
-}
-
-.msg-wrapper.mine .bubble-deleted { color: rgba(255, 255, 255, 0.72); }
 
 .msg-wrapper.other .bubble {
   background: var(--bubble-in);

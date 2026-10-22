@@ -47,13 +47,24 @@ function normalize(msg, myId) {
     createdAt:    new Date(msg.createdAt).getTime(),
     read:         msg.read,
     encrypted:    false,
-    // A tombstone is a row the server still returns with its content removed,
-    // so the list keeps it in place and says so instead of dropping a hole.
-    deleted:      Boolean(msg.deleted),
     editedAt:     msg.editedAt ? new Date(msg.editedAt).getTime() : null,
     reactions:    groupReactions(msg.reactions, myId),
   };
 }
+
+// A message deleted for everyone is still a row on the server, with its content
+// removed, because another device may want to say so. This client says nothing:
+// the row is dropped as it is read, so no placeholder is ever drawn and a
+// reload of the same chat gives back the same timeline it had before the
+// message existed.
+function fromServer(msgs, myId) {
+  return msgs.filter(m => !m.deleted).map(m => normalize(m, myId));
+}
+
+// How long a deleted row is kept mounted while it collapses. It has to outlast
+// the exit animation the bubble runs — one `--dur`, currently 180ms — or the row
+// would be gone before the messages under it had slid up into its place.
+const MESSAGE_EXIT_MS = 240;
 
 // A decrypted message carries no profile data, because the server never saw the
 // message it belongs to — the active peer supplies the name the bubble shows.
@@ -82,10 +93,6 @@ function normalizeEncrypted(message, peer) {
     time:           timeIn(created),
     createdAt:      created,
     encrypted:      true,
-    // Actions on an encrypted stream travel as control messages, which this
-    // release cannot send yet; the shape stays uniform so the bubbles ask one
-    // question of every message.
-    deleted:        false,
     editedAt:       null,
     reactions:      [],
   };
@@ -171,7 +178,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
       const me     = currentUserRef.current;
       if (!target || !me) return;
       fetchTargetMessages(target)
-        .then(msgs => setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, me.id)))))
+        .then(msgs => setMessages(prev => mergeMessages(prev, fromServer(msgs, me.id))))
         .catch(() => {});
     };
 
@@ -324,30 +331,29 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
       setMessages(prev => mergeMessages(prev, [normalize(msg, me.id)]));
     });
 
+    // A delete takes the row out of the timeline, on every device and in both
+    // scopes: "for everyone" removes it for everybody, "for me" hides it for
+    // this account alone. What is left on the server is not drawn — the row
+    // collapses where it stood and the messages under it close the gap.
     socket.on('message:deleted', ({ messageId, conversationId, scope }) => {
       onIncomingRef.current?.();
-      setMessages(prev => {
-        // "For me" is a hide, so the row leaves the timeline entirely; only this
-        // account's own devices were told, and one of them may not be looking at
-        // this chat, which is why the row is dropped by id rather than checked.
-        if (scope === 'me') return prev.filter(m => m.id !== messageId);
-        // Both the id and its conversation have to match: a tombstone for a chat
-        // that is closed here is not this list's business.
-        return prev.map(m => (m.id === messageId && m.conversationId === conversationId
-          ? {
-            ...m,
-            deleted: true,
-            text: '',
-            src: undefined,
-            name: null,
-            size: null,
-            // The server clears the reactions and the read receipts with the
-            // content, and a deleted message never shows a status mark.
-            reactions: [],
-            read: false,
-          }
-          : m));
-      });
+      setMessages(prev => prev.map(m => (
+        // "For me" reaches only this account's own devices, and one of them may
+        // not be looking at this chat, so the id alone is enough to find it. An
+        // "everyone" delete reaches the whole conversation, so the row has to
+        // belong to the chat on screen: a delete in one chat must not empty a
+        // row of another.
+        m.id === messageId && (scope === 'me' || m.conversationId === conversationId)
+          ? { ...m, leaving: true }
+          : m
+      )));
+      // The list owns how long the collapsed row stays mounted, so the removal
+      // is timed here rather than left to the bubble's animation event — a row
+      // whose animation never runs (a background tab, reduced motion) still
+      // goes away.
+      setTimeout(() => {
+        setMessages(prev => prev.filter(m => !(m.id === messageId && m.leaving)));
+      }, MESSAGE_EXIT_MS);
     });
 
     // A group's name, photo and bio are server metadata, so an edit made on any
@@ -488,7 +494,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     fetchTargetMessages(target)
       .then(msgs => {
         if (cancelled) return;
-        setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, currentUserId))));
+        setMessages(prev => mergeMessages(prev, fromServer(msgs, currentUserId)));
         setHistoryState('ready');
       })
       .catch(err => {

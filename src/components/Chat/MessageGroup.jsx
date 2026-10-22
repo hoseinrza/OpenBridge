@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Avatar from '../ui/Avatar.jsx';
 import EncryptedMedia from './EncryptedMedia.jsx';
 import MessageActionsMenu from './MessageActionsMenu.jsx';
@@ -21,13 +21,6 @@ function Highlight({ text, query }) {
    that everything the message owns — media, picker, reaction chips, timestamp
    and receipt — is laid out inside one surface. */
 function BubbleBody({ message, searchQuery, onOpenImage }) {
-  // A tombstone is the shape of a message that is gone: the row is still in the
-  // timeline, in the same place on the same day, with nothing of its own left
-  // inside it. Not even selectable — there is nothing there to take.
-  if (message.deleted) {
-    return <span className="bubble-deleted">این پیام حذف شد</span>;
-  }
-
   // An encrypted attachment has no address the browser could fetch. Only the
   // descriptor is known here, so the body — including its loading and failure
   // states — belongs to the component that can turn it back into bytes.
@@ -93,17 +86,18 @@ export default function MessageGroup({
   const [barBelow, setBarBelow] = useState(false);
   const [barOffset, setBarOffset] = useState(0);
   const [menu, setMenu] = useState(null); // { anchor, viaKeyboard } | null
+  const wrapperRef = useRef(null);
   const bubbleRef = useRef(null);
   const toggleRef = useRef(null);
   const pickerRef = useRef(null);
   const isMine = message.side === 'mine';
-  const deleted = Boolean(message.deleted);
+  // A row the list has marked as leaving is on its way out: it stops answering
+  // taps while it collapses, and the list drops it a beat later.
+  const leaving = Boolean(message.leaving);
   // Reactions live in the server's message table, and an encrypted message has
   // no row there to react to — so the affordance is not offered for it.
-  const reactable = !message.encrypted && !deleted;
-  // A tombstone has no action left on it: the menu, the picker and the keyboard
-  // stop asking, and the row keeps its place in the timeline and nothing else.
-  const actionable = !deleted;
+  const reactable = !message.encrypted && !leaving;
+  const actionable = !leaving;
 
   const reactions = message.reactions ?? [];
   const mine = new Set(reactions.filter(r => r.mine).map(r => r.emoji));
@@ -140,6 +134,30 @@ export default function MessageGroup({
   useEffect(() => {
     if (barOpen) pickerRef.current?.querySelector('.reaction-btn')?.focus();
   }, [barOpen]);
+
+  // A deleted row does not blink out: it collapses from its own height to
+  // nothing, so the messages under it slide up into the space instead of
+  // jumping. The height is measured here, one frame before anything about the
+  // row has changed, because a CSS animation would already be running by the
+  // time the row could be asked how tall it is. Duration and easing are read
+  // from the tokens the rest of the chat animates with, and the row is kept
+  // mounted a little longer than one duration (MESSAGE_EXIT_MS in useChat.js).
+  useLayoutEffect(() => {
+    if (!leaving) return undefined;
+    const el = wrapperRef.current;
+    if (!el) return undefined;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+    const tokens = getComputedStyle(el);
+    const anim = el.animate([
+      { height: `${el.offsetHeight}px`, marginBottom: tokens.marginBottom, opacity: 1 },
+      { height: '0px', marginBottom: '0px', opacity: 0 },
+    ], {
+      duration: Number.parseFloat(tokens.getPropertyValue('--dur')) || 180,
+      easing: tokens.getPropertyValue('--ease').trim() || 'ease',
+      fill: 'forwards',
+    });
+    return () => anim.cancel();
+  }, [leaving]);
 
   function pickReaction(emoji) {
     onReact?.(message.id, emoji);
@@ -211,9 +229,11 @@ export default function MessageGroup({
   }, [menu]);
 
   const bubbleClass = `bubble ${message.type === 'image' ? 'bubble-image' : ''}`;
+  const wrapperClass = `msg-wrapper ${isMine ? 'mine' : 'other'} `
+    + `${first ? 'first' : ''} ${last ? 'last' : ''} ${leaving ? 'leaving' : ''}`;
 
   return (
-    <div className={`msg-wrapper ${isMine ? 'mine' : 'other'} ${first ? 'first' : ''} ${last ? 'last' : ''}`}>
+    <div ref={wrapperRef} className={wrapperClass}>
       <div className="msg-group">
         {!isMine && (
           last ? (
@@ -289,10 +309,7 @@ export default function MessageGroup({
                 </span>
               )}
 
-              {/* Deleting for everyone clears the read receipts with the content,
-                  so a tick on a tombstone would claim a message nobody can read
-                  was never seen. The status mark goes with it. */}
-              {isMine && !deleted && (
+              {isMine && (
                 <span
                   className={`msg-receipt ${message.read ? 'read' : ''}`}
                   title={message.read ? 'خوانده شد' : 'ارسال شد'}

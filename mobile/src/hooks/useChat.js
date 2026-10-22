@@ -37,6 +37,13 @@ function normalize(msg, myId) {
   };
 }
 
+// A message deleted for everyone is still a row on the server with its content
+// removed. This app draws nothing in its place: the row is dropped as it is
+// read, so the phone never shows an empty bubble for a message that is gone.
+function fromServer(msgs, myId) {
+  return msgs.filter(m => !m.deleted).map(m => normalize(m, myId));
+}
+
 function mergeMessages(prev, incoming) {
   const byId = new Map(prev.map(m => [m.id, m]));
   for (const m of incoming) byId.set(m.id, m);
@@ -78,7 +85,7 @@ export function useChat(peer, currentUser, onIncoming) {
     try {
       const loader = p.kind === 'group' ? fetchGroupMessages : fetchMessages;
       const msgs = await loader(p.id);
-      setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, me.id))));
+      setMessages(prev => mergeMessages(prev, fromServer(msgs, me.id)));
       setHistoryState('ready');
     } catch (err) {
       setHistoryError(err.message ?? 'دریافت پیام‌ها ناموفق بود');
@@ -99,7 +106,7 @@ export function useChat(peer, currentUser, onIncoming) {
     if (!p || !me) return;
     const loader = p.kind === 'group' ? fetchGroupMessages : fetchMessages;
     loader(p.id)
-      .then(msgs => setMessages(prev => mergeMessages(prev, msgs.map(m => normalize(m, me.id)))))
+      .then(msgs => setMessages(prev => mergeMessages(prev, fromServer(msgs, me.id))))
       .catch(() => {});
   };
 
@@ -173,6 +180,13 @@ export function useChat(peer, currentUser, onIncoming) {
       )));
     };
 
+    // A delete — for everyone or for this account alone — takes the row out of
+    // this list. The id is enough: the list only ever holds the open chat, and a
+    // delete for me reaches only this account's own devices.
+    const onDeleted = ({ messageId }) => {
+      setMessages(prev => prev.filter(m => m.id !== messageId));
+    };
+
     // A chat can become encrypted while it is open on this screen: the web peer
     // sends its first envelope and the server flips the conversation. The phone
     // cannot decrypt it, so it must stop offering a composer that would send
@@ -192,6 +206,7 @@ export function useChat(peer, currentUser, onIncoming) {
     socket.on('typing:start', onTypingStart);
     socket.on('typing:stop', onTypingStop);
     socket.on('reaction:changed', onReaction);
+    socket.on('message:deleted', onDeleted);
     socket.on('e2ee:envelope', onEnvelope);
     socket.on('connect', onConnect);
 
@@ -201,6 +216,7 @@ export function useChat(peer, currentUser, onIncoming) {
       socket.off('typing:start', onTypingStart);
       socket.off('typing:stop', onTypingStop);
       socket.off('reaction:changed', onReaction);
+      socket.off('message:deleted', onDeleted);
       socket.off('e2ee:envelope', onEnvelope);
       socket.off('connect', onConnect);
     };
