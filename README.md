@@ -148,7 +148,7 @@ no numbers. `users.phone` remains excluded from every other user response.
 ## 🧪 Tests & checks
 
 ```bash
-cd backend && npm run test:e2e     # 41 tests: OTP signup, sessions, uploads, CORS, socket, contacts, E2EE
+cd backend && npm run test:e2e     # 51 tests: OTP signup, sessions, uploads, CORS, socket, contacts, E2EE, message actions
 npm run test:e2ee                  # MLS library gate, including the no-WebCrypto (Hermes) run
 npm run lint                       # web ESLint
 npm run build                      # web production build

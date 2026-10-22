@@ -217,6 +217,56 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
   }
 
+  // ── Edit a stored message ───────────────────────────────────────────────
+  // The answer goes to every participant's room, sender included: another of
+  // the sender's own open windows has to converge on the same bubble.
+  @SubscribeMessage('message:edit')
+  async onEdit(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: { messageId?: string; text?: string },
+  ) {
+    if (!this.allowRate(socket.id, 'message:edit', 20, 10_000)) {
+      return { ok: false, error: 'تعداد درخواست‌ها بیش از حد مجاز است' };
+    }
+
+    try {
+      const message = await this.messages.editMessage(body?.messageId, socket.data.userId, body?.text);
+      const participantIds = await this.messages.getConversationParticipantIds(message.conversationId);
+      this.server.to(participantIds).emit('message:edited', message);
+      return { ok: true, message };
+    } catch (err) {
+      return this.failure(err, 'ویرایش پیام ناموفق بود');
+    }
+  }
+
+  // ── Delete a stored message ─────────────────────────────────────────────
+  // Scope decides who hears about it: "everyone" is a change to what the chat
+  // holds, so every participant is told; "me" is one viewer's preference and
+  // goes only to that account's own rooms, which is what keeps every device of
+  // that person in step without leaking the hide to anybody else.
+  @SubscribeMessage('message:delete')
+  async onDelete(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: { messageId?: string; scope?: string },
+  ) {
+    if (!this.allowRate(socket.id, 'message:delete', 20, 10_000)) {
+      return { ok: false, error: 'تعداد درخواست‌ها بیش از حد مجاز است' };
+    }
+    const scope = body?.scope;
+    if (scope !== 'everyone' && scope !== 'me') return { ok: false, error: 'نوع حذف نامعتبر است' };
+
+    try {
+      const result = await this.messages.deleteMessage(body.messageId, socket.data.userId, scope);
+      const targets = scope === 'everyone'
+        ? await this.messages.getConversationParticipantIds(result.conversationId)
+        : [socket.data.userId];
+      this.server.to(targets).emit('message:deleted', result);
+      return { ok: true, ...result };
+    } catch (err) {
+      return this.failure(err, 'حذف پیام ناموفق بود');
+    }
+  }
+
   // ── Encrypted conversations: opaque envelopes, delivered in order ──────
   // The server is a sequenced delivery service here and nothing more: it stores
   // the blob it is handed, numbers it per conversation, and emits it in that

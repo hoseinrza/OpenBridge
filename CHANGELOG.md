@@ -4,6 +4,83 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.20] - 2026-10-22
+
+### Added
+- **The server now stores actions on a whole message.** Two socket events join
+  `message:send`, with the same ack convention: `message:edit { messageId, text }`
+  and `message:delete { messageId, scope }`. Every rule is enforced from the row
+  the id points at, never from anything the client claims about the chat: the
+  caller must be a participant of the conversation the message belongs to, an
+  edit is restricted to the sender's own `TEXT` message that is still alive, and
+  `scope: "everyone"` is the sender's alone while `scope: "me"` is any
+  participant's. Text is re-normalized through the same path that guards sending,
+  so an edit cannot grow a message past the 4000-character limit a new one is
+  held to.
+- **A tombstone, not a gap.** Deleting for everyone is one transaction that
+  stamps `deletedAt`, nulls `text`, `fileUrl`, `fileName` and `fileSize`, and
+  drops the message's reactions and read receipts. History then serves the row in
+  place — same id, same position in the timeline and in pagination — with
+  `deleted: true` and no content, so every device of every member converges on
+  the same transcript instead of disagreeing about where a message used to be.
+- **"Delete for me" is one viewer's preference, stored as one row.** A new
+  `message_hides` table records who hid what, and the read paths filter on it:
+  history, unread badges, the chat-list preview line and the profile's media,
+  file and link tabs all stop showing that row to that account — and a hidden
+  row does not spend a pagination slot. Everyone else keeps seeing the message,
+  and the `message:deleted` broadcast for this scope goes only to the actor's own
+  rooms, which is what puts every device of that one account in step without
+  leaking the hide to anybody else.
+- **Encrypted chats keep their promise.** An edit refuses to run inside an
+  end-to-end encrypted conversation, because replacing a legacy plaintext row
+  would be a fresh readable write in a chat that is ciphertext-only from its
+  first envelope. Deleting such a legacy row for everyone still works, since
+  that is a service the server can actually perform on a row it holds. The
+  envelope log gains a `kind` column (`MESSAGE` by default, `CONTROL` for the
+  encrypted action messages the next batch introduces) and unread counts already
+  skip anything that is not a message.
+
+### Changed
+- **An action on a message is not new activity.** Neither an edit nor a delete
+  touches `conversation.updatedAt`, so rewriting an old message cannot float that
+  chat to the top of somebody's list.
+- **A message you cannot see is a message you cannot act on.** Reactions and
+  edits answer a hidden row the way they answer an id that does not exist, a
+  delete for everyone refuses a row its own requester already hid, and a tombstone
+  accepts none of them. Asking to hide a row twice is harmless: the second ask
+  leaves one hide, which is what makes a retry safe.
+
+### Notes on what this does not do
+- No client can reach any of this yet: the right-click and long-press menu, the
+  edit bar, the "ویرایش‌شده" marker and the tombstone bubble are the web and
+  mobile releases that follow. Until then the events exist for a client that
+  sends them, and both shipped clients keep behaving exactly as before.
+- There is no undo, no trash, no edit history, and no group-admin power to delete
+  somebody else's message.
+- `deletedAt` no longer travels on the wire; clients read the boolean `deleted`.
+
+### Verification
+`cd backend && npm run build` and `npx prisma validate` clean, and `prisma db
+push` applied against the local development database only — no migration ran
+against any deployed one. The new `backend/test/message-actions.e2e.cjs` adds
+seven cases and passes: an edit by the sender broadcast to the peer *and* to a
+second socket of the sender's own account, and served back through REST history
+for both; refusals for a peer's edit, a non-member's edit, a non-text edit, an
+empty edit, a 4001-character edit and an id the server has never heard of;
+delete-for-everyone clearing text, file, reactions and read receipts in the
+database while every member reads a tombstone, leaving the conversation's
+recency stamp untouched, and refusing a later edit, reaction and second delete;
+delete-for-me hiding the row from one account only, telling no other room about
+it, refusing reactions and edits from the viewer who hid it, and still letting
+the sender delete it for everyone; hidden rows absent from the badge and from
+history without spending a pagination slot; an encrypted direct chat refusing
+the plaintext rewrite while accepting the deletion of the legacy row; and a row
+you hid for yourself refusing to be deleted for everyone while a repeated hide
+still leaves exactly one hide. The whole backend suite is 51/51
+(`npm run test:e2e`), up from 44 with these seven.
+No client UI exists for this batch, so there was no browser or device pass to
+report and none is claimed: the mobile app changed only in its version number.
+
 ## [1.1.19] - 2026-10-22
 
 ### Changed

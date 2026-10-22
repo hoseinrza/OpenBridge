@@ -27,6 +27,15 @@ enum ParticipantRole {
   MEMBER
 }
 
+// What an envelope carries. Both kinds are opaque ciphertext to the server and
+// both consume a `seq`, so the ratchet advances the same way either way; the
+// kind is what lets unread counts skip the control messages that no one reads
+// as chat.
+enum E2eeEnvelopeKind {
+  MESSAGE
+  CONTROL
+}
+
 model User {
   id          String     @id @default(uuid())
   username    String     @unique
@@ -47,6 +56,7 @@ model User {
 
   messages       Message[]
   reactions      Reaction[]
+  hides          MessageHide[]
   participations ConversationParticipant[]
   reads          MessageRead[]
   sessions       Session[]
@@ -73,9 +83,14 @@ model E2eeEnvelope {
   sender         User        @relation(fields: [senderId], references: [id], onDelete: Cascade)
   seq            Int
   content        String      @db.Text
+  // Declared by the sending client, so it is delivery metadata rather than
+  // something the server can verify: the plaintext inside is what proves a
+  // control is a control.
+  kind           E2eeEnvelopeKind @default(MESSAGE)
   createdAt      DateTime    @default(now())
 
   @@unique([conversationId, seq])
+  @@index([conversationId, kind])
   @@map("e2ee_envelopes")
 }
 
@@ -237,6 +252,7 @@ model Message {
 
   reactions Reaction[]
   reads     MessageRead[]
+  hides     MessageHide[]
 
   @@index([conversationId, createdAt])
   @@index([senderId])
@@ -256,6 +272,23 @@ model MessageRead {
   @@unique([messageId, userId])
   @@index([userId])
   @@map("message_reads")
+}
+
+// "Delete for me": the row and its ciphertext stay for everyone else, and only
+// this viewer stops seeing it. One row per (message, viewer), because a
+// message can be hidden by several of its recipients independently — a boolean
+// column on Message could only ever mean "hidden by the whole world".
+model MessageHide {
+  id        String   @id @default(uuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@index([userId])
+  @@map("message_hides")
 }
 
 // One reaction per person per message, like a tapback: pressing again removes

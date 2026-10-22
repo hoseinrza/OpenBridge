@@ -15,6 +15,12 @@ const WITH_RELATIONS = {
 
 const PARTNER_SELECT = { id: true, username: true, displayName: true, avatar: true, bio: true, status: true };
 
+// A message id arrives from a client, and an edit or a delete is only ever
+// allowed against a row the database actually has.
+function isMessageId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 64;
+}
+
 const LAST_MESSAGE_SELECT = {
   type: true,
   text: true,
@@ -23,12 +29,14 @@ const LAST_MESSAGE_SELECT = {
   sender: { select: { id: true, username: true, displayName: true } },
 };
 
-const LAST_MESSAGE_INCLUDE = {
-  where:   { deletedAt: null },
+// The preview line of a chat is the newest message the reader can actually see:
+// not one they deleted for themselves, not one that is now a tombstone.
+const lastMessageInclude = (userId: string) => ({
+  where:   { deletedAt: null, hides: { none: { userId } } },
   orderBy: { createdAt: 'desc' as const },
   take:    1,
   select:  LAST_MESSAGE_SELECT,
-};
+});
 
 // Photos and films in one list, documents and voice recordings in the other: the
 // split a profile panel is judged by, not the enum's own vocabulary.
@@ -92,11 +100,19 @@ export class MessagesService {
     return membership;
   }
 
+  // One shape for every reader of a message: REST history, the send broadcast and
+  // the edit/delete broadcasts all go through here, so a tombstone looks the same
+  // wherever it is picked up. `deleted` is what the clients switch on; the raw
+  // `deletedAt` never leaves the server, because the client only renders a
+  // tombstone and must not sort or date it by a second clock.
   private toWireMessage(message: any) {
-    const { reads, ...rest } = message;
+    const { reads, deletedAt, ...rest } = message;
+    const deleted = Boolean(deletedAt);
     return {
       ...rest,
-      fileUrl: signedFileUrl(rest.fileUrl),
+      deleted,
+      editedAt: rest.editedAt ?? null,
+      fileUrl: deleted ? null : signedFileUrl(rest.fileUrl),
       sender: rest.sender
         ? { ...rest.sender, avatar: signedFileUrl(rest.sender.avatar) }
         : rest.sender,
@@ -142,7 +158,10 @@ export class MessagesService {
     if (!other) throw new NotFoundException('کاربر پیدا نشد');
     const conversation = await this.getOrCreateDirectConversation(myId, otherId);
     const messages = await this.prisma.message.findMany({
-      where:   { conversationId: conversation.id, deletedAt: null },
+      // Deleted-for-everyone rows come back as tombstones so they keep their
+      // place in the timeline; rows this reader hid for themselves do not, and
+      // do not consume a page slot either.
+      where:   { conversationId: conversation.id, hides: { none: { userId: myId } } },
       include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
       // Newest first so take/skip pagination starts from recent messages,
       // then flip back to chronological order for the UI.
@@ -161,7 +180,7 @@ export class MessagesService {
       orderBy: { updatedAt: 'desc' },
       include: {
         participants: { where: { userId: { not: myId } }, include: { user: { select: PARTNER_SELECT } } },
-        messages:     LAST_MESSAGE_INCLUDE,
+        messages:     lastMessageInclude(myId),
       },
     });
 
@@ -179,17 +198,25 @@ export class MessagesService {
 
     return Promise.all(withPartner.map(async (c) => {
       // An encrypted conversation has no plaintext rows to count, so unread is
-      // "envelopes above my high-water mark that I did not submit".
+      // "envelopes above my high-water mark that I did not submit". Controls are
+      // not chat, so they never raise a badge.
       const unread = c.e2ee
         ? await this.prisma.e2eeEnvelope.count({
           where: {
             conversationId: c.id,
             senderId:       { not: myId },
             seq:            { gt: readSeq.get(c.id) ?? 0 },
+            kind:           'MESSAGE',
           },
         })
         : await this.prisma.message.count({
-          where: { conversationId: c.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
+          where: {
+            conversationId: c.id,
+            senderId:       { not: myId },
+            reads:          { none: { userId: myId } },
+            deletedAt:      null,
+            hides:          { none: { userId: myId } },
+          },
         });
       return {
         user:        c.participants[0].user,
@@ -234,10 +261,16 @@ export class MessagesService {
     }
 
     const message = await this.prisma.message.findUnique({
-      where:  { id: messageId },
-      select: { conversationId: true, deletedAt: true },
+      where: { id: messageId },
+      select: {
+        conversationId: true,
+        deletedAt:      true,
+        hides:          { where: { userId }, select: { id: true } },
+      },
     });
-    if (!message || message.deletedAt) throw new NotFoundException('پیام پیدا نشد');
+    // A tombstone carries no reactions and a row you hid is not on your screen
+    // to react to, so both answer the same way a missing id does.
+    if (!message || message.deletedAt || message.hides.length) throw new NotFoundException('پیام پیدا نشد');
 
     // Authorization is based on the message's real conversation, never on an
     // ID supplied by the client.
@@ -340,7 +373,7 @@ export class MessagesService {
       orderBy: { updatedAt: 'desc' },
       include: {
         participants: { include: { user: { select: PARTNER_SELECT } } },
-        messages:     LAST_MESSAGE_INCLUDE,
+        messages:     lastMessageInclude(myId),
       },
     });
     if (!groups.length) return [];
@@ -360,10 +393,17 @@ export class MessagesService {
             conversationId: group.id,
             senderId:       { not: myId },
             seq:            { gt: readSeq.get(group.id) ?? 0 },
+            kind:           'MESSAGE',
           },
         })
         : await this.prisma.message.count({
-          where: { conversationId: group.id, senderId: { not: myId }, reads: { none: { userId: myId } } },
+          where: {
+            conversationId: group.id,
+            senderId:       { not: myId },
+            reads:          { none: { userId: myId } },
+            deletedAt:      null,
+            hides:          { none: { userId: myId } },
+          },
         });
       return this.toWireGroup(group, unread, this.toWirePreview(group.messages[0]));
     }));
@@ -472,7 +512,7 @@ export class MessagesService {
   async getConversationMessages(conversationId: string, userId: string, take = 50, skip = 0) {
     await this.assertMember(conversationId, userId);
     const messages = await this.prisma.message.findMany({
-      where:   { conversationId, deletedAt: null },
+      where:   { conversationId, hides: { none: { userId } } },
       include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
       orderBy: { createdAt: 'desc' },
       take,
@@ -535,6 +575,10 @@ export class MessagesService {
         JOIN users u ON u.id = m."senderId"
         WHERE m."conversationId" = ${conversation.id}
           AND m."deletedAt" IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM message_hides h
+            WHERE h."messageId" = m.id AND h."userId" = ${requesterId}
+          )
           AND m.type = 'TEXT'
           AND m.text ~ 'https?://'
           ${older}
@@ -560,6 +604,7 @@ export class MessagesService {
       where: {
         conversationId: conversation.id,
         deletedAt:      null,
+        hides:          { none: { userId: requesterId } },
         type:           { in: SHARED_TYPES[kind] },
         ...(cursor ? { createdAt: { lt: cursor } } : {}),
       },
@@ -644,6 +689,101 @@ export class MessagesService {
       data:  { updatedAt: new Date() },
     });
     return this.toWireMessage(message);
+  }
+
+  // ── Edit and delete a stored message ──────────────────────────────────────
+  //
+  // Both paths derive the conversation from the row rather than from anything
+  // the client sends, so naming a message id is never enough to act inside a
+  // chat the caller is not a member of. Neither one touches the conversation's
+  // recency stamp: an action on a past message is not new activity, and it must
+  // not reorder the chat list.
+
+  // Text-only, sender-only, and never inside an encrypted chat: a plaintext
+  // rewrite there would be a new readable row in a conversation that is
+  // ciphertext-only from its first envelope.
+  async editMessage(messageId: string, userId: string, text: unknown) {
+    if (!isMessageId(messageId)) throw new BadRequestException('پیام نامعتبر است');
+
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: {
+        conversationId: true,
+        senderId:       true,
+        type:           true,
+        deletedAt:      true,
+        hides:          { where: { userId }, select: { id: true } },
+        conversation:   { select: { e2ee: true } },
+      },
+    });
+    if (!message || message.deletedAt || message.hides.length) throw new NotFoundException('پیام پیدا نشد');
+    await this.assertMember(message.conversationId, userId);
+    if (message.senderId !== userId) throw new ForbiddenException('فقط فرستنده می‌تواند پیامش را ویرایش کند');
+    if (message.type !== 'TEXT') throw new BadRequestException('فقط پیام متنی قابل ویرایش است');
+    if (message.conversation.e2ee) {
+      throw new BadRequestException('پیام این گفتگو رمزنگاری‌شده است و از این راه ویرایش نمی‌شود');
+    }
+
+    // The same normalization that guards sending: one limit for one kind of text,
+    // so an edit can never grow a message past what a new one would be allowed.
+    // Anything that is not a string arrives as the empty one and is refused.
+    const { text: editedText } = this.normalizeOutgoingMessage({
+      type: 'TEXT',
+      text: typeof text === 'string' ? text : '',
+    });
+
+    const updated = await this.prisma.message.update({
+      where:   { id: messageId },
+      data:    { text: editedText, editedAt: new Date() },
+      include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
+    });
+    return this.toWireMessage(updated);
+  }
+
+  // `everyone` empties the row for every participant; `me` leaves the row intact
+  // for everyone else and only records that this viewer does not want to see it.
+  async deleteMessage(messageId: string, userId: string, scope: 'everyone' | 'me') {
+    if (!isMessageId(messageId)) throw new BadRequestException('پیام نامعتبر است');
+
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      select: {
+        conversationId: true,
+        senderId:       true,
+        deletedAt:      true,
+        hides:          { where: { userId }, select: { id: true } },
+      },
+    });
+    if (!message || message.deletedAt) throw new NotFoundException('پیام پیدا نشد');
+    await this.assertMember(message.conversationId, userId);
+
+    if (scope === 'everyone') {
+      // A row this viewer already hid is not on their screen to delete, so it
+      // answers like a row that is not there. Hiding it again is not an error:
+      // the upsert below is what makes a retried "delete for me" harmless.
+      if (message.hides.length) throw new NotFoundException('پیام پیدا نشد');
+      if (message.senderId !== userId) {
+        throw new ForbiddenException('فقط فرستنده می‌تواند پیام را برای همه حذف کند');
+      }
+      // One transaction, because a tombstone that still shows the old text, the
+      // old file or the reactions it collected is three bugs at once.
+      await this.prisma.$transaction(async tx => {
+        await tx.message.update({
+          where: { id: messageId },
+          data:  { deletedAt: new Date(), text: null, fileUrl: null, fileName: null, fileSize: null },
+        });
+        await tx.reaction.deleteMany({ where: { messageId } });
+        await tx.messageRead.deleteMany({ where: { messageId } });
+      });
+    } else {
+      await this.prisma.messageHide.upsert({
+        where:  { messageId_userId: { messageId, userId } },
+        create: { messageId, userId },
+        update: {},
+      });
+    }
+
+    return { messageId, conversationId: message.conversationId, scope };
   }
 
   async markConversationRead(conversationId: string, userId: string) {
