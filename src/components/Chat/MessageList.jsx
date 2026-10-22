@@ -86,7 +86,7 @@ function e2eeNotice({ encrypted, secureMode, isGroup, reason }) {
 export default function MessageList({
   messages, activeUser, onReact, onEdit, onDelete, onToast, searchQuery,
   encrypted, secureMode, encryptionNote,
-  historyState, historyError, onRetryHistory,
+  historyState, historyError, onRetryHistory, onOpenProfile,
 }) {
   const listRef   = useRef(null);
   const bottomRef = useRef(null);
@@ -247,6 +247,7 @@ export default function MessageList({
               onToast={onToast}
               searchQuery={searchQuery}
               onOpenImage={setOpenImageId}
+              onOpenProfile={onOpenProfile}
             />
           )
         ))}

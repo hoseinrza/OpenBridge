@@ -24,7 +24,7 @@ function joinedAt(dateStr) {
   return new Date(dateStr).toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
+export default function ProfileModal({ user, isOwn, onMessage, onClose, onSaved }) {
   const [editing,  setEditing]  = useState(false);
   const [firstName, setFirstName] = useState(() => nameParts(user).firstName);
   const [lastName,  setLastName]  = useState(() => nameParts(user).lastName);
@@ -271,6 +271,19 @@ export default function ProfileModal({ user, isOwn, onClose, onSaved }) {
               <button type="button" className="btn btn-primary profile-edit-btn" onClick={() => setEditing(true)}>
                 <i className="fas fa-pen" aria-hidden="true" />
                 ویرایش پروفایل
+              </button>
+            )}
+
+            {/* Somebody else's sheet is not a dead end: the reason to look at a
+                person in a group is usually to write to them. */}
+            {!isOwn && onMessage && (
+              <button
+                type="button"
+                className="btn btn-primary profile-edit-btn"
+                onClick={() => onMessage(user)}
+              >
+                <i className="fas fa-comment" aria-hidden="true" />
+                پیام خصوصی
               </button>
             )}
           </>

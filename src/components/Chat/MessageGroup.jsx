@@ -80,7 +80,7 @@ function BubbleBody({ message, searchQuery, onOpenImage }) {
 
 export default function MessageGroup({
   message, first = true, last = true, isGroup = false, onReact, searchQuery,
-  onOpenImage, onEdit, onDelete, onToast, chatEncrypted = false,
+  onOpenImage, onEdit, onDelete, onToast, chatEncrypted = false, onOpenProfile,
 }) {
   const [barOpen, setBarOpen] = useState(false);
   const [barBelow, setBarBelow] = useState(false);
@@ -158,6 +158,14 @@ export default function MessageGroup({
     });
     return () => anim.cancel();
   }, [leaving]);
+
+  // The face beside a message is the door to the person behind it, in a group as
+  // much as in a direct chat. The avatar and the name line open the same profile,
+  // and both hand over only what this row knows: the sheet fills the rest from
+  // the server, so a tap answers at once whatever the network is doing.
+  function openProfile() {
+    onOpenProfile?.({ id: message.senderId, name: message.sender || 'کاربر', avatar: message.avatar });
+  }
 
   function pickReaction(emoji) {
     onReact?.(message.id, emoji);
@@ -237,12 +245,15 @@ export default function MessageGroup({
       <div className="msg-group">
         {!isMine && (
           last ? (
-            <Avatar
-              src={message.avatar}
-              name={message.sender || 'کاربر'}
-              size={30}
-              className="msg-avatar"
-            />
+            <button
+              type="button"
+              className="msg-avatar-btn"
+              onClick={openProfile}
+              aria-label={`پروفایل ${message.sender || 'کاربر'}`}
+              title={`پروفایل ${message.sender || 'کاربر'}`}
+            >
+              <Avatar src={message.avatar} name={message.sender || 'کاربر'} size={30} />
+            </button>
           ) : (
             <span className="msg-avatar-spacer" aria-hidden="true" />
           )
@@ -261,7 +272,9 @@ export default function MessageGroup({
             onKeyDown={handleKeyDown}
           >
             {!isMine && isGroup && first && (
-              <div className="msg-sender">{message.sender || 'کاربر'}</div>
+              <button type="button" className="msg-sender" onClick={openProfile}>
+                {message.sender || 'کاربر'}
+              </button>
             )}
 
             <BubbleBody

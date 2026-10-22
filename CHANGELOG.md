@@ -4,6 +4,57 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.25] - 2026-10-22
+
+### Added
+- **چهرهٔ کنار پیام درِ خودِ شخص است.** The circle beside an incoming bubble and
+  the sender name line above it are buttons now, and both open that person’s profile —
+  in a group, where the name is the whole point of the row, and in a direct chat, where
+  the face is the only thing saying whose message it is. The sheet opens at once with the
+  name and photo this row already carries, and the server’s record (username, bio,
+  presence, the date the account joined) is poured into the same sheet when it arrives, so
+  a slow lookup shows a profile with less in it rather than a spinner where a face already
+  was. Tapping your own row — a member list is the usual way — opens the editable profile
+  you already know, not somebody else’s read-only card.
+- **برگهٔ شخص بن‌بست نیست.** A profile opened for somebody else ends in «پیام
+  خصوصی», which starts the direct chat with them. That is the reason to look at a person
+  inside a group in the first place, and until now the only road there was searching for
+  their username. Pressing it while their chat is already on screen closes the sheet and
+  changes nothing, because reloading a transcript nobody asked about is a regression, not
+  a feature.
+- **ردیف اعضا هم همان در را دارد.** The rows of the «اعضا» tab in a group’s
+  profile panel open the same sheet for that member. The role chip stays outside the tap,
+  so reading who owns the group and reaching the person are two different gestures.
+
+### Notes on what this does not do
+- The sheet itself is the one this app already had: name, @username, presence, bio and the
+  joined date, with no phone number for anybody but you. Nothing was added to it beyond
+  the private-message button, and no server endpoint moved — a profile is read from
+  `GET /users/:id`, which answers without the phone field for every account but your own.
+- The phone has no such tap yet. Its chat rows draw an avatar that answers to nothing,
+  and its profile screen lists members without opening them; that is its own batch.
+
+Verified with `npm run lint` and `npm run build` clean on the web client. Everything else
+was driven in the running app against the local seeded database through real DOM events,
+read back as numbers and text, because the in-app browser on this machine reports a hidden
+surface where neither a pointer tool nor a screenshot works. A seeded group’s 30x30 avatar
+answered to «پروفایل نازنین شریفی» and opened a sheet reading «نازنین شریفی @nazanin_sharifi
+آفلاین … عضو از ۳۰ مهر ۱۴۰۵» with exactly two buttons, «بستن پروفایل» and «پیام خصوصی», and
+no phone number anywhere in it — while the same sheet opened for your own account does show
+its number, which is the split the server already enforces. The sender-name line is a
+BUTTON in the DOM and opened the same person. In the group panel’s «اعضا» tab (4 rows) a
+member row opened «کیوان رستمی @keivan_rostami» with the private-message button, and your
+own row — the one carrying the «شما» chip — opened the editable profile with «ویرایش پروفایل»
+instead. Pressing «پیام خصوصی» closed the sheet and moved the app from the group to the
+direct chat with that person (header «کیوان رستمی آفلاین», 14 rows, composer present);
+pressing it again from inside that same chat left the chat, its 14 rows and the sidebar
+selection untouched. Escape closed the sheet and left the group profile panel open on the
+«اعضا» tab behind it. Three limits: the new buttons were clicked, not keyboard-activated —
+a scripted keypress cannot make a native button fire, so Tab-and-Enter was not exercised;
+no mobile device was touched; and this release was staged hunk by hunk rather than file by
+file, because a voice-message feature is being written in the same two files at the same
+time and none of its lines belong here.
+
 ## [1.1.24] - 2026-10-22
 
 ### Changed

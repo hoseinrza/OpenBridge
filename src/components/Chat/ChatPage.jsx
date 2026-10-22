@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChat } from '../../hooks/useChat.js';
 import {
-  apiCall, fetchConversations, fetchGroups, normalizeUser, normalizeGroup,
+  apiCall, fetchUser, fetchConversations, fetchGroups, normalizeUser, normalizeGroup,
 } from '../../services/api.js';
 import { initE2ee } from '../../services/e2ee.js';
 import Sidebar from '../Sidebar/Sidebar.jsx';
@@ -250,6 +250,36 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   function closeProfile()         { setProfileTarget(null); }
   function handleProfileSaved(patch) { onProfileUpdate?.(patch); }
 
+  // A person's profile opens with the name and face the row already carries, so
+  // the tap is answered on the spot, and the server's record is poured into the
+  // same sheet when it arrives. A slow or failed lookup therefore shows a profile
+  // with less in it rather than a spinner where a face already was.
+  function openUserProfile(seed) {
+    const isOwn = seed.id === currentUser?.id;
+    setProfileTarget({ user: isOwn ? currentUser : seed, isOwn });
+    if (isOwn) return;
+    fetchUser(seed.id)
+      .then(wire => {
+        const full = normalizeUser(wire);
+        if (!full) return;
+        setProfileTarget(prev => (
+          prev && !prev.isOwn && prev.user.id === full.id
+            ? { user: { ...seed, ...full }, isOwn: false }
+            : prev
+        ));
+      })
+      .catch(() => {});
+  }
+
+  // The sheet's own way out of a group: writing to somebody starts the direct
+  // chat you would have to search for otherwise. Starting it again while it is
+  // already on screen would only clear a transcript nobody asked to reload.
+  function handleMessageFromProfile(user) {
+    closeProfile();
+    if (activeUser?.id === user.id) return;
+    handleStartConversation(user);
+  }
+
   const filteredMessages = searchQuery.trim()
     ? messages.filter(m => m.text?.toLowerCase().includes(searchQuery.toLowerCase()))
     : messages;
@@ -312,6 +342,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               historyState={historyState}
               historyError={historyError}
               onRetryHistory={retryHistory}
+              onOpenProfile={openUserProfile}
             />
 
             <TypingIndicator isTyping={isTyping} user={typingPeer ?? activeUser} />
@@ -361,13 +392,16 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           messages={messages}
           onClose={() => setProfileOpen(false)}
           onUpdated={handleGroupUpdated}
+          onOpenUser={openUserProfile}
         />
       )}
 
       {profileTarget && (
         <ProfileModal
+          key={profileTarget.user.id}
           user={profileTarget.isOwn ? currentUser : profileTarget.user}
           isOwn={profileTarget.isOwn}
+          onMessage={handleMessageFromProfile}
           onClose={closeProfile}
           onSaved={handleProfileSaved}
         />

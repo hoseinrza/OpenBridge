@@ -344,7 +344,18 @@
    ahead of the bubble instead of between the bubble and the middle. */
 .msg-wrapper.other .msg-group { flex-direction: row-reverse; }
 
-.msg-avatar { margin-bottom: 2px; }
+/* The face beside an incoming message is the door to the person behind it, so it
+   is a button — and a button has to be told to keep looking like the face it
+   replaced: no frame, no padding, the same 30px circle sitting on the row. */
+.msg-avatar-btn {
+  display: inline-flex;
+  margin-bottom: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
 .msg-avatar-spacer { width: 30px; flex-shrink: 0; }
 
 .msg-bubbles {
@@ -365,6 +376,16 @@
   color: var(--accent-text);
   margin-bottom: 1px;
   text-align: start;
+}
+
+/* The name is the second door to the same person, and it is set in the bubble's
+   own type: a frame or padding around it would push the first line of the
+   message down and break the grouping the row is built on. */
+button.msg-sender {
+  padding: 0;
+  border: 0;
+  background: none;
+  align-self: flex-start;
 }
 
 /* ── Bubble ──────────────────────────────────────────────────── */

@@ -79,7 +79,7 @@ function joinedAt(dateStr) {
 }
 
 export default function ChatProfilePanel({
-  chat, currentUser, encrypted, encryptionNote, messages = [], onClose, onUpdated,
+  chat, currentUser, encrypted, encryptionNote, messages = [], onClose, onUpdated, onOpenUser,
 }) {
   const isGroup = chat.kind === 'group';
   const myRole = isGroup
@@ -437,11 +437,19 @@ export default function ChatProfilePanel({
                   <ul className="panel-member-list">
                     {members.map((p) => (
                       <li key={p.id} className="panel-member">
-                        <Avatar src={p.avatar} name={p.name} size={36} />
-                        <span className="panel-member-name" title={p.name}>
-                          {p.name}
-                          {p.id === currentUser?.id && <span className="panel-member-you">شما</span>}
-                        </span>
+                        {/* A member is a person, so the row is a door to them —
+                            the same sheet a tap on their avatar in the chat opens. */}
+                        <button
+                          type="button"
+                          className="panel-member-btn"
+                          onClick={() => onOpenUser?.({ id: p.id, name: p.name, avatar: p.avatar })}
+                        >
+                          <Avatar src={p.avatar} name={p.name} size={36} />
+                          <span className="panel-member-name" title={p.name}>
+                            {p.name}
+                            {p.id === currentUser?.id && <span className="panel-member-you">شما</span>}
+                          </span>
+                        </button>
                         {ROLE_TEXT[p.role] && (
                           <span className={`panel-member-role role-${p.role.toLowerCase()}`}>{ROLE_TEXT[p.role]}</span>
                         )}

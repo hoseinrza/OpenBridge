@@ -204,6 +204,21 @@
 
 .panel-member:hover { background: var(--surface-3); }
 
+/* A member is a person, so the face and name are a door to them and the role
+   chip stays outside the reach of the tap. The button borrows the row's own
+   layout rather than adding one of its own. */
+.panel-member-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: start;
+}
+
 .panel-member-name {
   flex: 1;
   min-width: 0;
