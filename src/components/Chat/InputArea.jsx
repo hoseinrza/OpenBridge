@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import EmojiPicker from './EmojiPicker.jsx';
+import AttachMenu from './AttachMenu.jsx';
 
 const MAX_TEXTAREA_HEIGHT = 132;
 
@@ -8,18 +9,32 @@ export default function InputArea({
 }) {
   const [text, setText]           = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
+  const [showAttach, setShowAttach] = useState(false);
   const [sending, setSending]     = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError]         = useState('');
   const textareaRef = useRef(null);
   const fileRef     = useRef(null);
   const emojiRef    = useRef(null);
+  const attachRef   = useRef(null);
+  // Which kind the user asked for, remembered across the native picker: an image
+  // sent under «فایل» must stay a file row.
+  const pickRef     = useRef(null);
 
   const busy = sending || uploading;
 
   function dismissEmoji() {
     setShowEmoji(false);
     requestAnimationFrame(() => emojiRef.current?.focus());
+  }
+
+  function chooseAttachment(choice) {
+    setShowAttach(false);
+    pickRef.current = choice.kind;
+    // Written on the element, not in state, so the picker is already filtered
+    // when the click that opens it happens in this same turn.
+    if (fileRef.current) fileRef.current.accept = choice.accept;
+    requestAnimationFrame(() => fileRef.current?.click());
   }
 
   useEffect(() => {
@@ -86,7 +101,8 @@ export default function InputArea({
       return;
     }
 
-    const type = file.type.startsWith('image/') ? 'image' : 'file';
+    const type = pickRef.current === 'file' || !file.type.startsWith('image/') ? 'file' : 'image';
+    pickRef.current = null;
     setUploading(true);
     setError('');
     const result = await onSend({
@@ -116,10 +132,18 @@ export default function InputArea({
         />
       )}
 
+      {showAttach && (
+        <AttachMenu
+          onPick={chooseAttachment}
+          onClose={() => setShowAttach(false)}
+          ignoreRef={attachRef}
+        />
+      )}
+
       <input
         ref={fileRef}
         type="file"
-        accept="image/*,*/*"
+        accept="*/*"
         hidden
         onChange={handleFile}
       />
@@ -155,12 +179,15 @@ export default function InputArea({
         onSubmit={e => { e.preventDefault(); handleSend(); }}
       >
         <button
+          ref={attachRef}
           type="button"
-          className="icon-btn attach-btn"
-          title={blocked ?? 'پیوست فایل'}
-          aria-label="پیوست فایل"
+          className={`icon-btn attach-btn${showAttach ? ' active' : ''}`}
+          title={blocked ?? 'پیوست'}
+          aria-label="پیوست"
+          aria-haspopup="menu"
+          aria-expanded={showAttach}
           disabled={busy || Boolean(blocked)}
-          onClick={() => fileRef.current?.click()}
+          onClick={() => setShowAttach(open => !open)}
         >
           <i className={`fas ${blocked ? 'fa-lock' : 'fa-paperclip'}`} aria-hidden="true" />
         </button>

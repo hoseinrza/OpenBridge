@@ -95,7 +95,7 @@ export default function ChatHeader({
                 onClick={() => onOpenProfile?.(user)}
                 title="مشاهده پروفایل"
               >
-                <Avatar src={user.avatar} name={user.name} size={40} status={user.status} />
+                <Avatar src={user.avatar} name={user.name} size={40} />
                 <div className="chat-peer-text">
                   <span className="chat-peer-name" title={user.name}>{user.name}</span>
                   <span className={`chat-peer-status status-${user.status ?? 'offline'}`}>

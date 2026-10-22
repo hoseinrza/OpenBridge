@@ -20,6 +20,10 @@ const TABS = [
   { kind: 'files', label: 'فایل‌ها', icon: 'file-lines', empty: 'فایلی در این گفتگو نیست' },
   { kind: 'links', label: 'لینک‌ها', icon: 'link',       empty: 'لینکی در این گفتگو نیست' },
 ];
+// Members are already on this screen with the chat, so the tab fetches nothing —
+// and it is the one tab an encrypted chat can still show, because a member list
+// is not message content.
+const MEMBERS_TAB = { kind: 'members', label: 'اعضا', icon: 'people-group' };
 const ROLE_TEXT = { OWNER: 'مالک', ADMIN: 'مدیر' };
 // The same bounds the server enforces on PATCH /messages/groups/:id, so a draft
 // that cannot be saved is caught before the round trip.
@@ -144,7 +148,7 @@ export default function ChatProfileScreen({ route }) {
 
   // A tab is fetched the first time it is opened, never all three at once.
   useEffect(() => {
-    if (locked || pages[tab]) return;
+    if (locked || pages[tab] || tab === MEMBERS_TAB.kind) return;
     loadPage(tab);
   }, [tab, locked, pages, loadPage]);
 
@@ -206,6 +210,12 @@ export default function ChatProfileScreen({ route }) {
   const shared = TABS.find(entry => entry.kind === tab);
   const page = pages[tab] ?? pageState();
   const items = page.items;
+  const tabs = isGroup ? [MEMBERS_TAB, ...TABS] : TABS;
+  const onMembers = tab === MEMBERS_TAB.kind;
+  const members = profile?.participants ?? [];
+  // A locked chat has nothing to list except its members, so the strip only
+  // appears where there is a tab that still works.
+  const showTabs = !locked || isGroup;
 
   return (
     <View style={styles.container}>
@@ -323,144 +333,147 @@ export default function ChatProfileScreen({ route }) {
           )
         )}
 
-        {!locked && (
+        {(showTabs || locked) && (
           <View style={styles.section}>
-            <View style={styles.tabs} accessibilityRole="tablist">
-              {TABS.map(entry => (
-                <Pressable
-                  key={entry.kind}
-                  testID={`profile-tab-${entry.kind}`}
-                  style={[styles.tab, tab === entry.kind && styles.tabActive]}
-                  onPress={() => setTab(entry.kind)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: tab === entry.kind }}
-                  accessibilityLabel={entry.label}
-                >
-                  <FontAwesome6
-                    name={entry.icon}
-                    size={12}
-                    color={tab === entry.kind ? colors.accentText : colors.text3}
-                  />
-                  <Text style={[styles.tabText, tab === entry.kind && styles.tabTextActive]}>
-                    {entry.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            {page.status === 'loading' && (
-              <View style={styles.busy}>
-                <ActivityIndicator color={colors.accent} size="small" />
-                <Text style={styles.busyText}>در حال بارگذاری…</Text>
-              </View>
-            )}
-
-            {page.status === 'error' && (
-              <View style={styles.errorBanner} accessibilityRole="alert">
-                <FontAwesome6 name="triangle-exclamation" size={12} color={colors.danger} />
-                <Text style={styles.errorText}>{page.error}</Text>
-                <Pressable onPress={() => loadPage(tab)} accessibilityRole="button" accessibilityLabel="تلاش دوباره">
-                  <Text style={styles.retryText}>تلاش دوباره</Text>
-                </Pressable>
-              </View>
-            )}
-
-            {page.status === 'ready' && items.length === 0 && (
-              <Text style={styles.empty}>{shared.empty}</Text>
-            )}
-
-            {tab === 'media' && items.length > 0 && (
-              <View style={styles.grid}>
-                {items.map(item => (
+            {showTabs && (
+              <View style={styles.tabs} accessibilityRole="tablist">
+                {tabs.map(entry => (
                   <Pressable
-                    key={item.id}
-                    testID="profile-media-cell"
-                    style={styles.cell}
-                    onPress={() => setViewer(item.src)}
-                    accessibilityRole="imagebutton"
-                    accessibilityLabel={`بازکردن ${item.name || 'تصویر'} در اندازه کامل`}
-                  >
-                    <Image source={{ uri: item.src }} style={styles.cellImage} resizeMode="cover" />
-                  </Pressable>
-                ))}
-              </View>
-            )}
-
-            {tab !== 'media' && items.length > 0 && (
-              <View style={styles.list}>
-                {items.map(item => (
-                  <Pressable
-                    key={item.id}
-                    testID={tab === 'files' ? 'profile-file-row' : 'profile-link-row'}
-                    style={({ pressed }) => [styles.listRow, pressed && styles.listRowPressed]}
-                    onPress={() => openAddress(tab === 'files' ? item.src : item.url)}
+                    key={entry.kind}
+                    testID={`profile-tab-${entry.kind}`}
+                    style={[styles.tab, tab === entry.kind && styles.tabActive]}
+                    onPress={() => setTab(entry.kind)}
                     accessibilityRole="button"
-                    accessibilityLabel={tab === 'files'
-                      ? `دانلود ${item.name || 'فایل'}`
-                      : `بازکردن ${hostOf(item.url)}`}
+                    accessibilityState={{ selected: tab === entry.kind }}
+                    accessibilityLabel={entry.kind === MEMBERS_TAB.kind
+                      ? `${entry.label} ${fa(members.length)}`
+                      : entry.label}
                   >
                     <FontAwesome6
-                      name={tab === 'files' ? 'file-arrow-down' : 'link'}
-                      size={14}
-                      color={colors.accentText}
+                      name={entry.icon}
+                      size={12}
+                      color={tab === entry.kind ? colors.accentText : colors.text3}
                     />
-                    <View style={styles.listBody}>
-                      <Text style={styles.listTitle} numberOfLines={1}>
-                        {tab === 'files' ? (item.name || 'فایل') : hostOf(item.url)}
-                      </Text>
-                      {tab === 'links' && !!item.text && (
-                        <Text style={styles.listSub} numberOfLines={2}>{item.text}</Text>
-                      )}
-                      <Text style={styles.listMeta}>
-                        {tab === 'files' ? `${formatSize(item.size)} · ` : ''}
-                        {item.sender ?? '—'} · {formatDayLabel(item.createdAt)}
-                      </Text>
-                    </View>
+                    <Text style={[styles.tabText, tab === entry.kind && styles.tabTextActive]}>
+                      {entry.kind === MEMBERS_TAB.kind ? `${entry.label} ${fa(members.length)}` : entry.label}
+                    </Text>
                   </Pressable>
                 ))}
               </View>
             )}
 
-            {page.status === 'ready' && !!page.cursor && (
-              <Pressable
-                testID="profile-load-more"
-                style={styles.moreBtn}
-                onPress={() => loadPage(tab, page.cursor)}
-                accessibilityRole="button"
-                accessibilityLabel="نمایش بیشتر"
-              >
-                <Text style={styles.moreText}>نمایش بیشتر</Text>
-              </Pressable>
-            )}
-          </View>
-        )}
-
-        {locked && (
-          <View style={styles.lockedNote}>
-            <FontAwesome6 name="lock" size={13} color={colors.accentText} />
-            <Text style={styles.lockedText}>
-              این گفتگو سرتاسری رمزنگاری شده؛ فهرست رسانه‌ها و فایل‌ها فقط در نسخهٔ وب نشان داده می‌شود.
-            </Text>
-          </View>
-        )}
-
-        {isGroup && (profile?.participants?.length ?? 0) > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>اعضای گروه ({fa(profile.participants.length)})</Text>
-            {profile.participants.map(person => (
-              <View key={person.id} style={styles.member} testID="profile-member">
-                <Avatar uri={person.avatar} name={person.name} size={38} status={person.status} />
-                <View style={styles.memberBody}>
-                  <Text style={styles.memberName} numberOfLines={1}>{person.name}</Text>
-                  {!!person.username && (
-                    <Text style={styles.memberHandle} numberOfLines={1}>@{person.username}</Text>
-                  )}
-                </View>
-                <Text style={styles.memberRole}>
-                  {person.id === currentUser?.id ? 'شما' : (ROLE_TEXT[person.role] ?? '')}
+            {onMembers ? (
+              <View style={styles.list}>
+                {members.map(person => (
+                  <View key={person.id} style={styles.member} testID="profile-member">
+                    <Avatar uri={person.avatar} name={person.name} size={38} status={person.status} />
+                    <View style={styles.memberBody}>
+                      <Text style={styles.memberName} numberOfLines={1}>{person.name}</Text>
+                      {!!person.username && (
+                        <Text style={styles.memberHandle} numberOfLines={1}>@{person.username}</Text>
+                      )}
+                    </View>
+                    <Text style={styles.memberRole}>
+                      {person.id === currentUser?.id ? 'شما' : (ROLE_TEXT[person.role] ?? '')}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : locked ? (
+              <View style={styles.lockedNote}>
+                <FontAwesome6 name="lock" size={13} color={colors.accentText} />
+                <Text style={styles.lockedText}>
+                  این گفتگو سرتاسری رمزنگاری شده؛ فهرست رسانه‌ها و فایل‌ها فقط در نسخهٔ وب نشان داده می‌شود.
                 </Text>
               </View>
-            ))}
+            ) : (
+              <>
+                {page.status === 'loading' && (
+                  <View style={styles.busy}>
+                    <ActivityIndicator color={colors.accent} size="small" />
+                    <Text style={styles.busyText}>در حال بارگذاری…</Text>
+                  </View>
+                )}
+
+                {page.status === 'error' && (
+                  <View style={styles.errorBanner} accessibilityRole="alert">
+                    <FontAwesome6 name="triangle-exclamation" size={12} color={colors.danger} />
+                    <Text style={styles.errorText}>{page.error}</Text>
+                    <Pressable onPress={() => loadPage(tab)} accessibilityRole="button" accessibilityLabel="تلاش دوباره">
+                      <Text style={styles.retryText}>تلاش دوباره</Text>
+                    </Pressable>
+                  </View>
+                )}
+
+                {page.status === 'ready' && items.length === 0 && (
+                  <Text style={styles.empty}>{shared.empty}</Text>
+                )}
+
+                {tab === 'media' && items.length > 0 && (
+                  <View style={styles.grid}>
+                    {items.map(item => (
+                      <Pressable
+                        key={item.id}
+                        testID="profile-media-cell"
+                        style={styles.cell}
+                        onPress={() => setViewer(item.src)}
+                        accessibilityRole="imagebutton"
+                        accessibilityLabel={`بازکردن ${item.name || 'تصویر'} در اندازه کامل`}
+                      >
+                        <Image source={{ uri: item.src }} style={styles.cellImage} resizeMode="cover" />
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+
+                {tab !== 'media' && items.length > 0 && (
+                  <View style={styles.list}>
+                    {items.map(item => (
+                      <Pressable
+                        key={item.id}
+                        testID={tab === 'files' ? 'profile-file-row' : 'profile-link-row'}
+                        style={({ pressed }) => [styles.listRow, pressed && styles.listRowPressed]}
+                        onPress={() => openAddress(tab === 'files' ? item.src : item.url)}
+                        accessibilityRole="button"
+                        accessibilityLabel={tab === 'files'
+                          ? `دانلود ${item.name || 'فایل'}`
+                          : `بازکردن ${hostOf(item.url)}`}
+                      >
+                        <FontAwesome6
+                          name={tab === 'files' ? 'file-arrow-down' : 'link'}
+                          size={14}
+                          color={colors.accentText}
+                        />
+                        <View style={styles.listBody}>
+                          <Text style={styles.listTitle} numberOfLines={1}>
+                            {tab === 'files' ? (item.name || 'فایل') : hostOf(item.url)}
+                          </Text>
+                          {tab === 'links' && !!item.text && (
+                            <Text style={styles.listSub} numberOfLines={2}>{item.text}</Text>
+                          )}
+                          <Text style={styles.listMeta}>
+                            {tab === 'files' ? `${formatSize(item.size)} · ` : ''}
+                            {item.sender ?? '—'} · {formatDayLabel(item.createdAt)}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+
+                {page.status === 'ready' && !!page.cursor && (
+                  <Pressable
+                    testID="profile-load-more"
+                    style={styles.moreBtn}
+                    onPress={() => loadPage(tab, page.cursor)}
+                    accessibilityRole="button"
+                    accessibilityLabel="نمایش بیشتر"
+                  >
+                    <Text style={styles.moreText}>نمایش بیشتر</Text>
+                  </Pressable>
+                )}
+              </>
+            )}
           </View>
         )}
       </ScrollView>
@@ -557,7 +570,6 @@ function makeStyles(colors, insets) {
     cancelText: { color: colors.text2, fontFamily: fonts.medium, fontSize: type.sm },
 
     section: { gap: spacing.sm, marginTop: spacing.md },
-    sectionTitle: { color: colors.text2, fontFamily: fonts.semibold, fontSize: type.sm },
 
     tabs: {
       flexDirection: 'row', gap: spacing.xs,

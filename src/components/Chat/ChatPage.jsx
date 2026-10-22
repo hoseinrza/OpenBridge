@@ -201,6 +201,12 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
 
   function openOwnProfile()       { setProfileTarget({ user: currentUser, isOwn: true }); }
   function openChatProfile()      { setProfileOpen(true); }
+  // The list avatar opens a profile, but the panel reads the active conversation,
+  // so the chat is selected first.
+  function openProfileFromList(user) {
+    handleSelectUser(user);
+    setProfileOpen(true);
+  }
   function closeProfile()         { setProfileTarget(null); }
   function handleProfileSaved(patch) { onProfileUpdate?.(patch); }
 
@@ -217,6 +223,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
         currentUser={currentUser}
         onLogout={onLogout}
         onOpenProfile={openOwnProfile}
+        onOpenChatProfile={openProfileFromList}
         onNewChat={() => setNewChatOpen(true)}
         loading={chatsLoading}
         error={chatsError}

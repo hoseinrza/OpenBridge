@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import MessageGroup from './MessageGroup.jsx';
+import ImageLightbox from './ImageLightbox.jsx';
 import Avatar from '../ui/Avatar.jsx';
 import { dayKey, formatDayLabel } from '../../utils/time.js';
 import './MessageList.css';
@@ -94,9 +95,14 @@ export default function MessageList({
   const prevLastIdRef = useRef(null);
   const [atBottom, setAtBottom] = useState(true);
   const [seenCount, setSeenCount] = useState(0);
+  // One picture in the thread, by id: the ids survive a growing history, and a
+  // picture that leaves the list takes the viewer down with it.
+  const [openImageId, setOpenImageId] = useState(null);
   const isGroup = activeUser.kind === 'group';
 
   const rows = useMemo(() => buildRows(messages), [messages]);
+  const images = useMemo(() => messages.filter(msg => msg.type === 'image'), [messages]);
+  const viewerIndex = images.findIndex(img => img.id === openImageId);
   const notice = e2eeNotice({
     encrypted,
     secureMode,
@@ -230,6 +236,7 @@ export default function MessageList({
               isGroup={isGroup}
               onReact={onReact}
               searchQuery={searchQuery}
+              onOpenImage={setOpenImageId}
             />
           )
         ))}
@@ -242,6 +249,15 @@ export default function MessageList({
           <i className="fas fa-arrow-down" aria-hidden="true" />
           {newCount.toLocaleString('fa-IR')} پیام تازه
         </button>
+      )}
+
+      {viewerIndex >= 0 && (
+        <ImageLightbox
+          items={images}
+          index={viewerIndex}
+          onIndex={next => setOpenImageId(images[next].id)}
+          onClose={() => setOpenImageId(null)}
+        />
       )}
     </div>
   );

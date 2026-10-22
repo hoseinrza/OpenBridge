@@ -24,6 +24,7 @@ export default function Sidebar({
   currentUser,
   onLogout,
   onOpenProfile,
+  onOpenChatProfile,
   onNewChat,
   loading = false,
   error = false,
@@ -128,47 +129,59 @@ export default function Sidebar({
               : (isGroup ? 'هنوز پیامی نیست' : (STATUS_TEXT[user.status] ?? ''));
 
           return (
-            <button
+            <div
               key={user.id}
-              type="button"
               role="listitem"
               className={`user-item ${active ? 'active' : ''}`}
-              onClick={() => handleSelect(user)}
               aria-current={active ? 'true' : undefined}
             >
-              <Avatar
-                src={user.avatar}
-                name={user.name}
-                size={42}
-                group={isGroup}
-                status={isGroup ? undefined : user.status}
-              />
+              <button
+                type="button"
+                className="user-item-avatar"
+                onClick={() => onOpenChatProfile?.(user)}
+                title={`بازکردن پروفایل ${user.name}`}
+                aria-label={`بازکردن پروفایل ${user.name}`}
+              >
+                <Avatar
+                  src={user.avatar}
+                  name={user.name}
+                  size={42}
+                  group={isGroup}
+                  status={isGroup ? undefined : user.status}
+                />
+              </button>
 
-              <span className="user-item-body">
-                <span className="user-item-top">
-                  <span className="user-name" title={user.name}>{user.name}</span>
-                  {user.encrypted && (
-                    <i
-                      className="fas fa-lock user-lock"
-                      role="img"
-                      title="رمزنگاری سرتاسری"
-                      aria-label="گفتگوی رمزنگاری‌شده"
-                    />
-                  )}
-                  {user.updatedAt && (
-                    <span className="user-time">{formatConversationTime(user.updatedAt)}</span>
-                  )}
+              <button
+                type="button"
+                className="user-item-open"
+                onClick={() => handleSelect(user)}
+              >
+                <span className="user-item-body">
+                  <span className="user-item-top">
+                    <span className="user-name" title={user.name}>{user.name}</span>
+                    {user.encrypted && (
+                      <i
+                        className="fas fa-lock user-lock"
+                        role="img"
+                        title="رمزنگاری سرتاسری"
+                        aria-label="گفتگوی رمزنگاری‌شده"
+                      />
+                    )}
+                    {user.updatedAt && (
+                      <span className="user-time">{formatConversationTime(user.updatedAt)}</span>
+                    )}
+                  </span>
+                  <span className="user-item-bottom">
+                    <span className="user-meta" title={meta}>{meta}</span>
+                    {user.unread > 0 && (
+                      <span className="badge" aria-label={`${user.unread} پیام خوانده‌نشده`}>
+                        {user.unread > 99 ? '۹۹+' : user.unread}
+                      </span>
+                    )}
+                  </span>
                 </span>
-                <span className="user-item-bottom">
-                  <span className="user-meta" title={meta}>{meta}</span>
-                  {user.unread > 0 && (
-                    <span className="badge" aria-label={`${user.unread} پیام خوانده‌نشده`}>
-                      {user.unread > 99 ? '۹۹+' : user.unread}
-                    </span>
-                  )}
-                </span>
-              </span>
-            </button>
+              </button>
+            </div>
           );
         })}
 

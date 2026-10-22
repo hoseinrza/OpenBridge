@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import Modal from '../ui/Modal.jsx';
 import Avatar from '../ui/Avatar.jsx';
 import EncryptedMedia from './EncryptedMedia.jsx';
 import { formatSize } from '../../utils/format.js';
@@ -41,7 +40,7 @@ function BubbleBody({ message, searchQuery, onOpenImage }) {
       <button
         type="button"
         className="msg-image-btn"
-        onClick={() => onOpenImage(message.src)}
+        onClick={() => onOpenImage()}
         aria-label="بازکردن تصویر در اندازه کامل"
       >
         <img src={message.src} alt={message.text || 'تصویر ارسالی'} className="msg-image" />
@@ -80,6 +79,7 @@ function BubbleBody({ message, searchQuery, onOpenImage }) {
 
 export default function MessageGroup({
   message, first = true, last = true, isGroup = false, onReact, searchQuery,
+  onOpenImage,
 }) {
   const [barOpen, setBarOpen] = useState(false);
   const [barBelow, setBarBelow] = useState(false);
@@ -87,9 +87,6 @@ export default function MessageGroup({
   const bubbleRef = useRef(null);
   const toggleRef = useRef(null);
   const pickerRef = useRef(null);
-  // The preview holds the address it is showing: for an encrypted picture that
-  // is an object URL made by the bubble, which only exists while it is open.
-  const [lightbox, setLightbox] = useState(null);
   const isMine = message.side === 'mine';
   // Reactions live in the server's message table, and an encrypted message has
   // no row there to react to — so the affordance is not offered for it.
@@ -191,7 +188,9 @@ export default function MessageGroup({
             <BubbleBody
               message={message}
               searchQuery={searchQuery}
-              onOpenImage={setLightbox}
+              // The viewer belongs to the list, not the bubble: it walks the
+              // whole thread, so it needs every picture and this one's place.
+              onOpenImage={() => onOpenImage?.(message.id)}
             />
 
             <div className="msg-footer">
@@ -273,32 +272,6 @@ export default function MessageGroup({
           </div>
         </div>
       </div>
-
-      {lightbox && (
-        <Modal
-          onClose={() => setLightbox(false)}
-          labelledBy="image-preview-title"
-          className="image-lightbox"
-        >
-          <h2 id="image-preview-title" className="sr-only">پیش‌نمایش تصویر</h2>
-          <img src={lightbox} alt={message.text || 'تصویر ارسالی'} className="lightbox-image" />
-          <div className="lightbox-actions">
-            <a
-              className="btn btn-secondary"
-              href={lightbox}
-              download={message.name || 'image'}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <i className="fas fa-download" aria-hidden="true" />
-              دانلود تصویر
-            </a>
-            <button type="button" className="btn btn-secondary" onClick={() => setLightbox(false)}>
-              بستن
-            </button>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }

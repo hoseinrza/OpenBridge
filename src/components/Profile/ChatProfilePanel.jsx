@@ -19,6 +19,9 @@ const SHARED_TABS = [
   { kind: 'files', label: 'فایل‌ها',  icon: 'fa-file-lines',  empty: 'فایلی در این گفتگو نیست' },
   { kind: 'links', label: 'لینک‌ها',  icon: 'fa-link',        empty: 'لینکی در این گفتگو نیست' },
 ];
+// Members are chat metadata the client already holds, so this tab never fetches
+// and a direct chat, which has no list, does not show it at all.
+const MEMBERS_TAB = { kind: 'members', label: 'اعضا', icon: 'fa-user-group' };
 
 // The same rule the server applies to a plaintext transcript: a link runs to the
 // first space or quote, and the punctuation a sentence puts after it is dropped.
@@ -156,7 +159,7 @@ export default function ChatProfilePanel({
 
   // A tab is fetched the first time it is opened, never all three at once.
   useEffect(() => {
-    if (encrypted || pages[tab]) return;
+    if (encrypted || pages[tab] || tab === MEMBERS_TAB.kind) return;
     loadPage(tab);
   }, [tab, encrypted, pages, loadPage]);
 
@@ -241,6 +244,9 @@ export default function ChatProfilePanel({
   }
 
   const displayName = removeAvatar ? null : avatar;
+  const tabs = isGroup ? [MEMBERS_TAB, ...SHARED_TABS] : SHARED_TABS;
+  const onMembers = tab === MEMBERS_TAB.kind;
+  const members = chat.participants ?? [];
   const shared = SHARED_TABS.find(entry => entry.kind === tab);
   const page = pages[tab] ?? pageState();
   const sharedItems = encrypted ? (local?.[tab] ?? []) : page.items;
@@ -407,7 +413,7 @@ export default function ChatProfilePanel({
 
             <section className="panel-shared" aria-label="محتوای گفتگو">
               <div className="panel-tabs" role="tablist" aria-label="دسته‌بندی محتوای گفتگو">
-                {SHARED_TABS.map((entry) => (
+                {tabs.map((entry) => (
                   <button
                     key={entry.kind}
                     type="button"
@@ -419,93 +425,115 @@ export default function ChatProfilePanel({
                   >
                     <i className={`fas ${entry.icon}`} aria-hidden="true" />
                     {entry.label}
+                    {entry.kind === MEMBERS_TAB.kind && (
+                      <span className="panel-tab-count">{chat.memberCount?.toLocaleString('fa-IR') ?? '۰'}</span>
+                    )}
                   </button>
                 ))}
               </div>
 
               <div className="panel-tabpanel" role="tabpanel" aria-labelledby={`panel-tab-${tab}`}>
-                {encrypted && (
-                  <p className="panel-shared-note" role="note">
-                    <i className="fas fa-lock" aria-hidden="true" />
-                    <span>{isGroup
-                      ? 'این فهرست پیام‌هایی است که روی همین دستگاه رمزگشایی شده؛ سرور هیچ‌کدام را نمی‌بیند.'
-                      : 'این فهرست فقط پیام‌هایی را نشان می‌دهد که روی همین دستگاه رمزگشایی شده.'}</span>
-                  </p>
-                )}
-
-                {sharedStatus === 'loading' && (
-                  <p className="panel-shared-busy" role="status">
-                    <i className="fas fa-spinner fa-spin" aria-hidden="true" />
-                    در حال بارگذاری…
-                  </p>
-                )}
-
-                {sharedStatus === 'error' && (
-                  <div className="panel-shared-error">
-                    <span>{page.error}</span>
-                    <button type="button" className="btn btn-secondary" onClick={() => loadPage(tab)}>
-                      تلاش دوباره
-                    </button>
-                  </div>
-                )}
-
-                {sharedStatus === 'ready' && sharedItems.length === 0 && (
-                  <p className="panel-shared-empty">{shared.empty}</p>
-                )}
-
-                {sharedItems.length > 0 && tab === 'media' && (
-                  <div className="panel-grid">
-                    {sharedItems.map(item => (
-                      <MediaCell key={item.key ?? item.id} item={item} onOpen={setViewer} />
-                    ))}
-                  </div>
-                )}
-
-                {sharedItems.length > 0 && tab === 'files' && (
-                  <ul className="panel-list">
-                    {sharedItems.map(item => (
-                      <li key={item.key ?? item.id} className="panel-row">
-                        <FileRow item={item} />
-                      </li>
-                    ))}
-                  </ul>
-                )}
-
-                {sharedItems.length > 0 && tab === 'links' && (
-                  <ul className="panel-list">
-                    {sharedItems.map(item => (
-                      <li key={item.key ?? item.id} className="panel-row">
-                        <span className="panel-row-icon" aria-hidden="true">
-                          <i className="fas fa-link" />
+                {onMembers ? (
+                  <ul className="panel-member-list">
+                    {members.map((p) => (
+                      <li key={p.id} className="panel-member">
+                        <Avatar src={p.avatar} name={p.name} size={36} />
+                        <span className="panel-member-name" title={p.name}>
+                          {p.name}
+                          {p.id === currentUser?.id && <span className="panel-member-you">شما</span>}
                         </span>
-                        <a
-                          className="panel-row-main"
-                          href={item.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title={item.text ?? item.url}
-                        >
-                          <span className="panel-row-title" dir="ltr">{linkHost(item.url)}</span>
-                          {item.text && <span className="panel-row-sub">{item.text}</span>}
-                          <span className="panel-row-meta">
-                            {item.sender ?? '—'} · {sharedDate(item.createdAt)}
-                          </span>
-                        </a>
+                        {ROLE_TEXT[p.role] && (
+                          <span className={`panel-member-role role-${p.role.toLowerCase()}`}>{ROLE_TEXT[p.role]}</span>
+                        )}
                       </li>
                     ))}
                   </ul>
-                )}
+                ) : (
+                  <>
+                    {encrypted && (
+                      <p className="panel-shared-note" role="note">
+                        <i className="fas fa-lock" aria-hidden="true" />
+                        <span>{isGroup
+                          ? 'این فهرست پیام‌هایی است که روی همین دستگاه رمزگشایی شده؛ سرور هیچ‌کدام را نمی‌بیند.'
+                          : 'این فهرست فقط پیام‌هایی را نشان می‌دهد که روی همین دستگاه رمزگشایی شده.'}</span>
+                      </p>
+                    )}
 
-                {!encrypted && page.cursor && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost panel-shared-more"
-                    onClick={() => loadPage(tab, page.cursor)}
-                    disabled={sharedStatus === 'more'}
-                  >
-                    <i className={`fas ${sharedStatus === 'more' ? 'fa-spinner fa-spin' : 'fa-chevron-down'}`} aria-hidden="true" />
-                    نمایش بیشتر
-                  </button>
+                    {sharedStatus === 'loading' && (
+                      <p className="panel-shared-busy" role="status">
+                        <i className="fas fa-spinner fa-spin" aria-hidden="true" />
+                        در حال بارگذاری…
+                      </p>
+                    )}
+
+                    {sharedStatus === 'error' && (
+                      <div className="panel-shared-error">
+                        <span>{page.error}</span>
+                        <button type="button" className="btn btn-secondary" onClick={() => loadPage(tab)}>
+                          تلاش دوباره
+                        </button>
+                      </div>
+                    )}
+
+                    {sharedStatus === 'ready' && sharedItems.length === 0 && (
+                      <p className="panel-shared-empty">{shared.empty}</p>
+                    )}
+
+                    {sharedItems.length > 0 && tab === 'media' && (
+                      <div className="panel-grid">
+                        {sharedItems.map(item => (
+                          <MediaCell key={item.key ?? item.id} item={item} onOpen={setViewer} />
+                        ))}
+                      </div>
+                    )}
+
+                    {sharedItems.length > 0 && tab === 'files' && (
+                      <ul className="panel-list">
+                        {sharedItems.map(item => (
+                          <li key={item.key ?? item.id} className="panel-row">
+                            <FileRow item={item} />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {sharedItems.length > 0 && tab === 'links' && (
+                      <ul className="panel-list">
+                        {sharedItems.map(item => (
+                          <li key={item.key ?? item.id} className="panel-row">
+                            <span className="panel-row-icon" aria-hidden="true">
+                              <i className="fas fa-link" />
+                            </span>
+                            <a
+                              className="panel-row-main"
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={item.text ?? item.url}
+                            >
+                              <span className="panel-row-title" dir="ltr">{linkHost(item.url)}</span>
+                              {item.text && <span className="panel-row-sub">{item.text}</span>}
+                              <span className="panel-row-meta">
+                                {item.sender ?? '—'} · {sharedDate(item.createdAt)}
+                              </span>
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {!encrypted && page.cursor && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost panel-shared-more"
+                        onClick={() => loadPage(tab, page.cursor)}
+                        disabled={sharedStatus === 'more'}
+                      >
+                        <i className={`fas ${sharedStatus === 'more' ? 'fa-spinner fa-spin' : 'fa-chevron-down'}`} aria-hidden="true" />
+                        نمایش بیشتر
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </section>
@@ -517,29 +545,6 @@ export default function ChatProfilePanel({
               </div>
             )}
           </>
-        )}
-
-        {isGroup && (
-          <section className="panel-members">
-            <h3 className="panel-section-title">
-              <i className="fas fa-user-group" aria-hidden="true" />
-              {`اعضای گروه (${chat.memberCount?.toLocaleString('fa-IR') ?? '۰'})`}
-            </h3>
-            <ul className="panel-member-list">
-              {(chat.participants ?? []).map((p) => (
-                <li key={p.id} className="panel-member">
-                  <Avatar src={p.avatar} name={p.name} size={36} />
-                  <span className="panel-member-name" title={p.name}>
-                    {p.name}
-                    {p.id === currentUser?.id && <span className="panel-member-you">شما</span>}
-                  </span>
-                  {ROLE_TEXT[p.role] && (
-                    <span className={`panel-member-role role-${p.role.toLowerCase()}`}>{ROLE_TEXT[p.role]}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </section>
         )}
       </div>
 

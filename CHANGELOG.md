@@ -4,6 +4,66 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.19] - 2026-10-22
+
+### Changed
+- **Group members are a tab of their own, on both clients.** The list that used
+  to sit under the profile — web panel and phone screen alike — is now a fourth
+  tab, «اعضا», with the member count in its pill. It reads the list the chat
+  already carries, so it fetches nothing, and because a member list is not
+  message content it stays open in an end-to-end encrypted chat, where it is the
+  only tab that works. A direct chat, which has no list, shows no such tab.
+- **The composer asks what kind of attachment you want.** The paperclip no longer
+  opens the file picker directly: it opens a menu of two choices, where «تصویر»
+  filters the picker to `image/*` and «فایل» leaves it unrestricted. The choice is
+  remembered across the native picker, so a photo taken under «فایل» still arrives
+  as a file row instead of quietly becoming a picture bubble.
+- **A picture opens the way Telegram does.** The small preview dialog is replaced
+  by a full-screen viewer on black: the picture owns the viewport, the counter —
+  spelled with Persian digits — and the close button float in a scrim at the
+  top, and the sender, the day and the caption sit under it with a download icon.
+  It walks the thread — buttons at both edges, ArrowLeft/ArrowRight, or a
+  horizontal drag that follows the finger — and because the thread reads
+  right-to-left, the next picture is the one entering from the left. A tap on the
+  black area, Escape or the close button ends it, and no arrows are drawn when the
+  chat holds a single picture. Encrypted pictures behave the same: the viewer
+  opens the descriptor itself and hands the bytes back when it closes, so walking
+  a long thread never re-fetches a picture it already saw.
+- **A received bubble mirrors a sent one.** The clock now hugs the right edge and
+  the sender's name the left, so the two never stack on the same side.
+- **The chat-list avatar is a button of its own.** Tapping it opens that peer's
+  profile, while the rest of the row still just selects the chat; because the
+  panel reads the active conversation, the chat is selected first.
+- **No presence dot in the chat header.** The dot belongs to the chat list, where
+  it helps choose among many rows. Inside one conversation the header line
+  already says آنلاین or آفلاین, so the circle was decoration.
+
+### Notes on what this does not do
+- **The viewer does not zoom.** Pinch and double-tap zoom are their own piece of
+  work and were left out when the scope was set.
+- **A group photo is still only editable in the web panel**, unchanged from the
+  last release: the phone has no image picker dependency.
+
+Verified with `npm run lint` and `npm run build` clean on the web client, and
+Jest 48/48 across the 7 mobile suites — the profile suite is now 10 tests, three
+of them written for the members tab: that it is a tab, that it never fetches, and
+that an encrypted group keeps it while an encrypted direct chat shows no tab
+strip at all. The six behaviours were then driven in the running app against the
+local database: the attach menu's `accept` value was read back off the hidden
+input for both choices, and Escape, an outside click and a second click on the
+paperclip each closed it the way the emoji picker does; the viewer opened on the
+middle picture of a group, counted it as the second of three with Persian digits,
+moved by button, by both arrow keys and by a drag, followed the finger while dragging, stayed put on a tap
+that landed on the picture, closed on a tap that landed on the black area and on
+Escape, and released the body scroll lock afterwards; the members tab listed all
+five participants with their «مالک» and «شما» chips and made no request; the
+chat-list avatar opened that group's panel; and the received bubbles' rectangles
+put the time at the right edge of the bubble and the name at the left. Two things
+that proof does not cover: the browser's own file picker was stubbed rather than
+driven, so uploading a real file under each choice has not been exercised here,
+and no screenshot is attached because the in-app browser on this machine reports
+a hidden surface — the checks above are geometry and text read from the live DOM.
+
 ## [1.1.18] - 2026-10-22
 
 ### Added

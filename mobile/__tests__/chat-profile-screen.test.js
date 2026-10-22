@@ -84,14 +84,18 @@ test('shows a contact identity, bio and the day the account joined', async () =>
   expect(fetchUser).toHaveBeenCalledWith('p1');
 });
 
-test('lists group members with their roles and marks this device', async () => {
+test('members are a tab of their own and never fetched', async () => {
   const view = renderProfile(groupPeer);
   expect(await view.findByText('تیم طراحی')).toBeTruthy();
   expect(view.getByText('۲ عضو')).toBeTruthy();
   expect(view.getByText('هماهنگی روزانه')).toBeTruthy();
-  expect(view.getByText('اعضای گروه (۲)')).toBeTruthy();
+  await waitFor(() => expect(fetchShared).toHaveBeenCalledTimes(1));
+
+  fireEvent.press(view.getByTestId('profile-tab-members'));
+  expect(await view.findByText('اعضا ۲')).toBeTruthy();
   expect(view.getByText('مالک')).toBeTruthy();
   expect(view.getByText('شما')).toBeTruthy();
+  expect(fetchShared).toHaveBeenCalledTimes(1);
   expect(fetchUser).not.toHaveBeenCalled();
 });
 
@@ -150,12 +154,25 @@ test('a file row opens its signed url and a link row its own address', async () 
   expect(view.queryByTestId('profile-load-more')).toBeNull();
 });
 
-test('an encrypted chat explains itself instead of showing an empty grid', async () => {
+test('an encrypted group explains itself but still lists members', async () => {
   fetchE2eeState.mockResolvedValue({ e2ee: true });
   const view = renderProfile({ ...groupPeer, encrypted: true });
   expect(await view.findByText(/این گفتگو سرتاسری رمزنگاری شده/)).toBeTruthy();
   expect(fetchShared).not.toHaveBeenCalled();
+  expect(view.getByTestId('profile-tab-media')).toBeTruthy();
+
+  fireEvent.press(view.getByTestId('profile-tab-members'));
+  expect(await view.findByText('مالک')).toBeTruthy();
+  expect(fetchShared).not.toHaveBeenCalled();
+});
+
+test('an encrypted direct chat shows the explanation and no tabs', async () => {
+  fetchE2eeState.mockResolvedValue({ e2ee: true });
+  const view = renderProfile({ ...contact, encrypted: true });
+  expect(await view.findByText(/این گفتگو سرتاسری رمزنگاری شده/)).toBeTruthy();
   expect(view.queryByTestId('profile-tab-media')).toBeNull();
+  expect(view.queryByTestId('profile-tab-members')).toBeNull();
+  expect(fetchShared).not.toHaveBeenCalled();
 });
 
 test('admins edit the name, and only the field that changed is sent', async () => {
