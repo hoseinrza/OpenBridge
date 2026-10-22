@@ -4,6 +4,26 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.15] - 2026-10-22
+
+### Added
+- **`npm run seed:dev` rebuilds a local database worth testing against.** The
+  local Postgres had accumulated half-typed usernames and one-message chats from
+  every manual test run, so the chat list could not be judged by looking at it.
+  The script truncates every table and writes ten accounts (one to sign in as,
+  nine peers) with direct chats, groups, attachments, read receipts and
+  reactions, activity dated across the last ten days. The newest message of each
+  of the sign-in account's chats is chosen to cover a different preview shape —
+  a peer's reply, a photo, a file name, a message from yourself, a soft-deleted
+  tail, an empty group and an empty direct chat — so the list is checked without
+  sending messages by hand. Attachments are real files in `backend/uploads`, and
+  peers hold chats with each other, so signing in as any seeded account lands on
+  a non-empty list. Sign-in is the seeded phone number plus the OTP test code the
+  development login screen already shows. Encrypted conversations are not seeded:
+  their keys live on a device, so no script can write a transcript the server
+  would be able to hold. The script refuses to run unless `DATABASE_URL` points
+  at localhost, and no part of the app can reach it.
+
 ## [1.1.14] - 2026-10-22
 
 ### Added

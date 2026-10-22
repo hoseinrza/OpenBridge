@@ -1,12 +1,13 @@
 {
   "name": "chatapp-backend",
-  "version": "1.1.14",
+  "version": "1.1.15",
   "private": true,
   "scripts": {
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "build": "nest build",
     "test:e2e": "npm run build && node --test test/security.e2e.cjs test/e2ee-client.e2e.cjs",
+    "seed:dev": "node test/dev-chat-seed.mjs",
     "prisma:gen": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:dev": "prisma migrate dev",
