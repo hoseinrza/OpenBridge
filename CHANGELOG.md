@@ -4,6 +4,27 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.23] - 2026-10-22
+
+### Changed
+- **Reaction chips open from the edge the clock leaves free.** An incoming bubble
+  keeps its clock at the inline-start edge, so the row of chips that used to start
+  right under it now starts at the other end of the bubble; the outgoing side
+  already did this, and the two mirror each other now. Nothing moved vertically —
+  the row still sits above the meta line — and a long row still wraps inside the
+  bubble rather than over the clock.
+
+Verified with `npm run lint` and `npm run build` clean. Measured in the running app
+against the local database as a throwaway account: in a sent bubble the clock box
+spans x=200..232 of a bubble that runs to x=372 while its chip row spans
+x=326..361, and in a received bubble holding one chip from each side the clock
+spans x=236..268 of a bubble starting at x=50 while the chips span x=61..134 — the
+two share no edge and overlap nowhere, and both rows still sit above the meta line.
+No screenshot is attached: the in-app browser on this machine reports a hidden
+surface, so the proof is `getBoundingClientRect` read off the live DOM. The
+throwaway accounts, their group and the reactions added for the check were deleted
+afterwards, and the local database is back to the row counts it had before.
+
 ## [1.1.22] - 2026-10-22
 
 ### Changed

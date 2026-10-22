@@ -461,6 +461,11 @@
 .msg-wrapper.other .msg-sender { text-align: end; }
 .msg-wrapper.other .msg-footer { align-self: flex-start; }
 
+/* The chips open from the edge the clock leaves free. An outgoing bubble already
+   puts them at the inline-start edge, but an incoming one has its clock there,
+   so the row has to cross over rather than stack on top of it. */
+.msg-wrapper.other .msg-reactions { align-self: flex-end; }
+
 .msg-time {
   font-size: 11px;
   line-height: 1.3;
