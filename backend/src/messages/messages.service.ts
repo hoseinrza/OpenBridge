@@ -3,6 +3,8 @@ import { isBase64 } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { E2EE_MAX_ENVELOPE_CHARS, E2EE_MAX_GROUP_MEMBERS } from '../config/env';
 import { signedFileUrl } from '../uploads/file-urls';
+import { GroupEvents } from './group-events';
+import { UpdateGroupDto } from './dto/update-group.dto';
 
 const WITH_RELATIONS = {
   sender:    { select: { id: true, username: true, displayName: true, avatar: true } },
@@ -28,7 +30,7 @@ const LAST_MESSAGE_INCLUDE = {
 
 @Injectable()
 export class MessagesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private events: GroupEvents) {}
 
   private findDirectConversation(userAId: string, userBId: string) {
     return this.prisma.conversation.findFirst({
@@ -92,6 +94,7 @@ export class MessagesService {
     return {
       id:           group.id,
       name:         group.name,
+      description:  group.description ?? null,
       e2ee:         group.e2ee,
       avatar:       signedFileUrl(group.avatar),
       createdAt:    group.createdAt,
@@ -245,6 +248,19 @@ export class MessagesService {
 
   // ── Group chat ───────────────────────────────────────────────────────
 
+  // One rule for both paths: renaming a group must never be able to produce
+  // a name the create path would have refused.
+  private assertGroupName(name: string) {
+    const trimmed = name?.trim();
+    if (!trimmed || trimmed.length < 2) {
+      throw new BadRequestException('نام گروه باید حداقل ۲ کاراکتر باشد');
+    }
+    if (trimmed.length > 60) {
+      throw new BadRequestException('نام گروه نباید بیشتر از ۶۰ کاراکتر باشد');
+    }
+    return trimmed;
+  }
+
   // One insert for both group kinds: they differ only in whether the
   // conversation accepts envelopes from its first byte, and in how many members
   // an encrypted one may carry.
@@ -254,13 +270,7 @@ export class MessagesService {
     memberIds: string[],
     options: { e2ee?: boolean; memberCap?: number } = {},
   ) {
-    const trimmedName = name?.trim();
-    if (!trimmedName || trimmedName.length < 2) {
-      throw new BadRequestException('نام گروه باید حداقل ۲ کاراکتر باشد');
-    }
-    if (trimmedName.length > 60) {
-      throw new BadRequestException('نام گروه نباید بیشتر از ۶۰ کاراکتر باشد');
-    }
+    const trimmedName = this.assertGroupName(name);
 
     const uniqueMembers = [...new Set([creatorId, ...memberIds])];
     if (uniqueMembers.length < 2) {
@@ -340,6 +350,57 @@ export class MessagesService {
       e2ee:       true,
       memberCap:  E2EE_MAX_GROUP_MEMBERS,
     });
+  }
+
+  // Group identity is server metadata, so an encrypted group can be renamed
+  // and given a photo or a bio: none of it is message content, and every
+  // member already sees the name in their chat list.
+  //
+  // The recency stamp is deliberately carried over. The chat list is ordered
+  // by updatedAt, and editing a profile is not a new message — without this
+  // a rename would float an old group to the top of every member’s list.
+  async updateGroup(conversationId: string, requesterId: string, dto: UpdateGroupDto) {
+    const membership = await this.assertMember(conversationId, requesterId);
+    if (membership.role === 'MEMBER') {
+      throw new ForbiddenException('فقط مالک یا ادمین می‌تواند اطلاعات گروه را تغییر دهد');
+    }
+
+    const current = await this.prisma.conversation.findFirst({
+      where:  { id: conversationId, isGroup: true },
+      select: { id: true, name: true, avatar: true, description: true, updatedAt: true },
+    });
+    if (!current) throw new NotFoundException('گروه پیدا نشد');
+
+    if (dto.name === undefined && dto.description === undefined && dto.avatar === undefined) {
+      throw new BadRequestException('هیچ تغییری برای این گروه ارسال نشده است');
+    }
+
+    const data: { name?: string; description?: string | null; avatar?: string | null } = {};
+    if (dto.name !== undefined) data.name = this.assertGroupName(dto.name);
+    if (dto.description !== undefined) data.description = dto.description || null;
+    if (dto.avatar !== undefined) data.avatar = dto.avatar || null;
+
+    // Prisma stamps @updatedAt whatever it is handed, so the old value goes back
+    // in the same transaction. A concurrent message waits on the row lock and
+    // then stamps its own time, which is the ordering we actually want.
+    // The stamp is passed as a naive UTC string because a Date bound into raw SQL
+    // is formatted in the server's local zone and this column stores UTC wall time.
+    const stamp = current.updatedAt.toISOString().replace('T', ' ').replace('Z', '');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.conversation.update({ where: { id: conversationId }, data });
+      await tx.$executeRaw`UPDATE conversations SET "updatedAt" = ${stamp}::timestamp WHERE id = ${conversationId}`;
+    });
+
+    const group = await this.prisma.conversation.findUnique({
+      where:  { id: conversationId },
+      include: { participants: { include: { user: { select: PARTNER_SELECT } } } },
+    });
+    const wire = this.toWireGroup(group);
+    this.events.publishGroupUpdated({
+      memberIds: group.participants.map((p) => p.userId),
+      group: wire,
+    });
+    return wire;
   }
 
   // Membership is an MLS commit, not a database row: adding or removing a leaf

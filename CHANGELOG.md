@@ -4,6 +4,53 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.14] - 2026-10-22
+
+### Added
+- **A group can be renamed, given a photo and a bio.** `PATCH /api/messages/groups/:id`
+  accepts any of `name`, `description` and `avatar` and answers with the same group
+  shape the list endpoints already return. Owner and admins only: a plain member
+  gets 403, and so does anyone outside the group. The name is checked by the rule
+  group creation already used (trimmed, 2 to 60 characters) so a rename cannot
+  produce a name the create path would have refused, the bio is capped at 205
+  characters, and an avatar has to be a `/uploads/...` path — a `javascript:` value
+  is rejected before it is stored. `conversations.description` is a new column.
+  This stays true for an encrypted group: name, photo and bio are the metadata a
+  chat row and a member list are made of, never message content.
+- **Members are told live.** A REST handler had no way to reach the socket server,
+  so an in-process `GroupEvents` bus now carries the edit to the gateway, which
+  emits `group:updated` to every participant. Both group and conversation list
+  responses carry `description`.
+
+### Fixed
+- **Editing a group profile no longer floats it to the top of the chat list.** The
+  list is ordered by `updatedAt` and Prisma re-stamps that column on every write,
+  so a rename moved an old group above live conversations for all its members. The
+  previous value is now restored inside the same transaction, and it is handed to
+  raw SQL as a naive UTC string because a `Date` bound into raw SQL is formatted in
+  the server's local zone while the column stores UTC — the first version of this
+  fix shifted every edited group four hours forward on a Tehran-hosted machine.
+- **The new-chat search box stops colliding with its own icon.** The padding that
+  cleared the magnifier was written for a left-to-right box, so in RTL the caret and
+  the placeholder sat under it; the rule uses logical padding now.
+
+### Tests
+- Backend suite 42/42 with `npm run test:e2e`: a validation case covers a too-short
+  replacement name, a bio over the limit, a `javascript:` avatar and a PATCH with
+  nothing in it, and a new case has the owner upload a PNG, edit all three fields,
+  watch the stamp stay put, hear `group:updated` on the member's socket and not on
+  an outsider's, read the group back from the member's list, empty the bio, and get
+  403 for both a member and an outsider.
+- Live run against the restarted local API with two throwaway probe accounts:
+  PATCH returned 200 with the new name and bio, the peer's `GET /messages/groups`
+  showed both, the stamp was byte-identical to the value read just before the edit,
+  a one-character name was 400 and the member's own edit was 403. The probe accounts
+  and every row they made were deleted afterwards, along with two mobile-E2E fixture
+  accounts (`e2e_user_a`, `e2e_user_b`) and the `E2E Group` left in the local
+  database by an earlier seed run: 15 users, 15 conversations and 20 messages, all
+  belonging to real local accounts.
+- Root `npm run lint` clean and `npm run build` clean.
+
 ## [1.1.13] - 2026-10-22
 
 ### Fixed

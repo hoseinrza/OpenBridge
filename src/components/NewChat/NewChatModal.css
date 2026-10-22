@@ -309,7 +309,9 @@
 .newchat-search input {
   width: 100%;
   height: 40px;
-  padding: 0 var(--sp-4) 0 34px;
+  padding-block: 0;
+  padding-inline-start: 34px;
+  padding-inline-end: var(--sp-4);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   background: var(--surface);

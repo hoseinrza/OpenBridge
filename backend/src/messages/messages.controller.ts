@@ -1,11 +1,12 @@
 import {
-  Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, UseGuards, Request,
+  Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards, Request,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UsersService } from '../users/users.service';
 import { E2EE_ENVELOPE_PAGE } from '../config/env';
 import { MessagesService } from './messages.service';
 import { CreateGroupDto } from './dto/create-group.dto';
+import { UpdateGroupDto } from './dto/update-group.dto';
 import { AddParticipantDto } from './dto/add-participant.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { DirectPeerDto } from './dto/direct-peer.dto';
@@ -40,6 +41,19 @@ export class MessagesController {
   @Post('groups')
   createGroup(@Request() req, @Body() dto: CreateGroupDto) {
     return this.messages.createGroup(req.user.id, dto.name, dto.memberIds);
+  }
+
+  // Group identity is server metadata even for an encrypted group — name, photo
+  // and bio are what every member's chat row already shows — so editing them
+  // never touches the ciphertext stream. Owner and admins only; members are told
+  // over the socket.
+  @Patch('groups/:conversationId')
+  updateGroup(
+    @Request()                          req,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Body()                             dto: UpdateGroupDto,
+  ) {
+    return this.messages.updateGroup(conversationId, req.user.id, dto);
   }
 
   @Get('groups/:conversationId')

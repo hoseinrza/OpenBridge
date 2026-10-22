@@ -1,12 +1,13 @@
 import {
   WebSocketGateway, WebSocketServer,
-  SubscribeMessage, OnGatewayConnection, OnGatewayDisconnect,
+  SubscribeMessage, OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit,
   ConnectedSocket, MessageBody,
 } from '@nestjs/websockets';
 import { HttpException } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { MessagesService } from '../messages/messages.service';
+import { GroupEvents } from '../messages/group-events';
 import { RedisService } from '../redis/redis.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { JWT_SECRET, isOriginAllowed } from '../config/env';
@@ -25,7 +26,7 @@ function isId(value: unknown): value is string {
   },
   maxHttpBufferSize: MAX_PACKET_BYTES,
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
 
   private rateLimits = new Map<string, { count: number; resetAt: number }>();
@@ -40,7 +41,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private messages: MessagesService,
     private redis: RedisService,
     private prisma: PrismaService,
+    private events: GroupEvents,
   ) {}
+
+  // A group rename, a new photo or a new bio is a REST call (the photo has to be
+  // uploaded first), so the service publishes it here and every member's open
+  // window updates without waiting for the next list refresh.
+  afterInit() {
+    this.events.onGroupUpdated(({ memberIds, group }) => {
+      this.server.to(memberIds).emit('group:updated', group);
+    });
+  }
 
   private parseUser(socket: Socket): { sub: string; sid: string } | null {
     try {

@@ -418,6 +418,88 @@ test('validates group and pagination inputs', async () => {
     token: alice.token,
     body: { firstName: 'Ali 123' },
   })).status, 400, 'digits are not a name');
+  assert.equal((await api(`/messages/groups/${group.id}`, {
+    method: 'PATCH',
+    token: alice.token,
+    body: { name: 'x' },
+  })).status, 400, 'short replacement name');
+  assert.equal((await api(`/messages/groups/${group.id}`, {
+    method: 'PATCH',
+    token: alice.token,
+    body: { description: 'y'.repeat(206) },
+  })).status, 400, 'bio over the limit');
+  assert.equal((await api(`/messages/groups/${group.id}`, {
+    method: 'PATCH',
+    token: alice.token,
+    body: { avatar: 'javascript:alert(1)' },
+  })).status, 400, 'group avatar scheme');
+  assert.equal((await api(`/messages/groups/${group.id}`, {
+    method: 'PATCH',
+    token: alice.token,
+    body: {},
+  })).status, 400, 'an edit with nothing to edit');
+});
+
+test('the group owner edits its name, bio and photo and members are told', async () => {
+  const { alice, bob, eve } = global.__ctx;
+  const renamed = `Renamed group ${suffix}`;
+
+  const photo = await upload(alice.token, PNG_1X1, 'image/png', 'group-avatar.png');
+  assert.equal(photo.status, 201, 'group avatar upload');
+
+  // Read the live stamp rather than the one from creation: other tests put
+  // messages through this group, and recency belongs to those messages.
+  const { data: before } = await api('/messages/groups', { token: alice.token });
+  const was = before.find(entry => entry.id === group.id);
+
+  // Eve is in none of this: her socket must stay quiet while the group changes.
+  const bobHears = waitEvent(sockets.bob, 'group:updated', 4000);
+  const eveHears = waitEvent(sockets.eve, 'group:updated', 1000);
+
+  const edited = await api(`/messages/groups/${group.id}`, {
+    method: 'PATCH',
+    token:  alice.token,
+    body:   { name: renamed, description: 'Owned by alice', avatar: photo.data.url },
+  });
+  assert.equal(edited.status, 200, 'owner edit');
+  assert.equal(edited.data.name, renamed, 'new name');
+  assert.equal(edited.data.description, 'Owned by alice', 'new bio');
+  assert.match(edited.data.avatar, /^\/uploads\/.+\.png\?exp=\d+&sig=[a-f0-9]{64}$/, 'photo is a signed url');
+  // A rename must not float an old group to the top of every member's chat list,
+  // so the stamp is carried over untouched.
+  assert.equal(edited.data.updatedAt, was.updatedAt, 'a profile edit is not a new message');
+
+  const event = await bobHears;
+  assert.equal(event?.id, group.id, 'members hear which group changed');
+  assert.equal(event?.name, renamed, 'and what it is called now');
+  assert.equal(await eveHears, null, 'an outsider hears nothing');
+
+  const listed = await api('/messages/groups', { token: bob.token });
+  const seen = listed.data.find(entry => entry.id === group.id);
+  assert.equal(seen?.name, renamed, 'the member list shows the new name');
+  assert.equal(seen?.description, 'Owned by alice', 'and the new bio');
+
+  const cleared = await api(`/messages/groups/${group.id}`, {
+    method: 'PATCH',
+    token:  alice.token,
+    body:   { description: '' },
+  });
+  assert.equal(cleared.status, 200, 'bio can be emptied');
+  assert.equal(cleared.data.description, null, 'an empty bio is stored as nothing');
+
+  const member = await api(`/messages/groups/${group.id}`, {
+    method: 'PATCH',
+    token:  bob.token,
+    body:   { name: 'Bob renames it' },
+  });
+  assert.equal(member.status, 403, 'a plain member cannot edit the group');
+
+  const outsider = await api(`/messages/groups/${group.id}`, {
+    method: 'PATCH',
+    token:  eve.token,
+    body:   { name: 'Eve renames it' },
+  });
+  assert.equal(outsider.status, 403, 'an outsider cannot edit the group');
 });
 
 test('non-members cannot read, write, react or type in a group', async () => {
