@@ -84,7 +84,7 @@ function e2eeNotice({ encrypted, secureMode, isGroup, reason }) {
 }
 
 export default function MessageList({
-  messages, activeUser, onReact, searchQuery,
+  messages, activeUser, onReact, onEdit, onDelete, onToast, searchQuery,
   encrypted, secureMode, encryptionNote,
   historyState, historyError, onRetryHistory,
 }) {
@@ -101,7 +101,9 @@ export default function MessageList({
   const isGroup = activeUser.kind === 'group';
 
   const rows = useMemo(() => buildRows(messages), [messages]);
-  const images = useMemo(() => messages.filter(msg => msg.type === 'image'), [messages]);
+  // The viewer walks the pictures of this thread, so a deleted one is not one of
+  // them: its bytes are gone and its row is a tombstone, not a page.
+  const images = useMemo(() => messages.filter(msg => msg.type === 'image' && !msg.deleted), [messages]);
   const viewerIndex = images.findIndex(img => img.id === openImageId);
   const notice = e2eeNotice({
     encrypted,
@@ -234,7 +236,14 @@ export default function MessageList({
               first={row.first}
               last={row.last}
               isGroup={isGroup}
+              // A plaintext row inside a chat this device carries as ciphertext
+              // cannot be rewritten there, so the menu is told and leaves Edit
+              // out instead of offering a save the server always refuses.
+              chatEncrypted={encrypted}
               onReact={onReact}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onToast={onToast}
               searchQuery={searchQuery}
               onOpenImage={setOpenImageId}
             />

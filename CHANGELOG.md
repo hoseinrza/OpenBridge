@@ -4,6 +4,92 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.21] - 2026-10-22
+
+### Added
+- **Acting on a whole message, on the web.** Right-clicking a bubble opens an
+  action menu at the pointer; Shift+F10 or the Menu key opens the same menu at
+  the bubble for a keyboard, and a bubble is now a focusable group that
+  announces its sender and its time. The menu is one fixed-position surface
+  that never reflows the thread: it measures itself, clamps inside the
+  viewport, prefers the space under the bubble and flips above when there is
+  none, and it closes on an outside press, on scroll, on a resize and on
+  Escape — Escape handing focus back to the bubble it came from.
+- **The menu carries the actions.** Five tapbacks sit on the top row, each with
+  its pressed state read from the message, then «کپی», «ویرایش» and «حذف». What
+  you are offered is the server's permission table rather than a guess: an edit
+  only for your own plain-text message in a chat that is not end-to-end
+  encrypted, delete-for-everyone only when you wrote the row, delete-for-me to
+  any participant, and an encrypted bubble offers copying alone — its tapbacks,
+  edits and deletes arrive with the encrypted control envelopes.
+- **Delete is two steps, not one click.** Choosing it swaps the list for
+  «حذف برای همه», «حذف برای من» and «انصراف» under the title «حذف پیام», the two
+  destructive rows in the danger colour; «انصراف» walks back to the first step
+  instead of closing the menu.
+- **Editing happens in the composer.** Edit prefills the textarea with the
+  current text and puts the caret at its end, a «ویرایش پیام» bar names what is
+  being rewritten and shows the old text, and the send button becomes «ذخیره
+  ویرایش». A draft you had already typed is stashed and comes back when the edit
+  ends — by save, by cancel, or by Escape. The bubble then updates from the
+  broadcast, so what you see is what everyone else sees.
+- **«ویرایش‌شده» and «این پیام حذف شد».** An edited message carries a small marker
+  beside its clock. A message deleted for everyone keeps its place in the
+  timeline and reads as a tombstone, with no reactions, no receipt, no reaction
+  affordance and no menu of its own.
+- **Copying tells you whether it worked.** `navigator.clipboard.writeText`
+  first, a hidden textarea plus `execCommand('copy')` when the clipboard
+  refuses or is missing, and a toast at the bottom of the chat either way — «کپی
+  شد» or «کپی ناموفق بود» — that dismisses itself.
+- **A live update stays inside its own chat.** `message:edited` and
+  `message:deleted` are applied only when the payload belongs to the
+  conversation on screen, and a tombstone is matched on both its message id and
+  its conversation id, so an action taken in one chat cannot rewrite a row in
+  another. A delete for me drops the row from your list and leaves it for
+  everyone else.
+
+### Changed
+- **The chat list re-reads after an action.** A rewritten or tombstoned message
+  changes the line the sidebar previews, so the list refreshes instead of going
+  stale.
+- **Deleted pictures leave the viewer.** A tombstoned image is no longer part of
+  the lightbox's list, so walking a thread cannot land on an empty page.
+
+### Notes on what this does not do
+- Nothing here is on the phone yet: the long-press sheet, its edit bar and the
+  tombstone rendering are the next mobile batch, and until then the phone
+  behaves as it did in the last release.
+- Encrypted bubbles keep their actions queued: an end-to-end encrypted tapback,
+  edit or delete needs a control envelope, which is the E2EE batch that follows.
+- There is no undo, no edit history, and no selection menu yet — quoting,
+  forwarding and multi-select are their own piece of work.
+
+Verified with `npm run lint` and `npm run build` clean on the web client; the
+build still prints the pre-existing `@hpke/common` pure-annotation and
+chunk-size warnings. Everything below was driven in the running app as two probe
+accounts against the local database through real DOM events — `contextmenu`,
+`keydown`, `pointerdown`, `click` — because the in-app browser on this machine
+reports a hidden surface, where no pointer tool or screenshot works, so this is
+geometry and text read off the live DOM rather than pictures. The menu opened
+with eight entries, sat inside a 384-pixel-wide viewport without moving any
+bubble, walked its rows on the arrow keys in reading order, closed on Escape with
+focus returned to the bubble, and reopened on Shift+F10. The edit round-trip
+prefilled the composer, moved the caret to the end, disabled the paperclip,
+saved, and left the bubble reading «First probe message (corrected)» with
+«ویرایش‌شده» beside it and the earlier draft restored. Delete for everyone turned
+the row into «این پیام حذف شد» with its receipt gone; delete for me took the
+edited row out of the actor's list alone. Reloaded as the peer, both rows were
+still there — the edited one with its marker, the deleted one as a tombstone —
+and the peer's menu offered the tapbacks, «کپی» and «حذف» but no «ویرایش», with a
+delete step holding only «حذف برای من». A tapback from that menu reached the
+server and came back as a pressed chip, and tapping it again left none. Two
+things that proof does not cover: both clipboard success paths were exercised
+against stubs, because a hidden page is refused a real write, while the real
+call was exercised only as far as failing and producing «کپی ناموفق بود»; and an
+encrypted bubble's menu was never opened live, because no encrypted session
+existed between the two accounts in this browser — that gating is code read from
+the table above, unproven here until the E2EE batch. The probe accounts, their
+group and everything they wrote were deleted afterwards.
+
 ## [1.1.20] - 2026-10-22
 
 ### Added

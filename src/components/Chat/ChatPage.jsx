@@ -77,6 +77,11 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const [newChatOpen, setNewChatOpen]     = useState(false);
   const [chatsLoading, setChatsLoading]   = useState(true);
   const [chatsError, setChatsError]       = useState(false);
+  // The message the composer is currently correcting, and the one-line notice
+  // that says what just happened to a message (copied, or failed to be).
+  const [editing, setEditing]             = useState(null); // { id, text } | null
+  const [toast, setToast]                 = useState('');
+  const toastTimer = useRef(null);
 
   // A list refresh that is in flight when a message arrives can come back with
   // an unread count for the chat that is on screen, because marking it read is
@@ -158,19 +163,52 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     messages, isTyping, typingPeer, connected,
     historyState, historyError, retryHistory,
     encrypted, secureMode, encryptionNote, blockedReason,
-    sendMessage, notifyTyping, toggleReaction, clearMessages,
+    sendMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
   } = useChat(activeUser, currentUser, handleIncoming, handleGroupUpdated);
+
+  // A toast is the only answer some actions get: nothing on screen changes for
+  // a copy, and a failure that leaves the message as it was has nowhere else to
+  // be said. It says itself once and then goes away on its own.
+  const showToast = useCallback((text) => {
+    setToast(text);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(''), 2200);
+  }, []);
+
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  const saveEdit = useCallback(async (text) => {
+    if (!editing) return { ok: false, error: 'ویرایش پیام ناموفق بود' };
+    const result = await editMessage(editing.id, text);
+    if (result.ok) setEditing(null);
+    return result;
+  }, [editing, editMessage]);
+
+  const cancelEdit = useCallback(() => setEditing(null), []);
+
+  const startEdit = useCallback((target) => setEditing(target), []);
+
+  // A delete that the server refuses leaves the message exactly where it was,
+  // so the refusal itself is the only thing the screen can say about it.
+  const handleDelete = useCallback(async (messageId, scope) => {
+    const result = await deleteMessage(messageId, scope);
+    if (!result.ok) showToast(result.error || 'حذف پیام ناموفق بود');
+    return result;
+  }, [deleteMessage, showToast]);
 
   // Catch up on chats that changed while the socket was disconnected.
   useEffect(() => {
     if (connected) loadChats();
   }, [connected, loadChats]);
 
+  // A correction belongs to the chat it started in: leaving that chat ends it,
+  // so nothing can be saved into a conversation nobody is looking at.
   function handleSelectUser(user) {
     if (user.id === activeUser?.id) return;
     setActiveUser(user);
     setUsers(prev => prev.map(u => u.id === user.id ? { ...u, unread: 0 } : u));
     clearMessages();
+    setEditing(null);
     setSearchQuery('');
     setProfileOpen(false);
   }
@@ -182,6 +220,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
       : [{ ...user, unread: 0, pending: true }, ...prev]);
     setActiveUser(user);
     clearMessages();
+    setEditing(null);
     setSearchQuery('');
     setProfileOpen(false);
   }
@@ -193,11 +232,12 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     setUsers(prev => [group, ...prev.filter(c => c.id !== group.id)]);
     setActiveUser(group);
     clearMessages();
+    setEditing(null);
     setSearchQuery('');
     setProfileOpen(false);
   }
 
-  function handleBackToList() { setActiveUser(null); setProfileOpen(false); }
+  function handleBackToList() { setActiveUser(null); setProfileOpen(false); setEditing(null); }
 
   function openOwnProfile()       { setProfileTarget({ user: currentUser, isOwn: true }); }
   function openChatProfile()      { setProfileOpen(true); }
@@ -262,6 +302,9 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               messages={filteredMessages}
               activeUser={activeUser}
               onReact={toggleReaction}
+              onEdit={startEdit}
+              onDelete={handleDelete}
+              onToast={showToast}
               searchQuery={searchQuery}
               encrypted={encrypted}
               secureMode={secureMode}
@@ -278,7 +321,16 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               onTyping={notifyTyping}
               connected={connected}
               blocked={blockedReason}
+              editing={editing}
+              onSaveEdit={saveEdit}
+              onCancelEdit={cancelEdit}
             />
+
+            {toast && (
+              <div className="chat-toast" role="status">
+                <span>{toast}</span>
+              </div>
+            )}
           </>
         ) : (
           <div className="empty-chat">

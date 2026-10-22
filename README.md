@@ -16,7 +16,10 @@
 - 👥 Group chats with owner/member roles and membership management — on web **and** mobile
 - 🟢 Presence, ⌨️ typing indicators and read receipts (presence is tracked in
   process, so a single API instance is assumed)
-- 😀 Message reactions
+- 😀 Message reactions — and copy, edit or delete a message from a right-click or
+  Shift+F10 menu on the web, with a «ویرایش‌شده» marker on a rewritten bubble and a
+  tombstone in place of a deleted one. «Delete for me» hides a row for one account
+  only. The phone has no such menu yet.
 - 📎 Private file & image uploads behind signed, expiring URLs (optional ClamAV scan)
 - 🔐 **End-to-end encrypted web direct chats and web-created groups** (MLS): text,
   images and files are sealed on the device; the server stores opaque envelopes

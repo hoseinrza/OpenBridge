@@ -6,6 +6,7 @@ const MAX_TEXTAREA_HEIGHT = 132;
 
 export default function InputArea({
   onSend, onTyping, connected = true, blocked = null,
+  editing = null, onSaveEdit, onCancelEdit,
 }) {
   const [text, setText]           = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -20,8 +21,51 @@ export default function InputArea({
   // Which kind the user asked for, remembered across the native picker: an image
   // sent under «فایل» must stay a file row.
   const pickRef     = useRef(null);
+  // What was being typed before an edit began. The composer is the one place
+  // both live, so the draft is parked here and handed back when the edit ends —
+  // saved, cancelled, or interrupted by a chat switch.
+  const draftRef    = useRef('');
+  const textRef     = useRef('');
+  const editingRef  = useRef(null);
+  const caretRef    = useRef(false);
 
+  const isEditing = Boolean(editing);
   const busy = sending || uploading;
+
+  useEffect(() => { textRef.current = text; }, [text]);
+
+  useEffect(() => {
+    if (!editing) {
+      if (editingRef.current !== null) {
+        setText(draftRef.current);
+        draftRef.current = '';
+        editingRef.current = null;
+        setError('');
+        caretRef.current = true;
+      }
+      return;
+    }
+    if (editingRef.current === editing.id) return;
+    editingRef.current = editing.id;
+    draftRef.current = textRef.current;
+    setError('');
+    setText(editing.text);
+    // The text being corrected opens under the cursor with the caret after it,
+    // which is where a correction is almost always made.
+    caretRef.current = true;
+  }, [editing]);
+
+  // The caret is placed after the new text has been committed to the field, not
+  // while it is still being swapped in — which is also the only moment its
+  // length is known.
+  useEffect(() => {
+    if (!caretRef.current) return;
+    caretRef.current = false;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [text, editing]);
 
   function dismissEmoji() {
     setShowEmoji(false);
@@ -50,19 +94,26 @@ export default function InputArea({
     const value = text.trim();
     if (!value || busy) return;
     if (!connected) {
-      setError('اتصال به سرور برقرار نیست؛ پیام ارسال نشد');
+      setError(isEditing ? 'اتصال به سرور برقرار نیست؛ پیام ویرایش نشد' : 'اتصال به سرور برقرار نیست؛ پیام ارسال نشد');
       return;
     }
 
     setSending(true);
     setError('');
-    const result = await onSend({ type: 'text', text: value });
+    // One field, two jobs: while a message is being corrected its new text is
+    // saved in place of it, and nothing else is ever sent from here.
+    const result = isEditing
+      ? await onSaveEdit?.(value)
+      : await onSend({ type: 'text', text: value });
     setSending(false);
 
     if (!result?.ok) {
-      setError(result?.error || 'ارسال پیام ناموفق بود');
+      setError(result?.error || (isEditing ? 'ویرایش پیام ناموفق بود' : 'ارسال پیام ناموفق بود'));
       return;
     }
+    // A saved edit ends with the parent dropping the edit, which hands the
+    // composer back to the parked draft.
+    if (isEditing) return;
     setText('');
     setShowEmoji(false);
     textareaRef.current?.focus();
@@ -72,8 +123,9 @@ export default function InputArea({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
-    } else if (e.key === 'Escape' && showEmoji) {
-      setShowEmoji(false);
+    } else if (e.key === 'Escape') {
+      if (showEmoji) setShowEmoji(false);
+      else if (isEditing) onCancelEdit?.();
     }
   }
 
@@ -148,6 +200,28 @@ export default function InputArea({
         onChange={handleFile}
       />
 
+      {/* Editing is a mode of the composer, not a dialog: what is being
+          corrected stays named, one line of it is kept in sight, and the way
+          out is the same whether the text is saved, cancelled or escapes. */}
+      {editing && (
+        <div className="edit-bar">
+          <span className="edit-bar-title">
+            <i className="fas fa-pen-to-square" aria-hidden="true" />
+            ویرایش پیام
+          </span>
+          <span className="edit-bar-preview" title={editing.text}>{editing.text}</span>
+          <button
+            type="button"
+            className="edit-bar-cancel"
+            onClick={onCancelEdit}
+            title="انصراف"
+            aria-label="انصراف از ویرایش"
+          >
+            <i className="fas fa-xmark" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       {blocked && (
         <div className="composer-note is-blocked" role="status">
           <i className="fas fa-lock" aria-hidden="true" />
@@ -160,7 +234,9 @@ export default function InputArea({
           {busy ? (
             <>
               <i className="fas fa-spinner fa-spin" aria-hidden="true" />
-              {uploading ? 'در حال بارگذاری و ارسال فایل…' : 'در حال ارسال…'}
+              {uploading
+                ? 'در حال بارگذاری و ارسال فایل…'
+                : isEditing ? 'در حال ذخیره…' : 'در حال ارسال…'}
             </>
           ) : (
             <>
@@ -182,11 +258,13 @@ export default function InputArea({
           ref={attachRef}
           type="button"
           className={`icon-btn attach-btn${showAttach ? ' active' : ''}`}
-          title={blocked ?? 'پیوست'}
+          title={blocked ?? (isEditing ? 'ویرایش فقط متن را عوض می‌کند؛ پیوست در این حالت نیست' : 'پیوست')}
           aria-label="پیوست"
           aria-haspopup="menu"
           aria-expanded={showAttach}
-          disabled={busy || Boolean(blocked)}
+          // An edit rewrites one text row, so there is nothing for a file to
+          // attach to — the picker stays shut until the edit is over.
+          disabled={busy || Boolean(blocked) || isEditing}
           onClick={() => setShowAttach(open => !open)}
         >
           <i className={`fas ${blocked ? 'fa-lock' : 'fa-paperclip'}`} aria-hidden="true" />
@@ -221,13 +299,13 @@ export default function InputArea({
         <button
           type="submit"
           className="send-btn"
-          title={blocked ?? 'ارسال پیام'}
-          aria-label="ارسال پیام"
+          title={blocked ?? (isEditing ? 'ذخیره ویرایش' : 'ارسال پیام')}
+          aria-label={isEditing ? 'ذخیره ویرایش' : 'ارسال پیام'}
           disabled={!text.trim() || busy || !connected || Boolean(blocked)}
         >
           {sending
             ? <i className="fas fa-spinner fa-spin" aria-hidden="true" />
-            : <i className="fas fa-paper-plane" aria-hidden="true" />}
+            : <i className={`fas ${isEditing ? 'fa-check' : 'fa-paper-plane'}`} aria-hidden="true" />}
         </button>
       </form>
     </div>

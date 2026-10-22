@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Avatar from '../ui/Avatar.jsx';
 import EncryptedMedia from './EncryptedMedia.jsx';
+import MessageActionsMenu from './MessageActionsMenu.jsx';
 import { formatSize } from '../../utils/format.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢'];
@@ -20,6 +21,13 @@ function Highlight({ text, query }) {
    that everything the message owns — media, picker, reaction chips, timestamp
    and receipt — is laid out inside one surface. */
 function BubbleBody({ message, searchQuery, onOpenImage }) {
+  // A tombstone is the shape of a message that is gone: the row is still in the
+  // timeline, in the same place on the same day, with nothing of its own left
+  // inside it. Not even selectable — there is nothing there to take.
+  if (message.deleted) {
+    return <span className="bubble-deleted">این پیام حذف شد</span>;
+  }
+
   // An encrypted attachment has no address the browser could fetch. Only the
   // descriptor is known here, so the body — including its loading and failure
   // states — belongs to the component that can turn it back into bytes.
@@ -79,18 +87,23 @@ function BubbleBody({ message, searchQuery, onOpenImage }) {
 
 export default function MessageGroup({
   message, first = true, last = true, isGroup = false, onReact, searchQuery,
-  onOpenImage,
+  onOpenImage, onEdit, onDelete, onToast, chatEncrypted = false,
 }) {
   const [barOpen, setBarOpen] = useState(false);
   const [barBelow, setBarBelow] = useState(false);
   const [barOffset, setBarOffset] = useState(0);
+  const [menu, setMenu] = useState(null); // { anchor, viaKeyboard } | null
   const bubbleRef = useRef(null);
   const toggleRef = useRef(null);
   const pickerRef = useRef(null);
   const isMine = message.side === 'mine';
+  const deleted = Boolean(message.deleted);
   // Reactions live in the server's message table, and an encrypted message has
   // no row there to react to — so the affordance is not offered for it.
-  const reactable = !message.encrypted;
+  const reactable = !message.encrypted && !deleted;
+  // A tombstone has no action left on it: the menu, the picker and the keyboard
+  // stop asking, and the row keeps its place in the timeline and nothing else.
+  const actionable = !deleted;
 
   const reactions = message.reactions ?? [];
   const mine = new Set(reactions.filter(r => r.mine).map(r => r.emoji));
@@ -158,6 +171,45 @@ export default function MessageGroup({
     setBarOpen(true);
   }
 
+  // The action menu hangs on one of two anchors: where the pointer was when the
+  // bubble was right-clicked, or the bubble's own box when it was opened from
+  // the keyboard. The picker steps aside for it — one surface per message.
+  function openMenu(anchor, viaKeyboard) {
+    setBarOpen(false);
+    setMenu({ anchor, viaKeyboard });
+  }
+
+  function closeMenu() {
+    setMenu(null);
+  }
+
+  function handleContextMenu(event) {
+    if (!actionable) return;
+    event.preventDefault();
+    openMenu({ left: event.clientX, top: event.clientY, width: 0, height: 0 }, false);
+  }
+
+  function handleKeyDown(event) {
+    if (!actionable || event.target !== bubbleRef.current) return;
+    // F10 with Shift, and the Menu key, are the two keys a browser gives a
+    // context menu; neither reaches a bubble by Tab.
+    if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+      event.preventDefault();
+      const rect = bubbleRef.current.getBoundingClientRect();
+      openMenu({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }, true);
+    }
+  }
+
+  // Only a menu opened by hand returns focus when it goes away; one dismissed
+  // by the mouse would leave a ring on a bubble nobody meant to select. The
+  // hand-back waits for the portal to leave the document, or the bubble would
+  // take the focus and lose it again when its menu is unmounted.
+  const lastMenu = useRef(null);
+  useEffect(() => {
+    if (lastMenu.current && !menu && lastMenu.current.viaKeyboard) bubbleRef.current?.focus();
+    lastMenu.current = menu;
+  }, [menu]);
+
   const bubbleClass = `bubble ${message.type === 'image' ? 'bubble-image' : ''}`;
 
   return (
@@ -180,6 +232,13 @@ export default function MessageGroup({
           <div
             className={`${bubbleClass}${reactions.length > 0 ? ' has-reactions' : ''}`}
             ref={bubbleRef}
+            // A message is an object you can act on, so the keyboard reaches it
+            // as a stop of its own and says whose message this is out loud.
+            role="group"
+            tabIndex={actionable ? 0 : -1}
+            aria-label={`${isMine ? 'شما' : (message.sender || 'کاربر')}، ${message.time}`}
+            onContextMenu={handleContextMenu}
+            onKeyDown={handleKeyDown}
           >
             {!isMine && isGroup && first && (
               <div className="msg-sender">{message.sender || 'کاربر'}</div>
@@ -194,6 +253,10 @@ export default function MessageGroup({
             />
 
             <div className="msg-footer">
+              {message.editedAt && (
+                <span className="msg-edited">ویرایش‌شده</span>
+              )}
+
               <time className="msg-time" dateTime={new Date(message.createdAt).toISOString()}>
                 {message.time}
               </time>
@@ -205,7 +268,10 @@ export default function MessageGroup({
                 </span>
               )}
 
-              {isMine && (
+              {/* Deleting for everyone clears the read receipts with the content,
+                  so a tick on a tombstone would claim a message nobody can read
+                  was never seen. The status mark goes with it. */}
+              {isMine && !deleted && (
                 <span
                   className={`msg-receipt ${message.read ? 'read' : ''}`}
                   title={message.read ? 'خوانده شد' : 'ارسال شد'}
@@ -272,6 +338,22 @@ export default function MessageGroup({
           </div>
         </div>
       </div>
+
+      {/* The menu lives on the document body and is placed from the anchor, so
+          opening it never moves the bubble it belongs to. */}
+      {menu && actionable && (
+        <MessageActionsMenu
+          anchor={menu.anchor}
+          message={message}
+          chatEncrypted={chatEncrypted}
+          held={[...mine]}
+          onReact={pickReaction}
+          onEdit={onEdit}
+          onDelete={scope => onDelete?.(message.id, scope)}
+          onToast={onToast}
+          onClose={closeMenu}
+        />
+      )}
     </div>
   );
 }

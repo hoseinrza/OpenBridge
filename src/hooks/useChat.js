@@ -47,6 +47,10 @@ function normalize(msg, myId) {
     createdAt:    new Date(msg.createdAt).getTime(),
     read:         msg.read,
     encrypted:    false,
+    // A tombstone is a row the server still returns with its content removed,
+    // so the list keeps it in place and says so instead of dropping a hole.
+    deleted:      Boolean(msg.deleted),
+    editedAt:     msg.editedAt ? new Date(msg.editedAt).getTime() : null,
     reactions:    groupReactions(msg.reactions, myId),
   };
 }
@@ -78,6 +82,11 @@ function normalizeEncrypted(message, peer) {
     time:           timeIn(created),
     createdAt:      created,
     encrypted:      true,
+    // Actions on an encrypted stream travel as control messages, which this
+    // release cannot send yet; the shape stays uniform so the bubbles ask one
+    // question of every message.
+    deleted:        false,
+    editedAt:       null,
     reactions:      [],
   };
 }
@@ -102,6 +111,18 @@ function readPayload(target) {
 
 function targetPayload(target) {
   return isGroup(target) ? { conversationId: target.id } : { toId: target.id };
+}
+
+// Whether a plaintext row belongs to the chat currently open here. A group is
+// named by its conversation id; a direct chat by its two accounts, because in
+// that case the open target is a user id rather than a conversation id.
+// Every live update that carries a whole message is checked with this, or an
+// edit in a chat nobody is looking at would be merged into the wrong list.
+function inActiveChat(target, me, msg) {
+  if (!target || !me) return false;
+  if (isGroup(target)) return msg.conversationId === target.id;
+  return (msg.senderId === me.id && msg.receiverId === target.id)
+    || (msg.senderId === target.id && msg.receiverId === me.id);
 }
 
 // The one answer that means "there is nobody to invite": a peer whose devices
@@ -227,13 +248,9 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
       const me     = currentUserRef.current;
       if (!me) return;
 
-      const belongsToActiveGroup = isGroup(target) && msg.conversationId === target.id;
-      const belongsToActiveDirect = !isGroup(target) && target && (
-        (msg.senderId === me.id && msg.receiverId === target.id) ||
-        (msg.senderId === target.id && msg.receiverId === me.id)
-      );
+      const belongsToActive = inActiveChat(target, me, msg);
 
-      if (belongsToActiveGroup || belongsToActiveDirect) {
+      if (belongsToActive) {
         setMessages(prev => mergeMessages(prev, [normalize(msg, me.id)]));
       }
       if (isGroup(target) && msg.conversationId === target.id && msg.senderId !== me.id) {
@@ -291,6 +308,46 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
       setMessages(prev => prev.map(m => (
         m.id === messageId ? { ...m, reactions: groupReactions(reactions, currentUserId) } : m
       )));
+    });
+
+    // An edit or a delete changes a row already on screen. The server is the
+    // author of both, so nothing is drawn until its broadcast arrives — and the
+    // broadcast reaches this device too, which is why a second device of the
+    // same account converges without a reload.
+    socket.on('message:edited', (msg) => {
+      const target = targetRef.current;
+      const me     = currentUserRef.current;
+      // The sidebar previews the last message of every chat, and an edit or a
+      // delete changes what that is — including in a chat nobody has open.
+      onIncomingRef.current?.();
+      if (!inActiveChat(target, me, msg)) return;
+      setMessages(prev => mergeMessages(prev, [normalize(msg, me.id)]));
+    });
+
+    socket.on('message:deleted', ({ messageId, conversationId, scope }) => {
+      onIncomingRef.current?.();
+      setMessages(prev => {
+        // "For me" is a hide, so the row leaves the timeline entirely; only this
+        // account's own devices were told, and one of them may not be looking at
+        // this chat, which is why the row is dropped by id rather than checked.
+        if (scope === 'me') return prev.filter(m => m.id !== messageId);
+        // Both the id and its conversation have to match: a tombstone for a chat
+        // that is closed here is not this list's business.
+        return prev.map(m => (m.id === messageId && m.conversationId === conversationId
+          ? {
+            ...m,
+            deleted: true,
+            text: '',
+            src: undefined,
+            name: null,
+            size: null,
+            // The server clears the reactions and the read receipts with the
+            // content, and a deleted message never shows a status mark.
+            reactions: [],
+            read: false,
+          }
+          : m));
+      });
     });
 
     // A group's name, photo and bio are server metadata, so an edit made on any
@@ -554,6 +611,37 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     });
   }, [targetUser]);
 
+  // ── Editing and deleting a message the server stores ─────
+  // Both wait for the ack, so a refusal leaves the bubble untouched. The change
+  // itself then arrives through `message:edited` / `message:deleted`, which is
+  // the same path a peer's device sees — this device is never special-cased, so
+  // the two can't drift.
+  const editMessage = useCallback(async (msgId, text) => {
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      return { ok: false, error: 'اتصال به سرور برقرار نیست؛ پیام ویرایش نشد' };
+    }
+    try {
+      await emitWithAck(socket, 'message:edit', { messageId: msgId, text });
+    } catch (err) {
+      return { ok: false, error: err.message || 'ویرایش پیام ناموفق بود' };
+    }
+    return { ok: true };
+  }, []);
+
+  const deleteMessage = useCallback(async (msgId, scope) => {
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      return { ok: false, error: 'اتصال به سرور برقرار نیست؛ پیام حذف نشد' };
+    }
+    try {
+      await emitWithAck(socket, 'message:delete', { messageId: msgId, scope });
+    } catch (err) {
+      return { ok: false, error: err.message || 'حذف پیام ناموفق بود' };
+    }
+    return { ok: true };
+  }, []);
+
   const clearMessages = useCallback(() => {
     setMessages([]);
     setTypingPeer(null);
@@ -581,6 +669,6 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     // Why a chat that could be encrypted is not, shown whenever it is not.
     encryptionNote: secure?.mode === 'plain' ? (secure.reason ?? null) : null,
     blockedReason: unavailable,
-    sendMessage, notifyTyping, toggleReaction, clearMessages,
+    sendMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
   };
 }
