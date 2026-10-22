@@ -578,19 +578,16 @@
 }
 
 /* ── Inline reactions ────────────────────────────────────────── */
-/* Chips are their own row at the bubble's lower inline edge; they never share
-   space with the clock or push it around. */
+/* Chips are their own row, and they sit above the clock: they read as a comment
+   on the text, which the meta line below them only timestamps. */
 .msg-reactions {
   display: flex;
   flex-wrap: wrap;
   align-self: flex-start;
   gap: 3px;
   max-width: 100%;
-  margin-top: 2px;
-  margin-bottom: -1px;
+  margin-top: 1px;
 }
-
-.bubble.has-reactions { padding-bottom: 4px; }
 
 .msg-reaction {
   display: inline-flex;
@@ -732,8 +729,6 @@
 
 .bubble-image > .msg-footer,
 .bubble-image > .msg-reactions { padding-inline: 7px; }
-
-.bubble-image.has-reactions { padding-bottom: 3px; }
 
 .msg-image-btn {
   display: block;

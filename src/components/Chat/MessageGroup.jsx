@@ -230,7 +230,7 @@ export default function MessageGroup({
 
         <div className="msg-bubbles">
           <div
-            className={`${bubbleClass}${reactions.length > 0 ? ' has-reactions' : ''}`}
+            className={bubbleClass}
             ref={bubbleRef}
             // A message is an object you can act on, so the keyboard reaches it
             // as a stop of its own and says whose message this is out loud.
@@ -251,6 +251,27 @@ export default function MessageGroup({
               // whole thread, so it needs every picture and this one's place.
               onOpenImage={() => onOpenImage?.(message.id)}
             />
+
+            {/* The chips answer the text and the clock records it, so the row of
+                reactions belongs between them — above the meta line, not under
+                it, whatever side the thread runs on. */}
+            {reactions.length > 0 && (
+              <div className="msg-reactions" role="group" aria-label="واکنش‌ها">
+                {reactions.map(({ emoji, mine: held }) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className={`msg-reaction ${held ? 'mine' : ''}`}
+                    onClick={() => pickReaction(emoji)}
+                    aria-pressed={held}
+                    aria-label={held ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                    title={held ? 'برای برداشتن واکنش دوباره بزن' : 'واکنش نشان بده'}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="msg-footer">
               {message.editedAt && (
@@ -281,24 +302,6 @@ export default function MessageGroup({
                 </span>
               )}
             </div>
-
-            {reactions.length > 0 && (
-              <div className="msg-reactions" role="group" aria-label="واکنش‌ها">
-                {reactions.map(({ emoji, mine: held }) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    className={`msg-reaction ${held ? 'mine' : ''}`}
-                    onClick={() => pickReaction(emoji)}
-                    aria-pressed={held}
-                    aria-label={held ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
-                    title={held ? 'برای برداشتن واکنش دوباره بزن' : 'واکنش نشان بده'}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            )}
 
             {reactable && (
               <button

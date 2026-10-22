@@ -4,6 +4,27 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.22] - 2026-10-22
+
+### Changed
+- **Reaction chips moved above the clock.** They are a comment on the text, and
+  the line under them only says when it was sent, so the row of chips now sits
+  between the message and its meta line instead of hanging below both. The bubble
+  also stopped carrying the extra bottom padding that existed only to make room
+  for a row that used to sit under the clock, and the class that asked for it is
+  gone with it.
+
+Verified with `npm run lint` and `npm run build` clean. Measured in the running
+app against the local database as a throwaway account: a sent bubble's children
+now read text, reactions, footer, with the chip row ending two pixels above the
+clock and the bubble's bottom padding back to its plain value; a received bubble
+holding one chip from each side reads sender, text, reactions, footer, its chips
+flush with the same edge as the clock and nothing overlapping it. No screenshot is
+attached — the in-app browser on this machine reports a hidden surface — so the
+proof is `getBoundingClientRect` read off the live DOM. The throwaway accounts,
+their group and the reactions added for the check were deleted afterwards, and the
+local database is back to the row counts it had before.
+
 ## [1.1.21] - 2026-10-22
 
 ### Added
