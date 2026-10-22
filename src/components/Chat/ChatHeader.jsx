@@ -73,16 +73,21 @@ export default function ChatHeader({
             )}
 
             {isGroup ? (
-              <div className="chat-peer">
+              <button
+                type="button"
+                className="chat-peer as-button"
+                onClick={() => onOpenProfile?.(user)}
+                title="مشاهده اطلاعات گروه"
+              >
                 <Avatar src={user.avatar} name={user.name} size={40} group />
                 <div className="chat-peer-text">
                   <span className="chat-peer-name" title={user.name}>{user.name}</span>
                   <span className="chat-peer-status group-status">
                     <i className="fas fa-users" aria-hidden="true" />
-                    {user.memberCount ?? 0} عضو
+                    {(user.memberCount ?? 0).toLocaleString('fa-IR')} عضو
                   </span>
                 </div>
-              </div>
+              </button>
             ) : (
               <button
                 type="button"

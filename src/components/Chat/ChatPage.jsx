@@ -10,6 +10,7 @@ import MessageList from './MessageList.jsx';
 import TypingIndicator from './TypingIndicator.jsx';
 import InputArea from './InputArea.jsx';
 import ProfileModal from '../Profile/ProfileModal.jsx';
+import ChatProfilePanel from '../Profile/ChatProfilePanel.jsx';
 import NewChatModal from '../NewChat/NewChatModal.jsx';
 import './Chat.css';
 
@@ -72,6 +73,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const [activeUser, setActiveUser]       = useState(null);
   const [searchQuery, setSearchQuery]     = useState('');
   const [profileTarget, setProfileTarget] = useState(null); // { user, isOwn } | null
+  const [profileOpen, setProfileOpen]     = useState(false);
   const [newChatOpen, setNewChatOpen]     = useState(false);
   const [chatsLoading, setChatsLoading]   = useState(true);
   const [chatsError, setChatsError]       = useState(false);
@@ -136,12 +138,28 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   // conversations/groups and keeps unread counters / ordering in sync)
   const handleIncoming = useCallback(() => { loadChats(); }, [loadChats]);
 
+  // A group's name, photo and bio are server metadata, so an edit made on any
+  // member's device arrives as the whole row and is applied to both the list and
+  // the chat on screen — no reload, and the encrypted preview of a group whose
+  // wire carries no plaintext stays the one this device already has.
+  const handleGroupUpdated = useCallback((wire) => {
+    const group = normalizeGroup(wire);
+    if (!group?.id) return;
+    const preview = previewFromServer(group.lastMessage, currentUser.id);
+    setUsers(prev => prev.map(u => (
+      u.id === group.id ? { ...u, ...group, preview: preview ?? u.preview } : u
+    )));
+    setActiveUser(prev => (prev && prev.id === group.id
+      ? { ...prev, ...group, preview: preview ?? prev.preview }
+      : prev));
+  }, [currentUser.id]);
+
   const {
     messages, isTyping, typingPeer, connected,
     historyState, historyError, retryHistory,
     encrypted, secureMode, encryptionNote, blockedReason,
     sendMessage, notifyTyping, toggleReaction, clearMessages,
-  } = useChat(activeUser, currentUser, handleIncoming);
+  } = useChat(activeUser, currentUser, handleIncoming, handleGroupUpdated);
 
   // Catch up on chats that changed while the socket was disconnected.
   useEffect(() => {
@@ -154,6 +172,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     setUsers(prev => prev.map(u => u.id === user.id ? { ...u, unread: 0 } : u));
     clearMessages();
     setSearchQuery('');
+    setProfileOpen(false);
   }
 
   function handleStartConversation(user) {
@@ -164,6 +183,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     setActiveUser(user);
     clearMessages();
     setSearchQuery('');
+    setProfileOpen(false);
   }
 
   function handleGroupCreated(conversation) {
@@ -174,12 +194,13 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     setActiveUser(group);
     clearMessages();
     setSearchQuery('');
+    setProfileOpen(false);
   }
 
-  function handleBackToList() { setActiveUser(null); }
+  function handleBackToList() { setActiveUser(null); setProfileOpen(false); }
 
   function openOwnProfile()       { setProfileTarget({ user: currentUser, isOwn: true }); }
-  function openPeerProfile(user)  { setProfileTarget({ user, isOwn: false }); }
+  function openChatProfile()      { setProfileOpen(true); }
   function closeProfile()         { setProfileTarget(null); }
   function handleProfileSaved(patch) { onProfileUpdate?.(patch); }
 
@@ -211,7 +232,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               encryptionNote={encryptionNote}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
-              onOpenProfile={openPeerProfile}
+              onOpenProfile={openChatProfile}
               onBack={handleBackToList}
             />
 
@@ -270,6 +291,18 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           </div>
         )}
       </div>
+
+      {profileOpen && activeUser && (
+        <ChatProfilePanel
+          key={activeUser.id}
+          chat={activeUser}
+          currentUser={currentUser}
+          encrypted={encrypted}
+          encryptionNote={encryptionNote}
+          onClose={() => setProfileOpen(false)}
+          onUpdated={handleGroupUpdated}
+        />
+      )}
 
       {profileTarget && (
         <ProfileModal

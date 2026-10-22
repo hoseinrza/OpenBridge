@@ -47,17 +47,20 @@ export function normalizeGroup(group) {
       id:     user.id,
       name:   user.displayName || user.username,
       avatar: resolveUrl(user.avatar) || null,
+      role:   p.role ?? user.role ?? null,
     };
   });
   return {
     kind:         'group',
     id:           group.id,
     name:         group.name || 'گروه بدون نام',
+    description:  group.description ?? '',
     avatar:       resolveUrl(group.avatar) || null,
     participants,
     memberCount:  participants.length,
     unread:       group.unread ?? 0,
     encrypted:    group.e2ee === true,
+    createdAt:    group.createdAt,
     updatedAt:    group.updatedAt,
     lastMessage:  group.lastMessage ?? null,
   };
@@ -220,6 +223,13 @@ export function fetchGroups() {
 
 export function createGroup(name, memberIds) {
   return request('POST', '/messages/groups', { name, memberIds });
+}
+
+// Only the fields that changed are sent, so an untouched photo is never
+// rewritten. `avatar` must be the bare `/uploads/<file>` path, not the signed
+// display url.
+export function updateGroup(conversationId, data) {
+  return request('PATCH', `/messages/groups/${conversationId}`, data);
 }
 
 export function fetchGroupMessages(conversationId, skip = 0) {

@@ -1,6 +1,6 @@
 {
   "name": "mobile",
-  "version": "1.1.15",
+  "version": "1.1.16",
   "main": "index.js",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",

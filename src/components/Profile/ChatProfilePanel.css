@@ -1,0 +1,273 @@
+/* The chat profile is a third column rather than a dialog, so the conversation
+   stays visible behind it the way Telegram keeps the chat open while you read a
+   profile. Below the phone breakpoint it becomes a full-screen page. */
+.chat-profile {
+  width: 340px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--sidebar-bg);
+  border-inline-start: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--header);
+  flex-shrink: 0;
+  padding: 0 var(--sp-3) 0 var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-head-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.panel-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-5) var(--sp-5) var(--sp-6);
+  text-align: center;
+}
+
+.panel-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  margin-bottom: var(--sp-3);
+}
+
+.panel-avatar-wrap .avatar {
+  border: 3px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.panel-avatar-edit {
+  position: absolute;
+  bottom: 0;
+  inset-inline-start: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  box-shadow: var(--shadow-1);
+}
+
+.panel-avatar-edit:hover { background: var(--accent-hover); }
+.panel-avatar-edit:disabled { opacity: 0.7; }
+
+.panel-name {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.panel-username {
+  margin-top: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  unicode-bidi: isolate;
+}
+
+.panel-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.panel-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.panel-status.status-online .panel-status-dot { background: var(--success); }
+.panel-status.status-online { color: var(--success); }
+.panel-status.status-idle .panel-status-dot { background: var(--warning); }
+.panel-status.status-dnd .panel-status-dot { background: var(--danger); }
+
+.panel-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.panel-bio {
+  margin: var(--sp-3) auto 0;
+  max-width: 340px;
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--text-2);
+  text-align: start;
+  unicode-bidi: plaintext;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.panel-joined {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+.panel-encryption {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  font-size: var(--text-sm);
+  text-align: start;
+  cursor: help;
+}
+
+.panel-encryption.is-on {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.panel-encryption.is-off {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+.panel-form {
+  margin-top: var(--sp-4);
+  text-align: start;
+}
+
+.panel-textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.panel-bio-count {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--text-xs);
+}
+
+.panel-remove-photo {
+  margin-top: var(--sp-2);
+  color: var(--danger);
+}
+
+.panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+
+.panel-members {
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+  text-align: start;
+}
+
+.panel-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: var(--text-3);
+}
+
+.panel-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.panel-member {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+}
+
+.panel-member:hover { background: var(--surface-3); }
+
+.panel-member-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-base);
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel-member-you {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.panel-member-role {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+.panel-member-role.role-owner { color: var(--accent); }
+
+@media (max-width: 1100px) {
+  .chat-profile { width: 300px; }
+}
+
+@media (max-width: 768px) {
+  .chat-profile {
+    position: absolute;
+    inset: 0;
+    z-index: 200;
+    width: auto;
+    border-inline-start: 0;
+  }
+
+  .panel-scroll {
+    padding-inline: var(--sp-4);
+    padding-bottom: calc(var(--sp-6) + env(safe-area-inset-bottom));
+  }
+}

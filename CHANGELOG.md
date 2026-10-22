@@ -4,6 +4,41 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.16] - 2026-10-22
+
+### Added
+- **Opening a chat now opens its profile.** Tapping the header of a direct chat or
+  a group slides in a third column with the same information the phone clients
+  show: photo, name, `@username`, live status, bio, the date the account or group
+  joined, and — for a group — the member list with each person's role, so an owner
+  is distinguishable from a plain member without asking. On a narrow window the
+  panel covers the conversation instead of squeezing it, because a 340px column
+  next to a sidebar leaves no room to read a message.
+- **Owners and admins edit a group's profile in place.** The panel reuses the
+  `PATCH /api/messages/groups/:id` endpoint from 1.1.14: name, bio and photo can be
+  changed or cleared, only the fields that actually changed are sent, and an
+  untouched photo is never rewritten. A plain member sees the same panel with no
+  pen at all.
+- **Edits reach every member without a reload.** `useChat` takes a fifth handler for
+  the `group:updated` broadcast, and `ChatPage` merges the row it carries into the
+  chat list and the active conversation, so a rename done on one device changes the
+  header, the sidebar row and an open panel on another while both stay online. The
+  chat list preview of an edited group is kept rather than replaced by `undefined`.
+
+### Changed
+- **The chat header is a button.** It previously rendered the peer's name as a
+  `div`, so there was nothing to activate with a keyboard or a screen reader; it now
+  carries an accessible name and opens the panel. Group member counts are rendered
+  with Persian digits, like every other count in the app.
+
+Verified in the development browser as both the owner and a plain member: the group
+panel showed the renamed title and new bio live on the second account, the member
+list showed «مالک» and «شما» and offered no edit control to the member, the direct
+chat panel showed the contact's identity and encryption row without a member list,
+Escape closed it, and the rename survived a fresh sign-in. `npm run test:e2e` in the
+backend passes 42/42 against the local database; the probe accounts used for the
+browser run were deleted afterwards.
+
 ## [1.1.15] - 2026-10-22
 
 ### Added

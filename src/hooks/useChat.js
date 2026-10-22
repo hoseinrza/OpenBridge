@@ -110,7 +110,7 @@ function targetPayload(target) {
 // quietly send readable text.
 const peerWithoutKeys = (error) => error?.code === 'no-keys' || error?.status === 404;
 
-export function useChat(targetUser, currentUser, onIncoming) {
+export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   const [messages,     setMessages]     = useState([]);
   const [typingPeer,   setTypingPeer]   = useState(null);
   const [connected,    setConnected]    = useState(false);
@@ -127,6 +127,7 @@ export function useChat(targetUser, currentUser, onIncoming) {
   const targetRef      = useRef(targetUser);
   const currentUserRef = useRef(currentUser);
   const onIncomingRef  = useRef(onIncoming);
+  const onGroupUpdatedRef = useRef(onGroupUpdated);
   const secureRef      = useRef(null);
   const openingRef     = useRef(false);
   const refreshHistoryRef = useRef(() => {});
@@ -138,6 +139,7 @@ export function useChat(targetUser, currentUser, onIncoming) {
     targetRef.current      = targetUser;
     currentUserRef.current = currentUser;
     onIncomingRef.current  = onIncoming;
+    onGroupUpdatedRef.current = onGroupUpdated;
     secureRef.current      = secure;
 
     // Pull anything that was persisted while the socket was down and merge it
@@ -290,6 +292,10 @@ export function useChat(targetUser, currentUser, onIncoming) {
         m.id === messageId ? { ...m, reactions: groupReactions(reactions, currentUserId) } : m
       )));
     });
+
+    // A group's name, photo and bio are server metadata, so an edit made on any
+    // member's device arrives as the whole row rather than a delta.
+    socket.on('group:updated', (group) => onGroupUpdatedRef.current?.(group));
 
     return () => {
       socket.disconnect();
