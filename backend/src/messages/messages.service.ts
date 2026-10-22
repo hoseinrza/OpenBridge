@@ -1,10 +1,12 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { isBase64 } from 'class-validator';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { E2EE_MAX_ENVELOPE_CHARS, E2EE_MAX_GROUP_MEMBERS } from '../config/env';
 import { signedFileUrl } from '../uploads/file-urls';
 import { GroupEvents } from './group-events';
 import { UpdateGroupDto } from './dto/update-group.dto';
+import { SharedKind, SHARED_PAGE } from './dto/shared-query.dto';
 
 const WITH_RELATIONS = {
   sender:    { select: { id: true, username: true, displayName: true, avatar: true } },
@@ -27,6 +29,31 @@ const LAST_MESSAGE_INCLUDE = {
   take:    1,
   select:  LAST_MESSAGE_SELECT,
 };
+
+// Photos and films in one list, documents and voice recordings in the other: the
+// split a profile panel is judged by, not the enum's own vocabulary.
+const SHARED_TYPES = {
+  media: ['IMAGE', 'VIDEO'],
+  files: ['FILE', 'AUDIO'],
+} satisfies Record<'media' | 'files', ('IMAGE' | 'VIDEO' | 'FILE' | 'AUDIO')[]>;
+
+type LinkRow = {
+  id:         string;
+  text:       string;
+  createdAt:  Date;
+  senderId:   string;
+  senderName: string;
+};
+
+// A link runs to the first space or quote, and the punctuation a sentence puts
+// after it is trimmed back — a saved address ending in a full stop is an address
+// that 404s.
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'`]+/gi;
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}«»"'`]+$/;
+
+function extractLinks(text: string) {
+  return (text.match(URL_IN_TEXT) ?? []).map(raw => raw.replace(TRAILING_PUNCTUATION, '')).filter(Boolean);
+}
 
 @Injectable()
 export class MessagesService {
@@ -452,6 +479,114 @@ export class MessagesService {
       skip,
     });
     return messages.reverse().map(m => this.toWireMessage(m));
+  }
+
+  private async resolveSharedTarget(target: string, requesterId: string) {
+    const asConversation = await this.prisma.conversation.findUnique({
+      where:  { id: target },
+      select: { id: true, e2ee: true },
+    });
+    if (asConversation) {
+      await this.assertMember(asConversation.id, requesterId);
+      return asConversation;
+    }
+
+    // Not a conversation id, so it is the other way a client names a chat: the
+    // peer on the other end. A chat that does not exist has nothing to show, and
+    // that is also the answer for a peer that does not exist, so probing this
+    // endpoint cannot list accounts.
+    const direct = await this.findDirectConversation(requesterId, target);
+    if (!direct) throw new NotFoundException('گفتگو پیدا نشد');
+    return { id: direct.id, e2ee: direct.e2ee };
+  }
+
+  // The photos, files and links a chat's profile shows. `target` is either a
+  // group's conversation id or a peer's user id — the two ways the clients
+  // already address a chat — and neither is trusted: membership in whatever it
+  // resolves to is what authorizes the read.
+  //
+  // An encrypted conversation has no readable rows to list, so the answer says
+  // so rather than returning an empty list, which a client would render as "this
+  // chat has no photos" for a chat that has thousands of them.
+  async sharedItems(
+    target: string,
+    requesterId: string,
+    kind: SharedKind,
+    take = SHARED_PAGE,
+    before?: string,
+  ) {
+    const conversation = await this.resolveSharedTarget(target, requesterId);
+    if (conversation.e2ee) return { kind, encrypted: true, items: [], nextCursor: null };
+
+    const cursor = before ? new Date(before) : null;
+
+    if (kind === 'links') {
+      // Which messages carry a link is a question about the text, so it is asked
+      // of the database rather than answered by paging through every message.
+      // A JS Date bound into raw SQL is written in the server's local zone while
+      // these columns hold naive UTC, so the cursor goes in as a UTC wall time.
+      const older = cursor
+        ? Prisma.sql`AND m."createdAt" < ${cursor.toISOString().replace('T', ' ').replace('Z', '')}::timestamp`
+        : Prisma.empty;
+      const rows = await this.prisma.$queryRaw<LinkRow[]>(Prisma.sql`
+        SELECT m.id, m.text, m."createdAt", m."senderId",
+               COALESCE(NULLIF(u."displayName", ''), u.username) AS "senderName"
+        FROM messages m
+        JOIN users u ON u.id = m."senderId"
+        WHERE m."conversationId" = ${conversation.id}
+          AND m."deletedAt" IS NULL
+          AND m.type = 'TEXT'
+          AND m.text ~ 'https?://'
+          ${older}
+        ORDER BY m."createdAt" DESC, m.id DESC
+        LIMIT ${take + 1}
+      `);
+
+      // The page boundary is a message, never a link inside one, so a message
+      // with several links returns all of them and none of them are skipped.
+      const hasMore = rows.length > take;
+      const items = rows.slice(0, take).flatMap(row => extractLinks(row.text).map((url, index) => ({
+        id:        `${row.id}-${index}`,
+        kind:      'link',
+        url,
+        text:      row.text,
+        createdAt: row.createdAt,
+        sender:    { id: row.senderId, name: row.senderName },
+      })));
+      return { kind, encrypted: false, items, nextCursor: hasMore ? rows[take - 1].createdAt.toISOString() : null };
+    }
+
+    const rows = await this.prisma.message.findMany({
+      where: {
+        conversationId: conversation.id,
+        deletedAt:      null,
+        type:           { in: SHARED_TYPES[kind] },
+        ...(cursor ? { createdAt: { lt: cursor } } : {}),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take:    take + 1,
+      select:  {
+        id: true, type: true, fileUrl: true, fileName: true, fileSize: true, createdAt: true,
+        sender: { select: { id: true, username: true, displayName: true } },
+      },
+    });
+
+    const hasMore = rows.length > take;
+    return {
+      kind,
+      encrypted: false,
+      items: rows.slice(0, take).map(row => ({
+        id:        row.id,
+        kind,
+        type:      row.type.toLowerCase(),
+        url:       signedFileUrl(row.fileUrl),
+        name:      row.fileName,
+        size:      row.fileSize,
+        createdAt: row.createdAt,
+        sender:    { id: row.sender.id, name: row.sender.displayName || row.sender.username },
+      })),
+      nextCursor: hasMore ? rows[take - 1].createdAt.toISOString() : null,
+    };
   }
 
   private normalizeOutgoingMessage(data: {

@@ -4,6 +4,56 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.17] - 2026-10-22
+
+### Added
+- **The profile panel shows what a chat contains.** Under the identity rows, a
+  tab strip lists the conversation's **media**, **files** and **links**, the way
+  Telegram's profile does: photos and videos as a three-column grid that opens a
+  full-size picture when a cell is tapped, files as rows with their name, size,
+  sender and date and a download link, links as rows with the host, the sentence
+  they appeared in and who sent them. A tab is fetched the first time it is
+  opened, never all three at once.
+- **`GET /api/messages/shared/:target?kind=media|files|links`** answers those
+  lists. `:target` is a conversation id for a group and the peer's id for a
+  direct chat, which is how the rest of the app already addresses a private
+  conversation, so the same rule keeps working for both. Membership is checked
+  before anything is read, an outsider gets `403` and an unknown target `404`,
+  and the kind is validated (`400` for anything else, and for a page over 200).
+  Media and file rows carry a freshly signed `/uploads` URL, so a list never
+  hands out a link that outlives the signature.
+- **Links are read out of the transcript, not stored twice.** There is no link
+  table: the server takes the messages that contain a URL and cuts every
+  `http(s)` run out of its text, dropping the punctuation a Persian or English
+  sentence puts after it. Because one message can hold two links, the page
+  cursor is always a message boundary, so a message is never split across two
+  pages and a repeated fetch cannot show the same link twice or skip one.
+- **An encrypted chat says so instead of looking empty.** The server can only
+  hold ciphertext there, so it answers `encrypted: true` with no items and the
+  panel explains that what follows came from this device, then lists the photos,
+  files and links it can actually decrypt from the local transcript. Reading a
+  blank grid as "no photos were ever sent" would be a lie about a chat that is
+  full of them.
+
+### Changed
+- `ChatProfilePanel` grows a shared section and a picture viewer of its own, and
+  takes the active chat's messages so the encrypted branch can be built from
+  them. `src/services/api.js` gains `getSharedItems`.
+
+Verified in the development browser as the seeded account: the group media tab
+showed 3 thumbnails and opened one full-size, the files tab listed
+`لیست-کارها.txt` at 263 bytes and its signed link returned 200 with exactly that
+many bytes, and a message holding 2 URLs produced 2 link rows with the trailing
+`.` and `)` stripped. A direct chat's media tab listed the photo sent into it.
+Escape closes the picture before it closes the panel, and the viewer takes focus
+when it opens. The test message, the test photo and its file on disk were deleted
+afterwards, and the panel then read empty again. `npm run test:e2e` in the
+backend passes 44/44 against the local database, 2 of them new for this endpoint;
+lint and build are clean. Two paths were not exercised in the browser: the
+«نمایش بیشتر» button, which needs 25 shared items in one chat and is covered by
+the paging assertions in the e2e test instead, and the encrypted branch, because
+the seeded account holds no encrypted chat and its peers register no devices.
+
 ## [1.1.16] - 2026-10-22
 
 ### Added

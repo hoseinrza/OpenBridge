@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { updateGroup, uploadFile, resolveUrl, uploadPath } from '../../services/api.js';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { updateGroup, uploadFile, resolveUrl, uploadPath, getSharedItems } from '../../services/api.js';
 import Avatar from '../ui/Avatar.jsx';
+import EncryptedMedia from '../Chat/EncryptedMedia.jsx';
+import { formatSize } from '../../utils/format.js';
 import './ChatProfilePanel.css';
 
 const STATUS_TEXT = { online: 'آنلاین', idle: 'غیرفعال', dnd: 'مشغول', offline: 'آفلاین' };
@@ -11,12 +13,71 @@ const NAME_MIN = 2;
 const NAME_MAX = 60;
 const DESCRIPTION_MAX = 205;
 
+const SHARED_PAGE = 24;
+const SHARED_TABS = [
+  { kind: 'media', label: 'رسانه',    icon: 'fa-photo-film',  empty: 'تصویری در این گفتگو نیست' },
+  { kind: 'files', label: 'فایل‌ها',  icon: 'fa-file-lines',  empty: 'فایلی در این گفتگو نیست' },
+  { kind: 'links', label: 'لینک‌ها',  icon: 'fa-link',        empty: 'لینکی در این گفتگو نیست' },
+];
+
+// The same rule the server applies to a plaintext transcript: a link runs to the
+// first space or quote, and the punctuation a sentence puts after it is dropped.
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'`]+/gi;
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}«»"'`]+$/;
+
+function extractLinks(text) {
+  return (text?.match(URL_IN_TEXT) ?? []).map(raw => raw.replace(TRAILING_PUNCTUATION, '')).filter(Boolean);
+}
+
+function linkHost(url) {
+  return url.replace(/^https?:\/\//, '').split('/')[0];
+}
+
+function sharedDate(value) {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString('fa-IR', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+// An encrypted chat has nothing on the server to ask, so its lists are built
+// from what this device has already decrypted. Newest first, like the server's
+// own pages, and a photo is carried as the descriptor its bubble opens.
+function localLists(messages) {
+  const media = [];
+  const files = [];
+  const links = [];
+
+  for (const m of messages) {
+    const meta = { createdAt: m.createdAt, sender: m.side === 'mine' ? 'شما' : m.sender };
+    if (m.attachment) {
+      const item = { ...meta, key: m.id, name: m.name, size: m.size, attachment: m.attachment };
+      (m.type === 'image' ? media : files).push(item);
+    } else if (m.type === 'image') {
+      media.push({ ...meta, key: m.id, src: m.src, name: m.name, size: m.size });
+    } else if (m.type === 'file') {
+      files.push({ ...meta, key: m.id, src: m.src, name: m.name, size: m.size });
+    }
+    for (const url of extractLinks(m.text)) links.push({ ...meta, key: `${m.id}-${url}`, url, text: m.text });
+  }
+
+  return {
+    media: media.reverse(),
+    files: files.reverse(),
+    links: links.reverse(),
+  };
+}
+
+function pageState() {
+  return { status: 'loading', items: [], cursor: null, error: '' };
+}
+
 function joinedAt(dateStr) {
   if (!dateStr) return null;
   return new Date(dateStr).toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-export default function ChatProfilePanel({ chat, currentUser, encrypted, encryptionNote, onClose, onUpdated }) {
+export default function ChatProfilePanel({
+  chat, currentUser, encrypted, encryptionNote, messages = [], onClose, onUpdated,
+}) {
   const isGroup = chat.kind === 'group';
   const myRole = isGroup
     ? chat.participants?.find(p => p.id === currentUser?.id)?.role ?? 'MEMBER'
@@ -31,23 +92,78 @@ export default function ChatProfilePanel({ chat, currentUser, encrypted, encrypt
   const [saving,       setSaving]       = useState(false);
   const [uploading,    setUploading]    = useState(false);
   const [error,        setError]        = useState('');
+  const [tab,          setTab]          = useState('media');
+  const [pages,        setPages]        = useState({});
+  const [viewer,       setViewer]       = useState(null);
 
   const closeRef = useRef(null);
   const nameRef = useRef(null);
   const fileInputRef = useRef(null);
+  const viewerRef = useRef(null);
+
+  const local = useMemo(() => (encrypted ? localLists(messages) : null), [encrypted, messages]);
 
   // The panel is remounted per chat, so nothing from the previous one survives.
   useEffect(() => { closeRef.current?.focus(); }, []);
 
   useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    function onKey(e) {
+      if (e.key !== 'Escape') return;
+      // A picture being viewed swallows the key first: closing it should not
+      // close the panel behind it.
+      if (viewer) setViewer(null); else onClose();
+    }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, viewer]);
 
   useEffect(() => {
     if (editing) nameRef.current?.focus();
   }, [editing]);
+
+  const loadPage = useCallback(async (kind, before) => {
+    setPages(prev => ({ ...prev, [kind]: { ...(prev[kind] ?? pageState()), status: before ? 'more' : 'loading' } }));
+    try {
+      const data = await getSharedItems(chat.id, kind, before, SHARED_PAGE);
+      // Shaped like the lists this device builds for an encrypted chat, so the
+      // panel renders one kind of row no matter which produced it.
+      const items = data.items.map(item => ({
+        ...item,
+        key:    item.id,
+        // A signed upload path is relative to the API, not to this page.
+        src:    item.kind === 'link' ? undefined : resolveUrl(item.url),
+        sender: item.sender?.name ?? null,
+      }));
+      setPages(prev => {
+        const was = prev[kind] ?? pageState();
+        return {
+          ...prev,
+          [kind]: {
+            status: 'ready',
+            items:    before ? [...was.items, ...items] : items,
+            cursor:   data.nextCursor ?? null,
+            encrypted: data.encrypted,
+          },
+        };
+      });
+    } catch (err) {
+      setPages(prev => ({
+        ...prev,
+        [kind]: { ...(prev[kind] ?? pageState()), status: 'error', error: err.message || 'دریافت فهرست ناموفق بود' },
+      }));
+    }
+  }, [chat.id]);
+
+  // A tab is fetched the first time it is opened, never all three at once.
+  useEffect(() => {
+    if (encrypted || pages[tab]) return;
+    loadPage(tab);
+  }, [tab, encrypted, pages, loadPage]);
+
+  // The dialog is only reachable by keyboard once it holds focus.
+  useEffect(() => {
+    if (viewer) viewerRef.current?.focus();
+  }, [viewer]);
 
   function startEditing() {
     setName(chat.name ?? '');
@@ -125,6 +241,11 @@ export default function ChatProfilePanel({ chat, currentUser, encrypted, encrypt
   }
 
   const displayName = removeAvatar ? null : avatar;
+  const shared = SHARED_TABS.find(entry => entry.kind === tab);
+  const page = pages[tab] ?? pageState();
+  const sharedItems = encrypted ? (local?.[tab] ?? []) : page.items;
+  // A local list is never in flight: it is whatever this device already holds.
+  const sharedStatus = encrypted ? 'ready' : page.status;
 
   return (
     <aside className="chat-profile" aria-label={isGroup ? 'اطلاعات گروه' : 'اطلاعات مخاطب'}>
@@ -284,6 +405,111 @@ export default function ChatProfilePanel({ chat, currentUser, encrypted, encrypt
               <span>{encrypted ? 'رمزنگاری سرتاسری' : 'بدون رمزنگاری'}</span>
             </div>
 
+            <section className="panel-shared" aria-label="محتوای گفتگو">
+              <div className="panel-tabs" role="tablist" aria-label="دسته‌بندی محتوای گفتگو">
+                {SHARED_TABS.map((entry) => (
+                  <button
+                    key={entry.kind}
+                    type="button"
+                    role="tab"
+                    id={`panel-tab-${entry.kind}`}
+                    aria-selected={tab === entry.kind}
+                    className={`panel-tab ${tab === entry.kind ? 'is-active' : ''}`}
+                    onClick={() => setTab(entry.kind)}
+                  >
+                    <i className={`fas ${entry.icon}`} aria-hidden="true" />
+                    {entry.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="panel-tabpanel" role="tabpanel" aria-labelledby={`panel-tab-${tab}`}>
+                {encrypted && (
+                  <p className="panel-shared-note" role="note">
+                    <i className="fas fa-lock" aria-hidden="true" />
+                    <span>{isGroup
+                      ? 'این فهرست پیام‌هایی است که روی همین دستگاه رمزگشایی شده؛ سرور هیچ‌کدام را نمی‌بیند.'
+                      : 'این فهرست فقط پیام‌هایی را نشان می‌دهد که روی همین دستگاه رمزگشایی شده.'}</span>
+                  </p>
+                )}
+
+                {sharedStatus === 'loading' && (
+                  <p className="panel-shared-busy" role="status">
+                    <i className="fas fa-spinner fa-spin" aria-hidden="true" />
+                    در حال بارگذاری…
+                  </p>
+                )}
+
+                {sharedStatus === 'error' && (
+                  <div className="panel-shared-error">
+                    <span>{page.error}</span>
+                    <button type="button" className="btn btn-secondary" onClick={() => loadPage(tab)}>
+                      تلاش دوباره
+                    </button>
+                  </div>
+                )}
+
+                {sharedStatus === 'ready' && sharedItems.length === 0 && (
+                  <p className="panel-shared-empty">{shared.empty}</p>
+                )}
+
+                {sharedItems.length > 0 && tab === 'media' && (
+                  <div className="panel-grid">
+                    {sharedItems.map(item => (
+                      <MediaCell key={item.key ?? item.id} item={item} onOpen={setViewer} />
+                    ))}
+                  </div>
+                )}
+
+                {sharedItems.length > 0 && tab === 'files' && (
+                  <ul className="panel-list">
+                    {sharedItems.map(item => (
+                      <li key={item.key ?? item.id} className="panel-row">
+                        <FileRow item={item} />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {sharedItems.length > 0 && tab === 'links' && (
+                  <ul className="panel-list">
+                    {sharedItems.map(item => (
+                      <li key={item.key ?? item.id} className="panel-row">
+                        <span className="panel-row-icon" aria-hidden="true">
+                          <i className="fas fa-link" />
+                        </span>
+                        <a
+                          className="panel-row-main"
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={item.text ?? item.url}
+                        >
+                          <span className="panel-row-title" dir="ltr">{linkHost(item.url)}</span>
+                          {item.text && <span className="panel-row-sub">{item.text}</span>}
+                          <span className="panel-row-meta">
+                            {item.sender ?? '—'} · {sharedDate(item.createdAt)}
+                          </span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {!encrypted && page.cursor && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost panel-shared-more"
+                    onClick={() => loadPage(tab, page.cursor)}
+                    disabled={sharedStatus === 'more'}
+                  >
+                    <i className={`fas ${sharedStatus === 'more' ? 'fa-spinner fa-spin' : 'fa-chevron-down'}`} aria-hidden="true" />
+                    نمایش بیشتر
+                  </button>
+                )}
+              </div>
+            </section>
+
             {error && (
               <div className="field-error" role="alert">
                 <i className="fas fa-triangle-exclamation" aria-hidden="true" />
@@ -316,6 +542,81 @@ export default function ChatProfilePanel({ chat, currentUser, encrypted, encrypt
           </section>
         )}
       </div>
+
+      {viewer && (
+        <div className="panel-viewer" role="dialog" aria-modal="true" aria-label="تصویر در اندازه کامل">
+          <button
+            type="button"
+            className="icon-btn panel-viewer-close"
+            ref={viewerRef}
+            onClick={() => setViewer(null)}
+            aria-label="بستن تصویر"
+          >
+            <i className="fas fa-xmark" aria-hidden="true" />
+          </button>
+          <img src={viewer} alt="تصویر ارسالی" className="panel-viewer-image" />
+        </div>
+      )}
     </aside>
+  );
+}
+
+// A thumbnail is either bytes this device can address directly or a descriptor
+// it has to open itself, and only the second case owns an object URL — so the
+// encrypted cell stays the component that makes and releases it.
+function MediaCell({ item, onOpen }) {
+  if (item.attachment) {
+    return (
+      <div className="panel-cell">
+        <EncryptedMedia
+          attachment={item.attachment}
+          kind="image"
+          name={item.name}
+          size={item.size}
+          onOpen={onOpen}
+        />
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="panel-cell"
+      onClick={() => onOpen(item.src)}
+      aria-label={`بازکردن ${item.name || 'تصویر'} در اندازه کامل`}
+    >
+      <img src={item.src} alt={item.name || 'تصویر ارسالی'} loading="lazy" />
+    </button>
+  );
+}
+
+function FileRow({ item }) {
+  const meta = `${item.sender ?? '—'} · ${sharedDate(item.createdAt)}`;
+
+  if (item.attachment) {
+    return (
+      <div className="panel-row-stack">
+        <EncryptedMedia attachment={item.attachment} kind="file" name={item.name} size={item.size} />
+        <span className="panel-row-meta">{meta}</span>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <span className="panel-row-icon" aria-hidden="true">
+        <i className="fas fa-file-arrow-down" />
+      </span>
+      <a
+        className="panel-row-main"
+        href={item.src}
+        download={item.name || undefined}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <span className="panel-row-title" title={item.name}>{item.name || 'فایل'}</span>
+        <span className="panel-row-meta">{formatSize(item.size)} · {meta}</span>
+      </a>
+    </>
   );
 }

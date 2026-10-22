@@ -9,6 +9,7 @@ import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 import { AddParticipantDto } from './dto/add-participant.dto';
 import { PaginationQueryDto } from './dto/pagination-query.dto';
+import { SharedQueryDto } from './dto/shared-query.dto';
 import { DirectPeerDto } from './dto/direct-peer.dto';
 import { EnvelopeQueryDto } from './dto/envelope-query.dto';
 
@@ -67,6 +68,18 @@ export class MessagesController {
       query.take ?? 50,
       query.skip ?? 0,
     );
+  }
+
+  // What a chat's profile lists as its media, files and links. Addressed by a
+  // group's conversation id or by a peer's user id, because those are the two
+  // ways the clients already name a chat.
+  @Get('shared/:target')
+  sharedItems(
+    @Request()                    req,
+    @Param('target', ParseUUIDPipe) target: string,
+    @Query()                      query: SharedQueryDto,
+  ) {
+    return this.messages.sharedItems(target, req.user.id, query.kind, query.take, query.before);
   }
 
   @Post('groups/:conversationId/participants')

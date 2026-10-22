@@ -299,6 +299,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           currentUser={currentUser}
           encrypted={encrypted}
           encryptionNote={encryptionNote}
+          messages={messages}
           onClose={() => setProfileOpen(false)}
           onUpdated={handleGroupUpdated}
         />

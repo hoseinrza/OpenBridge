@@ -502,6 +502,139 @@ test('the group owner edits its name, bio and photo and members are told', async
   assert.equal(outsider.status, 403, 'an outsider cannot edit the group');
 });
 
+test('a chat lists its shared photos, files and links for its members only', async () => {
+  const { alice, bob, eve } = global.__ctx;
+  const unknownTarget = '0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f';
+
+  // Its own group, so every count below describes what this test put into it
+  // rather than what the earlier ones left in the shared fixture.
+  const chat = await api('/messages/groups', {
+    method: 'POST',
+    token:  alice.token,
+    body:   { name: `Shared group ${suffix}`, memberIds: [bob.user.id] },
+  });
+  assert.equal(chat.status, 201, 'shared-list group');
+  const id = chat.data.id;
+
+  const photo = await upload(alice.token, PNG_1X1, 'image/png', 'shared-photo.png');
+  const note  = await upload(alice.token, Buffer.from('shared file body'), 'text/plain', 'shared-notes.txt');
+  assert.equal(photo.status, 201, 'photo upload');
+  assert.equal(note.status, 201, 'file upload');
+
+  const payloads = [
+    { conversationId: id, type: 'image', fileUrl: photo.data.url, fileName: 'shared-photo.png', fileSize: PNG_1X1.length },
+    { conversationId: id, type: 'file',  fileUrl: note.data.url,  fileName: 'shared-notes.txt', fileSize: 16 },
+    { conversationId: id, type: 'text',  text: 'Look: https://example.com/a and https://example.com/b.' },
+  ];
+  for (const payload of payloads) {
+    const ack = await emitAck(sockets.alice, 'message:send', payload);
+    assert.equal(ack.ok, true, `send a ${payload.type} message`);
+  }
+  // A link somewhere else in this account's chats must stay out of this list.
+  const elsewhere = await emitAck(sockets.alice, 'message:send', {
+    toId: bob.user.id, type: 'text', text: 'https://example.com/direct-only',
+  });
+  assert.equal(elsewhere.ok, true, 'direct message carrying a link');
+
+  const media = await api(`/messages/shared/${id}?kind=media`, { token: bob.token });
+  assert.equal(media.status, 200, 'a member reads the photo list');
+  assert.equal(media.data.encrypted, false, 'this one the server can see');
+  assert.deepEqual(media.data.items.map(item => item.name), ['shared-photo.png']);
+  assert.match(
+    media.data.items[0].url,
+    /^\/uploads\/.+\.png\?exp=\d+&sig=[a-f0-9]{64}$/,
+    'thumbnails are signed urls',
+  );
+  assert.equal(media.data.items[0].sender.id, alice.user.id, 'and the list says who sent it');
+
+  const files = await api(`/messages/shared/${id}?kind=files`, { token: alice.token });
+  assert.deepEqual(files.data.items.map(item => item.name), ['shared-notes.txt']);
+  assert.equal(files.data.items[0].size, 16, 'a file row carries its size');
+
+  const links = await api(`/messages/shared/${id}?kind=links`, { token: alice.token });
+  assert.deepEqual(
+    links.data.items.map(item => item.url),
+    ['https://example.com/a', 'https://example.com/b'],
+    'one row per link, in the order they were written',
+  );
+  assert.equal(links.data.items[0].text.includes('https://example.com/a'), true, 'the message is kept as context');
+  assert.equal(
+    links.data.items.some(item => item.url.includes('direct-only')),
+    false,
+    'another conversation holds its own links',
+  );
+
+  assert.equal(
+    (await api(`/messages/shared/${id}?kind=media`, { token: eve.token })).status,
+    403,
+    'an outsider reads nothing',
+  );
+
+  // A direct chat is addressed by the peer, exactly like its history is.
+  const byPeer = await api(`/messages/shared/${bob.user.id}?kind=links`, { token: alice.token });
+  assert.deepEqual(byPeer.data.items.map(item => item.url), ['https://example.com/direct-only'], 'peer-addressed list');
+
+  assert.equal(
+    (await api(`/messages/shared/${unknownTarget}?kind=media`, { token: alice.token })).status,
+    404,
+    'a target that is neither a chat nor a peer',
+  );
+  assert.equal((await api(`/messages/shared/${id}?kind=bogus`, { token: alice.token })).status, 400, 'kind is one of three');
+  assert.equal((await api(`/messages/shared/${id}?kind=media&take=900`, { token: alice.token })).status, 400, 'page size is capped');
+
+  // Then walk the same list in pages: the newest order has to survive the cursor.
+  for (let i = 0; i < 3; i++) {
+    const extra = await upload(alice.token, PNG_1X1, 'image/png', `more-${i}.png`);
+    const ack = await emitAck(sockets.alice, 'message:send', {
+      conversationId: id,
+      type:           'image',
+      fileUrl:        extra.data.url,
+      fileName:       `more-${i}.png`,
+      fileSize:       PNG_1X1.length,
+    });
+    assert.equal(ack.ok, true, 'an extra photo');
+  }
+
+  const page1 = await api(`/messages/shared/${id}?kind=media&take=2`, { token: alice.token });
+  assert.equal(page1.data.items.length, 2, 'a page holds what was asked for');
+  assert.equal(typeof page1.data.nextCursor, 'string', 'and says where to carry on');
+  const page2 = await api(
+    `/messages/shared/${id}?kind=media&take=2&before=${encodeURIComponent(page1.data.nextCursor)}`,
+    { token: alice.token },
+  );
+  const names = [...page1.data.items, ...page2.data.items].map(item => item.name);
+  assert.equal(new Set(names).size, 4, 'pages neither repeat nor skip');
+  assert.deepEqual(
+    names,
+    ['more-2.png', 'more-1.png', 'more-0.png', 'shared-photo.png'],
+    'newest first across the cursor',
+  );
+});
+
+test('an encrypted chat has nothing for the server to list', async () => {
+  const { alice, bob, eve } = global.__ctx;
+
+  const enc = await api('/messages/e2ee/group', {
+    method: 'POST',
+    token:  alice.token,
+    body:   { name: `Shared encrypted ${suffix}`, memberIds: [bob.user.id] },
+  });
+  assert.equal(enc.status, 201, 'encrypted group');
+
+  for (const kind of ['media', 'files', 'links']) {
+    const listed = await api(`/messages/shared/${enc.data.id}?kind=${kind}`, { token: alice.token });
+    assert.equal(listed.status, 200, `${kind} list`);
+    assert.equal(listed.data.encrypted, true, `${kind} says the server cannot see the transcript`);
+    assert.deepEqual(listed.data.items, [], `${kind} is empty rather than guessed at`);
+  }
+
+  assert.equal(
+    (await api(`/messages/shared/${enc.data.id}?kind=media`, { token: eve.token })).status,
+    403,
+    'encryption is not what authorizes a reader',
+  );
+});
+
 test('non-members cannot read, write, react or type in a group', async () => {
   const { eve } = global.__ctx;
 

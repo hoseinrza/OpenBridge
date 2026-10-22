@@ -232,6 +232,17 @@ export function updateGroup(conversationId, data) {
   return request('PATCH', `/messages/groups/${conversationId}`, data);
 }
 
+// The photos, files and links a conversation profile lists. `target` is a group's
+// conversation id or a peer's user id, which is how this client names a chat
+// everywhere else. An encrypted conversation answers `encrypted: true` with an
+// empty list, because the server holds ciphertext and will not guess at it.
+export function getSharedItems(target, kind, before, take) {
+  const params = new URLSearchParams({ kind });
+  if (take) params.set('take', String(take));
+  if (before) params.set('before', before);
+  return request('GET', `/messages/shared/${target}?${params.toString()}`);
+}
+
 export function fetchGroupMessages(conversationId, skip = 0) {
   return request('GET', `/messages/groups/${conversationId}?take=50&skip=${skip}`);
 }
