@@ -4,6 +4,53 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.1.18] - 2026-10-22
+
+### Added
+- **A chat's profile is a screen on the phone too.** Tapping the header of a
+  conversation — the name and its member/online line, which is now a button
+  called `ChatHeaderTitle` — pushes «اطلاعات گفتگو». The screen opens on the row
+  the chat list already had, then asks the server for the fields a list leaves
+  out, so a contact's bio and the day the account joined arrive without a
+  second navigation. Below the avatar: member count, `@username` and online
+  state for a person, description and join date for a group, and a row that says
+  whether the conversation is end-to-end encrypted. A group lists its members
+  with their role («مالک», «مدیر», «شما»).
+- **The same three tabs the web panel got.** رسانه / فایل‌ها / لینک‌ها read
+  `GET /api/messages/shared/:target`, one fetch the first time a tab is opened.
+  Media is a three-column grid that opens a full-size picture in a modal whose
+  close button sits below the status bar; a file row shows Persian-digit size,
+  sender and date and opens its freshly signed download URL; a link row shows
+  the host, the sentence it appeared in and opens that address. «نمایش بیشتر»
+  appends the next page, and a failed page offers «تلاش دوباره» instead of
+  going blank.
+- **Owners and admins edit the group from the phone.** «ویرایش نام و توضیح»
+  swaps to two inputs with the same 2/60/205-character bounds the server
+  enforces, so a draft that would be rejected is caught before the round trip.
+  Only the fields that actually changed are sent, and a rename done on another
+  device updates this screen through the `group:updated` broadcast.
+- `mobile/src/utils/persian.js` renders Latin digits as Persian ones (and `.`
+  before a digit as `٫`), so counts and sizes on this screen match the rest of
+  the app. `src/services/api.js` gains `updateGroup` and `fetchShared`.
+
+### Notes on what this does not do
+- **A group photo still cannot be changed from the phone.** The app has no image
+  picker dependency and adding one is a native change, not a screen change, so
+  the avatar stays editable in the web panel, which already uploads it.
+- **An encrypted chat shows an explanation, not a list.** The phone holds no
+  decryptable transcript, so it says the lists are in the web version and does
+  not call the endpoint at all.
+
+Verified with Jest: 47/47 across 7 suites, 11 of them new (`ChatProfileScreen`
+9, `ChatHeaderTitle` 2) covering identity rows, member roles, one-fetch-per-tab,
+paging, the file/link `Linking` targets, the encrypted branch, an admin saving
+only the changed field, a plain member seeing no edit button, a too-short name
+being refused, and the `group:updated` broadcast. On-device proof is CI-only:
+`.maestro/auth-and-chat.yaml` now taps `chat-header-profile`, asserts
+`profile-screen`, switches to the files tab and asserts the links tab before
+taking `e2e-chat-profile` and returning to the composer. No emulator exists on
+this machine, so those steps have not been run here.
+
 ## [1.1.17] - 2026-10-22
 
 ### Added

@@ -40,6 +40,9 @@ export function normalizeUser(u) {
     bio:       u.bio ?? '',
     status:    u.online ? 'online' : 'offline',
     createdAt: u.createdAt,
+    // Carried through only because a group's member list shows it; a plain
+    // user record has none.
+    role:      u.role ?? null,
     unread:    0,
   };
 }
@@ -50,11 +53,13 @@ export function normalizeGroup(g) {
     id:           g.id,
     kind:         'group',
     name:         g.name,
+    description:  g.description ?? '',
     avatar:       resolveUrl(g.avatar),
     memberCount:  g.participants?.length ?? 0,
     participants: (g.participants ?? []).map(normalizeUser).filter(Boolean),
     unread:       g.unread ?? 0,
     encrypted:    g.e2ee === true,
+    createdAt:    g.createdAt,
     updatedAt:    g.updatedAt,
     status:       'group',
   };
@@ -206,6 +211,17 @@ export function fetchE2eeState(peer) {
 
 export function createGroup(name, memberIds) {
   return request('POST', '/messages/groups', { name, memberIds });
+}
+
+export function updateGroup(conversationId, patch) {
+  return request('PATCH', `/messages/groups/${conversationId}`, patch);
+}
+
+// A chat profile's shared content. `target` is a group's conversation id or a
+// peer's user id — the two ways a chat is already named here.
+export function fetchShared(target, kind, before) {
+  const query = `kind=${kind}&take=24${before ? `&before=${encodeURIComponent(before)}` : ''}`;
+  return request('GET', `/messages/shared/${target}?${query}`);
 }
 
 // ── Upload (wired up in Phase 6) ───────────────────────

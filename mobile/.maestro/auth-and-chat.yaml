@@ -31,3 +31,15 @@ appId: com.openbridge.mobile
 - assertVisible:
     id: "reaction-chip-0"
 - takeScreenshot: "e2e-chat-after-reaction"
+- tapOn:
+    id: "chat-header-profile"
+- assertVisible:
+    id: "profile-screen"
+- tapOn:
+    id: "profile-tab-files"
+- assertVisible:
+    id: "profile-tab-links"
+- takeScreenshot: "e2e-chat-profile"
+- back
+- assertVisible:
+    id: "composer-input"

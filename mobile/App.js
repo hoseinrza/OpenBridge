@@ -12,6 +12,8 @@ import { SocketProvider } from './src/context/SocketContext';
 import LoginScreen from './src/screens/LoginScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatScreen from './src/screens/ChatScreen';
+import ChatProfileScreen from './src/screens/ChatProfileScreen';
+import ChatHeaderTitle from './src/components/ChatHeaderTitle';
 import NewGroupScreen from './src/screens/NewGroupScreen';
 import ContactsScreen from './src/screens/ContactsScreen';
 
@@ -51,7 +53,19 @@ function RootNavigator() {
           <Stack.Screen
             name="Chat"
             component={ChatScreen}
-            options={({ route }) => ({ title: route.params?.peer?.name ?? 'گفتگو' })}
+            options={({ route, navigation }) => ({
+              headerTitle: () => (
+                <ChatHeaderTitle
+                  peer={route.params?.peer}
+                  onPress={() => navigation.navigate('ChatProfile', { peer: route.params?.peer })}
+                />
+              ),
+            })}
+          />
+          <Stack.Screen
+            name="ChatProfile"
+            component={ChatProfileScreen}
+            options={{ title: 'اطلاعات گفتگو' }}
           />
           <Stack.Screen name="NewGroup" component={NewGroupScreen} options={{ title: 'گروه جدید' }} />
           <Stack.Screen name="Contacts" component={ContactsScreen} options={{ title: 'مخاطبین' }} />
