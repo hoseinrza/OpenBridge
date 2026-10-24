@@ -4,6 +4,28 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.2.2] - 2026-10-24
+
+### Security
+- **audit تولیدی وب پاک شد.** `npm audit --omit=dev --audit-level=high` روی
+  ریشه الان صفر است: `@capacitor/android` و `@capacitor/core` به 6.2.2،
+  `react-router`/`react-router-dom` به 7.18.4، `socket.io-parser` به 4.2.7،
+  `engine.io-client` به 6.6.7 و `ws` به 8.21.3 رفتند. هیچ API برنامه‌ای عوض
+  نشد.
+- **بک‌اند بدون ارتقای major بهبود یافت.** همان audit در `backend` از ۱۷ مورد
+  به ۱۱ مورد رسید و `socket.io`/`ws` به نسخهٔ امن رفتند. باقی موارد
+  (`@nestjs/platform-express`، `body-parser`، `multer`، و `bcrypt` →
+  `@mapbox/node-pre-gyp` → `tar`) بدون Nest 11 / bcrypt 6 بسته نمی‌شوند و
+  عمداً اعمال نشدند. `tar` فقط در زمان نصب dependency استفاده می‌شود، نه در
+  runtime؛ job audit در CI هم `continue-on-error` است.
+- audit کامل (بدون `--omit=dev`) هنوز موارد dev مثل `@capacitor/cli`/webpack
+  را نشان می‌دهد؛ دستور مورد نظر پروژه با `--omit=dev` اجرا می‌شود.
+
+### Verified
+- `npm audit --omit=dev --audit-level=high` در ریشه → 0.
+- `npm run lint` و `npm run build` وب؛ `nest build`؛
+  `backend && npm run test:e2e` → 62/62؛ `npm run test:e2ee` → 5/5.
+
 ## [1.2.1] - 2026-10-24
 
 ### Changed
