@@ -4,6 +4,45 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.3.1] - 2026-10-24
+
+### Fixed
+- **پیام صوتی در فهرست گفتگوها دیگر نام فایلش را فریاد نمی‌زند.** پیش‌نمایش یک
+  گفتگوی رمزنگاری‌شده روی همین دستگاه از آخرین پیامِ رمزگشایی‌شده ساخته می‌شود، و
+  طبقه‌بندش فقط عکس و سند را می‌شناخت؛ برای همین یک پیام صوتی همان اسمی را که ضبط‌کننده
+  به فایل داده بود وسط فهرست گفتگوها می‌نوشت («voice-message.weba»). حالا همان MIME را
+  می‌خواند که خودِ حباب می‌خواند: صوت «پیام صوتی»، ویدیو «ویدیو»، عکس «عکس»، و یک
+  سند واقعی نام خودش را نگه می‌دارد.
+- **«فایل‌ها» دیگر قفسهٔ پیام صوتی نیست.** پیام صوتی چیزی است که همان‌جا
+  گوش می‌دهی، نه سندی که نگهش داری، پس از فهرست فایل‌های پنل گفتگو بیرون رفت — هم از
+  فهرستی که این دستگاه برای گفتگوی رمزنگاری‌شده می‌سازد، هم از پرس‌وجوی خودِ سرور برای
+  گفتگوی غیررمزنگاری‌شده، که همان مسیری است صوتِ ضبط‌شده با موبایل از آن رد می‌شود.
+  خودِ پیام دست‌نخورده است: حباب، دکمهٔ پخش و طولش در ترنسکریپت می‌ماند.
+
+### Notes on what this does not do
+- فهرست گفتگوهای اپ موبایل اصلاً خط پیش‌نمایش ندارد، پس آنجا چیزی تغییر نکرد.
+- در گفتگوی رمزنگاری‌شده یک ویدیو هنوز حبابِ سند می‌گیرد و هنوز زیر «فایل‌ها» می‌آید؛
+  چیزی که درست شد فقط پیش‌نمایش فهرست گفتگوها بود.
+
+### Verified
+Verified with `npm run lint` and `npm run build` clean on the web client. Everything else
+was driven in the running app against the local database through real DOM events, read back
+as text and counts. The encrypted direct chat that produced the report now reads
+«امیرممممممم · ۱۰:۲۶ · پیام صوتی» where its row had read «voice-message.weba», and its
+panel's «فایل‌ها» tab answers «فایلی در این گفتگو نیست» while both voice bubbles stay in the
+transcript. The plaintext chat with مریم احمدی — whose two voice notes are real rows on the
+server — listed «voice-message.weba 2.0 کیلوبایت» and «… 1.2 کیلوبایت» under «فایل‌ها»
+against the backend process that predated the change, and lists nothing there after it; its
+chat-list row already said «پیام صوتی» before and still does, which is the server's own path.
+A group's «فایل‌ها» still lists «لیست-کارها.txt 263 بایت · نازنین شریفی · ۲۷ مهر ۱۴۰۵», so
+documents were not swept out with the voice notes. The server half was also A/B-tested with
+two temporary rows (one FILE, one AUDIO) written into a chat this account is not a member
+of: the old process returned both, the rebuilt one returned only the document, and both rows
+were deleted afterwards (0 left). Limits: the backend on :3000 had been started before this
+change and was restarted to serve it, so the "before" reading of the plaintext list came from
+that older process; no incoming voice note from another account was exercised, and no mobile
+device was touched.
+
 ## [1.3.0] - 2026-10-24
 
 ### Changed

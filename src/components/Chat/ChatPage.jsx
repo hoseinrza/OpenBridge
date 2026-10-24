@@ -29,9 +29,15 @@ function previewFromServer(lastMessage, myId) {
 function previewFromEncrypted(message, chat, myId) {
   if (!message) return null;
   const attachment = message.attachment ?? null;
+  const mime = attachment?.mime ?? '';
   return {
+    // The sender wrote the MIME type into its own descriptor, so the row can
+    // say what arrived instead of reciting the filename the recorder chose.
     type: attachment
-      ? (attachment.mime?.startsWith('image/') ? 'image' : 'file')
+      ? (mime.startsWith('image/') ? 'image'
+        : mime.startsWith('audio/') ? 'audio'
+        : mime.startsWith('video/') ? 'video'
+        : 'file')
       : 'text',
     text:       message.text ?? '',
     fileName:   attachment?.name ?? null,

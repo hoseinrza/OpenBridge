@@ -43,11 +43,12 @@ const lastMessageInclude = (userId: string) => ({
 // the number a recording client stops its own timer at.
 const MAX_DURATION_MS = 15 * 60 * 1000;
 
-// Photos and films in one list, documents and voice recordings in the other: the
-// split a profile panel is judged by, not the enum's own vocabulary.
+// Photos and films in one list, documents in the other. A voice recording is in
+// neither: it is a message you listen to where it stands, not a file you keep,
+// which is also how the encrypted lists this device builds for itself are split.
 const SHARED_TYPES = {
   media: ['IMAGE', 'VIDEO'],
-  files: ['FILE', 'AUDIO'],
+  files: ['FILE'],
 } satisfies Record<'media' | 'files', ('IMAGE' | 'VIDEO' | 'FILE' | 'AUDIO')[]>;
 
 type LinkRow = {

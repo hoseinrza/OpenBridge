@@ -51,7 +51,9 @@ function localLists(messages) {
 
   for (const m of messages) {
     const meta = { createdAt: m.createdAt, sender: m.side === 'mine' ? 'شما' : m.sender };
-    if (m.attachment) {
+    // A voice message is a message you listen to, not a document you keep, so
+    // it lives in the transcript and in none of this panel's lists.
+    if (m.attachment && m.type !== 'audio') {
       const item = { ...meta, key: m.id, name: m.name, size: m.size, attachment: m.attachment };
       (m.type === 'image' ? media : files).push(item);
     } else if (m.type === 'image') {
