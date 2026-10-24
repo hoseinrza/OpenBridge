@@ -784,6 +784,71 @@ test('uploads are type-checked and only readable through signed URLs', async () 
   assert.ok(clamScanCount >= 2, 'clean and infected uploads both reached clamd');
 });
 
+// A recording is a file the sender's own browser wrote, so the two things worth
+// testing here are the pair the upload filter checks (MIME type against the
+// extension a recorder chose) and the one number the sender knows that the file
+// itself may not: how long it was.
+test('a voice message carries the length its sender measured', async () => {
+  const { alice, bob } = global.__ctx;
+  const recording = Buffer.from('opaque-bytes-no-body-check-for-audio');
+
+  const weba = await upload(alice.token, recording, 'audio/webm', 'voice-message.weba');
+  assert.equal(weba.status, 201, 'a browser recording lands under the audio extension');
+  assert.equal(weba.data.type, 'AUDIO', 'the upload names it a voice message');
+  assert.match(weba.data.url, /^\/uploads\/[a-f0-9-]+\.weba$/);
+
+  const m4a = await upload(alice.token, recording, 'audio/mp4', 'voice-message.m4a');
+  assert.equal(m4a.status, 201, 'a phone recording lands too');
+
+  const crossed = await upload(alice.token, recording, 'audio/webm', 'voice-message.m4a');
+  assert.equal(crossed.status, 400, 'a MIME type that contradicts its own extension');
+
+  const delivered = waitEvent(sockets.bob, 'message:new', 4000);
+  const sent = await emitAck(sockets.alice, 'message:send', {
+    toId:       bob.user.id,
+    type:       'AUDIO',
+    fileUrl:    weba.data.url,
+    fileName:   'voice-message.weba',
+    fileSize:   weba.data.size,
+    durationMs: 4600,
+  });
+  assert.equal(sent.ok, true, 'the voice message is sent');
+  const voice = await delivered;
+  assert.equal(voice?.type, 'AUDIO');
+  assert.equal(voice?.durationMs, 4600, 'the length reaches every device with the message');
+
+  const played = await fetch(`${origin}${API_PREFIX}${voice.fileUrl}`);
+  assert.equal(played.status, 200, 'the signed address is readable');
+  assert.equal(played.headers.get('content-type'), 'audio/webm', 'as audio, not as bytes');
+  assert.match(played.headers.get('content-disposition') ?? '', /^inline/, 'without a download prompt');
+
+  for (const durationMs of [900_001, -5, '4600', 46.5]) {
+    const refused = await emitAck(sockets.alice, 'message:send', {
+      toId:       bob.user.id,
+      type:       'AUDIO',
+      fileUrl:    weba.data.url,
+      durationMs,
+    });
+    assert.equal(refused.ok, false, `a length of ${JSON.stringify(durationMs)} is refused`);
+    assert.match(refused.error, /مدت/);
+  }
+
+  // A picture has no length. The number is dropped rather than stored somewhere
+  // no bubble will ever show, and the sender is not punished for offering it.
+  const picture = await upload(alice.token, PNG_1X1, 'image/png', 'pixel.png');
+  assert.equal(picture.status, 201);
+  const pictureDelivered = waitEvent(sockets.bob, 'message:new', 4000);
+  const pictureSent = await emitAck(sockets.alice, 'message:send', {
+    toId:       bob.user.id,
+    type:       'IMAGE',
+    fileUrl:    picture.data.url,
+    fileName:   'pixel.png',
+    durationMs: 3000,
+  });
+  assert.equal(pictureSent.ok, true, 'a stray duration does not refuse a picture');
+  assert.equal((await pictureDelivered)?.durationMs, null, 'and nothing keeps it');
+});
+
 test('CORS rejects unknown origins and allows configured dev origins', async () => {
   const evil = await fetch(`${origin}${API_PREFIX}`, { headers: { Origin: 'https://evil.example.com' } });
   assert.equal(evil.headers.get('access-control-allow-origin'), null);

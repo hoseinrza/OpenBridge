@@ -8,6 +8,7 @@ import { MessagesModule } from './messages/messages.module';
 import { ChatModule }     from './chat/chat.module';
 import { UploadsModule }  from './uploads/uploads.module';
 import { E2eeModule }     from './e2ee/e2ee.module';
+import { CallsModule }    from './calls/calls.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { E2eeModule }     from './e2ee/e2ee.module';
     ChatModule,
     UploadsModule,
     E2eeModule,
+    CallsModule,
   ],
   controllers: [AppController],
 })

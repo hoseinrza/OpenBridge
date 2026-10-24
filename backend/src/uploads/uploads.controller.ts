@@ -283,7 +283,11 @@ export class UploadsController {
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader(
       'Content-Disposition',
-      mime.startsWith('image/') ? 'inline' : `attachment; filename="${filename}"`,
+      // A picture opens in place and so does a recording handed to a phone's
+      // audio player, which will not read a body marked as a download.
+      mime.startsWith('image/') || mime.startsWith('audio/')
+        ? 'inline'
+        : `attachment; filename="${filename}"`,
     );
     return res.sendFile(join(UPLOAD_DIR, filename), err => {
       if (err && !res.headersSent) res.status(404).json({ message: 'فایل پیدا نشد' });

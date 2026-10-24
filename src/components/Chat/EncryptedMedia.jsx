@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { openAttachment } from '../../services/attachments.js';
+import VoiceBubble from './VoiceBubble.jsx';
 import { formatSize } from '../../utils/format.js';
 import './EncryptedMedia.css';
 
@@ -77,6 +78,25 @@ export default function EncryptedMedia({ attachment, kind, name, size, onOpen })
     link.href = target;
     link.download = name || 'file';
     link.click();
+  }
+
+  // A recording is opened exactly once, by the tap that wants to hear it. The
+  // player is handed the decrypted object URL along with the reference this view
+  // holds on it, so the bytes stay alive while they are being listened to and are
+  // given back when the bubble leaves or the listen ends — whichever comes first.
+  if (kind === 'audio') {
+    return (
+      <div className="enc-media" ref={boxRef}>
+        <VoiceBubble
+          id={`enc-${attachment.blob}`}
+          durationMs={attachment.durationMs}
+          resolve={async () => {
+            const opened = await openAttachment(attachment);
+            return { url: opened.url, release: opened.release };
+          }}
+        />
+      </div>
+    );
   }
 
   if (kind === 'file') {

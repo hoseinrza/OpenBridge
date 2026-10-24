@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchE2eeState, fetchGroupMessages, fetchMessages, resolveUrl } from '../services/api';
+import { fetchE2eeState, fetchGroupMessages, fetchMessages, resolveUrl, uploadFile } from '../services/api';
 import { useSocket } from '../context/SocketContext';
 
 // One row per person per message: a chip has to know whether this device holds
@@ -24,6 +24,9 @@ function normalize(msg, myId) {
     src:            msg.fileUrl ? resolveUrl(msg.fileUrl) : undefined,
     name:           msg.fileName,
     size:           msg.fileSize,
+    // The length the sender measured while recording; a streamed file has no
+    // reliable container length, so this number is what the bubble shows.
+    durationMs:     msg.durationMs ?? undefined,
     side:           msg.senderId === myId ? 'mine' : 'other',
     senderId:       msg.senderId,
     receiverId:     msg.receiverId,
@@ -276,6 +279,43 @@ export function useChat(peer, currentUser, onIncoming) {
     }
   }, [socket, connected, peer?.id, peer?.kind, locked]);
 
+  // ── Voice ────────────────────────────────────────────
+  // The bytes go to the same endpoint a photo uses, then the message row names
+  // that file and carries the length the recorder measured — a streamed audio
+  // file has no trustworthy length of its own until it is read to the end.
+  const sendVoice = useCallback(async (recording) => {
+    if (locked) {
+      return { ok: false, error: 'این گفتگو سرتاسری رمزنگاری شده؛ نوشتن در آن فقط از نسخهٔ وب ممکن است' };
+    }
+    if (!socket || !connected || !peer) {
+      return { ok: false, error: 'اتصال به سرور برقرار نیست؛ دوباره تلاش کن' };
+    }
+    if (!recording?.uri) return { ok: false, error: 'فایل صوتی پیدا نشد' };
+
+    const target = peer.kind === 'group'
+      ? { conversationId: peer.id }
+      : { toId: peer.id };
+
+    try {
+      const file = await uploadFile({
+        uri: recording.uri,
+        name: recording.name ?? 'voice-message.m4a',
+        type: 'audio/mp4',
+      });
+      await emitWithAck(socket, 'message:send', {
+        ...target,
+        type: 'AUDIO',
+        fileUrl: file.url,
+        fileName: file.name,
+        fileSize: file.size,
+        durationMs: Math.round(recording.durationMs ?? 0),
+      }, 30000);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message ?? 'ارسال پیام صوتی ناموفق بود' };
+    }
+  }, [socket, connected, peer?.id, peer?.kind, locked]);
+
   // ── Typing notification ──────────────────────────────
   const notifyTyping = useCallback(() => {
     if (!socket || !peer || locked) return;
@@ -299,6 +339,6 @@ export function useChat(peer, currentUser, onIncoming) {
   return {
     messages, isTyping, typingName, connected, locked,
     historyState, historyError, retryHistory,
-    sendMessage, notifyTyping, toggleReaction,
+    sendMessage, sendVoice, notifyTyping, toggleReaction,
   };
 }

@@ -379,8 +379,7 @@ img { max-width: 100%; }
   .app-layout { position: relative; }
   .sidebar { width: 100%; }
 
-  .app-layout:not(.detail-open) .chat-main,
-  .app-layout:not(.detail-open) .video-main { display: none; }
+  .app-layout:not(.detail-open) .chat-main { display: none; }
   .app-layout.detail-open .sidebar { display: none; }
 }
 

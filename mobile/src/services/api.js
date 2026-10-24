@@ -209,6 +209,17 @@ export function fetchE2eeState(peer) {
     : request('GET', `/messages/e2ee/direct/${peer.id}`);
 }
 
+// The room token is minted server-side after it checks the session, the call
+// state and this user's participation. Mobile declares itself so an E2EE call
+// is refused instead of joined without a key.
+export function fetchCallToken(callId, body) {
+  return request('POST', `/calls/${callId}/token`, body);
+}
+
+export function fetchCallsStatus() {
+  return request('GET', '/calls/status');
+}
+
 export function createGroup(name, memberIds) {
   return request('POST', '/messages/groups', { name, memberIds });
 }

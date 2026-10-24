@@ -20,7 +20,7 @@ const BLOB_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const MAX_NAME = 255;
 
 /** Serialises one attachment payload. Refuses a descriptor it could not read back. */
-export function packAttachment({ blob, name, mime, size, key, iv }) {
+export function packAttachment({ blob, name, mime, size, key, iv, durationMs }) {
   if (typeof blob !== 'string' || !BLOB_ID.test(blob)) throw new Error('شناسه پیوست نامعتبر است');
   if (typeof key !== 'string' || fromBase64(key).length !== KEY_BYTES) throw new Error('کلید پیوست نامعتبر است');
   if (typeof iv !== 'string' || fromBase64(iv).length !== NONCE_BYTES) throw new Error('nonce پیوست نامعتبر است');
@@ -31,6 +31,9 @@ export function packAttachment({ blob, name, mime, size, key, iv }) {
     name: typeof name === 'string' ? name.slice(0, MAX_NAME) : '',
     mime: typeof mime === 'string' ? mime.slice(0, 100) : 'application/octet-stream',
     size: Number.isInteger(size) && size >= 0 ? size : null,
+    // A voice note is only worth its length, and a reader that never heard of
+    // this field still plays the file — it just cannot say how long it is.
+    durationMs: Number.isInteger(durationMs) && durationMs >= 0 ? durationMs : null,
     key,
     iv,
   });
@@ -67,6 +70,10 @@ export function parseAttachment(text) {
     name: typeof payload.name === 'string' ? payload.name : '',
     mime: typeof payload.mime === 'string' ? payload.mime : 'application/octet-stream',
     size: Number.isInteger(payload.size) ? payload.size : null,
+    // Absent, unreadable or negative all mean the same thing to a reader: this
+    // attachment never told us how long it is, so the bubble leaves the number
+    // blank instead of inventing one.
+    durationMs: Number.isInteger(payload.durationMs) && payload.durationMs >= 0 ? payload.durationMs : null,
     key:  payload.key,
     iv:   payload.iv,
   };

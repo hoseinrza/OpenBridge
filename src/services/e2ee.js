@@ -100,6 +100,19 @@ export function onE2eeConnection(handler) {
   return () => listeners.delete(handler);
 }
 
+/**
+ * Derives the media key for one call, or null when the conversation is not
+ * end-to-end encrypted. The key stays on this device; only the fingerprint is
+ * sent, and the server compares fingerprints rather than keys.
+ */
+export async function exportCallKey(me, chat, callId) {
+  const client = await initE2ee(me);
+  if (chat?.kind === 'group') {
+    return client.exportCallKeyForGroup(chat.conversationId ?? chat.id, callId);
+  }
+  return client.exportCallKeyForPeer(chat.id, callId);
+}
+
 /** Walk every conversation this device holds keys for; returns the ones that stalled. */
 export async function catchUpAll() {
   const current = state;

@@ -37,6 +37,10 @@ function normalize(msg, myId) {
     src:          msg.fileUrl ? resolveUrl(msg.fileUrl) : undefined,
     name:         msg.fileName,
     size:         msg.fileSize,
+    // What the sender's microphone said its own recording lasted. A bubble reads
+    // this number instead of asking the container, which is the one field a
+    // browser-written voice file is not certain to carry.
+    durationMs:   Number.isInteger(msg.durationMs) ? msg.durationMs : null,
     side:         msg.senderId === myId ? 'mine' : 'other',
     senderId:     msg.senderId,
     receiverId:   msg.receiverId,
@@ -70,6 +74,15 @@ const MESSAGE_EXIT_MS = 240;
 // message it belongs to — the active peer supplies the name the bubble shows.
 // An attachment carries only a descriptor: the bytes are fetched and opened by
 // the bubble itself, so nothing readable is held in this list.
+// Which bubble an opened attachment draws. The rule is the MIME type the sender
+// wrote into its own descriptor, because an encrypted conversation gives the
+// server nothing to go on but those bytes.
+function attachmentKind(mime) {
+  if (mime?.startsWith('image/')) return 'image';
+  if (mime?.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
 function normalizeEncrypted(message, peer) {
   const created = new Date(message.at).getTime();
   const attachment = message.attachment ?? null;
@@ -80,11 +93,12 @@ function normalizeEncrypted(message, peer) {
     : peer;
   return {
     id:             `e2ee-${message.seq}`,
-    type:           attachment ? (attachment.mime?.startsWith('image/') ? 'image' : 'file') : 'text',
+    type:           attachment ? attachmentKind(attachment.mime) : 'text',
     text:           message.text,
     attachment,
     name:           attachment?.name ?? null,
     size:           attachment?.size ?? null,
+    durationMs:     attachment?.durationMs ?? null,
     side:           message.mine ? 'mine' : 'other',
     senderId:       message.senderId,
     conversationId: message.conversationId,
@@ -200,7 +214,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     // The order is the safety of this path: the group exists before a byte is
     // uploaded, so a peer with no keys to invite never leaves an orphan blob on
     // the server, and the file is encrypted before anything is sent at all.
-    attachmentSendRef.current = async (target, file) => {
+    attachmentSendRef.current = async (target, file, durationMs) => {
       const client = await initE2ee({ id: currentUserRef.current.id });
       const opened = secureRef.current?.conversationId
         ? null
@@ -212,6 +226,9 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
         name: file.name,
         mime: file.type || 'application/octet-stream',
         size: file.size,
+        // Travels inside the envelope rather than as a row: an encrypted
+        // conversation has no message table entry for the server to measure.
+        durationMs: durationMs ?? null,
         key,
         iv,
       }));
@@ -544,7 +561,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     if (msg._file && (status?.mode === 'open'
       || (!isGroup(target) && status?.mode === 'plain'))) {
       try {
-        return await attachmentSendRef.current(target, msg._file);
+        return await attachmentSendRef.current(target, msg._file, msg.durationMs);
       } catch (error) {
         if (!peerWithoutKeys(error) || isGroup(target)) {
           return { ok: false, error: error.message || 'رمزنگاری یا ارسال فایل ناموفق بود' };
@@ -572,6 +589,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
           fileUrl:  uploaded.url,
           fileName: uploaded.name,
           fileSize: uploaded.size,
+          durationMs: msg.durationMs ?? null,
         });
       } catch (err) {
         return { ok: false, error: err.message };

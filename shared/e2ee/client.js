@@ -23,6 +23,7 @@ import {
   generateKeyPackage,
   getCiphersuiteFromName,
   joinGroup,
+  mlsExporter,
   processPrivateMessage,
   zeroOutUint8Array,
 } from 'ts-mls';
@@ -70,6 +71,12 @@ function toHex(bytes) {
   let out = '';
   for (const byte of bytes) out += byte.toString(16).padStart(2, '0');
   return out;
+}
+
+// Base64url is the spelling the call service stores and compares. The value is
+// a SHA-256 digest of the media key, never the key.
+function toBase64Url(bytes) {
+  return toBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function identityOf(leaf) {
@@ -354,6 +361,69 @@ export async function createE2eeClient({
     const record = await readRecord(conversationId);
     if (!record?.state) throw fail('no-group', 'این گفتگو روی این دستگاه هنوز کلید ندارد');
     return record;
+  }
+
+  /**
+   * Derives the LiveKit media key for one call from this conversation's MLS
+   * exporter secret.
+   *
+   * MLS authenticates the epoch and every member of the group; the call id is
+   * the exporter context, so a key cannot be replayed into a different call.
+   * The returned `key` is handed straight to the local E2EE key provider and is
+   * never sent anywhere. Only the SHA-256 `fingerprint` travels, to prove that
+   * two devices derived the same key.
+   */
+  async function exportCallKey(conversationId, callId) {
+    if (typeof conversationId !== 'string' || !conversationId) {
+      throw fail('conversation', 'گفتگوی این تماس مشخص نیست');
+    }
+    if (typeof callId !== 'string' || !callId) {
+      throw fail('call', 'شناسهٔ این تماس مشخص نیست');
+    }
+    const record = await requireGroup(conversationId);
+    const state = loadState(record);
+    const key = await mlsExporter(
+      state.keySchedule.exporterSecret,
+      'openbridge-call-v1',
+      encodeUtf8(`call:${callId}`),
+      32,
+      impl,
+    );
+    return {
+      key: toBase64(key),
+      fingerprint: toBase64Url(await impl.hash.digest(key)),
+      epoch: state.groupContext.epoch.toString(),
+      groupId: toBase64(state.groupContext.groupId),
+    };
+  }
+
+  /**
+   * Derives a call key for the direct conversation with `peerId`.
+   *
+   * Deliberately does not call openDirect: that would create an encrypted
+   * conversation as a side effect. A call on a plaintext chat returns null and
+   * is treated as non-E2EE by the caller.
+   */
+  async function exportCallKeyForPeer(peerId, callId) {
+    await ensureDevice();
+    const probe = await transport.api(`messages/e2ee/direct/${peerId}`);
+    if (!probe?.e2ee || !probe.conversationId) return null;
+    if (!(await readRecord(probe.conversationId))) {
+      await serialize(probe.conversationId, () => drain(probe.conversationId));
+    }
+    return exportCallKey(probe.conversationId, callId);
+  }
+
+  /** Derives a call key for an encrypted group, or null for a plaintext one. */
+  async function exportCallKeyForGroup(conversationId, callId) {
+    await ensureDevice();
+    const probe = await transport.api(`messages/e2ee/group/${conversationId}`);
+    if (!probe?.e2ee) return null;
+    if (!(await readRecord(conversationId))) {
+      await openGroup(conversationId);
+    }
+    await catchUp(conversationId);
+    return exportCallKey(conversationId, callId);
   }
 
   // ------------------------------------------------------------------ key pool
@@ -732,6 +802,9 @@ export async function createE2eeClient({
     conversations,
     createEncryptedGroupChat,
     devices,
+    exportCallKey,
+    exportCallKeyForGroup,
+    exportCallKeyForPeer,
     history,
     lastMessage,
     markRead,

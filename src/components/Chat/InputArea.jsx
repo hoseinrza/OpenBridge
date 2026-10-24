@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import EmojiPicker from './EmojiPicker.jsx';
 import AttachMenu from './AttachMenu.jsx';
+import { createVoiceRecorder, voiceRecordingSupported } from '../../services/voice.js';
+import { formatDuration } from '../../utils/format.js';
 
 const MAX_TEXTAREA_HEIGHT = 132;
+// How many bars the scrolling meter keeps, and how often a new one is pushed into
+// it. The meter is decoration with a purpose — it says the microphone is alive —
+// so it is sampled far below the frame rate the level is read at.
+const LEVEL_BARS = 24;
+const LEVEL_SAMPLE_MS = 55;
 
 export default function InputArea({
   onSend, onTyping, connected = true, blocked = null,
@@ -14,10 +21,20 @@ export default function InputArea({
   const [sending, setSending]     = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError]         = useState('');
+  // Recording is a mode of the composer, the same way editing is: the text field
+  // steps aside, the send button becomes a stop, and the only way out is to send
+  // what was captured or throw it away.
+  const [recording, setRecording] = useState(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [bars, setBars]           = useState([]);
   const textareaRef = useRef(null);
   const fileRef     = useRef(null);
   const emojiRef    = useRef(null);
   const attachRef   = useRef(null);
+  const recorderRef = useRef(null);
+  const stoppingRef = useRef(false);
+  const sampleAtRef = useRef(0);
+  const voiceSendRef = useRef(null);
   // Which kind the user asked for, remembered across the native picker: an image
   // sent under «فایل» must stay a file row.
   const pickRef     = useRef(null);
@@ -31,6 +48,7 @@ export default function InputArea({
 
   const isEditing = Boolean(editing);
   const busy = sending || uploading;
+  const canRecordVoice = voiceRecordingSupported();
 
   useEffect(() => { textRef.current = text; }, [text]);
 
@@ -174,6 +192,119 @@ export default function InputArea({
     textareaRef.current?.focus();
   }
 
+  function dropRecording() {
+    recorderRef.current?.cancel();
+    recorderRef.current = null;
+    stoppingRef.current = false;
+    setRecording(null);
+    setElapsedMs(0);
+    setBars([]);
+  }
+
+  async function startRecording() {
+    if (busy || recording || isEditing) return;
+    if (blocked) { setError(blocked); return; }
+    if (!connected) { setError('اتصال به سرور برقرار نیست؛ پیام صوتی ارسال نشد'); return; }
+
+    const recorder = createVoiceRecorder();
+    try {
+      await recorder.start();
+    } catch (err) {
+      // A refused permission comes back as a named error and says what to do
+      // about it; anything else means there was no microphone to open at all.
+      setError(err?.name === 'NotAllowedError' || err?.name === 'SecurityError'
+        ? 'برای ضبط پیام صوتی، دسترسی به میکروفون را اجازه بده'
+        : 'دستگاه ضبط صدا پیدا نشد');
+      return;
+    }
+    recorderRef.current = recorder;
+    setElapsedMs(0);
+    setBars([]);
+    setError('');
+    setRecording('live');
+  }
+
+  async function sendRecording() {
+    const recorder = recorderRef.current;
+    if (!recorder || stoppingRef.current) return;
+    stoppingRef.current = true;
+    setRecording('sending');
+
+    let file;
+    let durationMs;
+    try {
+      ({ file, durationMs } = await recorder.stop());
+    } catch (err) {
+      dropRecording();
+      setError(err?.message || 'ضبط پیام صوتی ناموفق بود');
+      return;
+    }
+    recorderRef.current = null;
+    stoppingRef.current = false;
+    setUploading(true);
+    // No object URL is made for a preview: the bubble that appears is the one the
+    // server broadcasts back, with its own signed address on it.
+    const result = await onSend({ type: 'audio', name: file.name, size: file.size, durationMs, _file: file });
+    setUploading(false);
+    setRecording(null);
+    setElapsedMs(0);
+    setBars([]);
+
+    if (!result?.ok) setError(result?.error || 'ارسال پیام صوتی ناموفق بود');
+  }
+
+  // The ceiling is enforced from inside the frame loop, which is one turn away
+  // from the render that made the handler — so the loop reaches the current one
+  // through a ref instead of depending on it and restarting every frame.
+  const sendVoiceRef = useRef(null);
+  useEffect(() => { sendVoiceRef.current = sendRecording; });
+
+  // The timer, the meter and the ceiling all ride one frame loop, and the loop
+  // only exists while a recording is open. Past the ceiling the composer stops
+  // on its own rather than recording something it cannot send.
+  useEffect(() => {
+    if (recording !== 'live') return undefined;
+    let frame = requestAnimationFrame(function tick(now) {
+      const recorder = recorderRef.current;
+      if (!recorder) return;
+      setElapsedMs(recorder.elapsed());
+      if (now - sampleAtRef.current >= LEVEL_SAMPLE_MS) {
+        sampleAtRef.current = now;
+        const level = recorder.level();
+        setBars(prev => [...prev.slice(-(LEVEL_BARS - 1)), level]);
+      }
+      if (recorder.elapsed() >= recorder.maxMs) { sendVoiceRef.current?.(); return; }
+      frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [recording]);
+
+  // A chat switch, an edit or a lost connection while the microphone is open
+  // throws the recording away: a voice note is never meant to land in a
+  // conversation nobody started it in.
+  useEffect(() => {
+    if (recording === 'live' && (blocked || isEditing || !connected)) dropRecording();
+  }, [recording, blocked, isEditing, connected]);
+
+  // Escape throws the recording away wherever the focus has got to: opening the
+  // bar moves focus onto its send button, but a click elsewhere must not leave an
+  // open microphone running behind a screen that no longer shows one.
+  useEffect(() => {
+    if (!recording) return undefined;
+    function onKey(event) {
+      if (event.key === 'Escape') dropRecording();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [recording]);
+
+  useEffect(() => {
+    if (recording === 'live') voiceSendRef.current?.focus();
+  }, [recording]);
+
+  // Leaving the screen takes the microphone with it.
+  useEffect(() => () => recorderRef.current?.cancel(), []);
+
   return (
     <div className="composer">
       {showEmoji && (
@@ -235,7 +366,7 @@ export default function InputArea({
             <>
               <i className="fas fa-spinner fa-spin" aria-hidden="true" />
               {uploading
-                ? 'در حال بارگذاری و ارسال فایل…'
+                ? (recording ? 'در حال بارگذاری و ارسال پیام صوتی…' : 'در حال بارگذاری و ارسال فایل…')
                 : isEditing ? 'در حال ذخیره…' : 'در حال ارسال…'}
             </>
           ) : (
@@ -250,6 +381,45 @@ export default function InputArea({
         </div>
       )}
 
+      {recording ? (
+        <div className="input-area voice-recording">
+          <button
+            type="button"
+            className="icon-btn voice-rec-cancel"
+            onClick={dropRecording}
+            title="لغو"
+            aria-label="لغو ضبط پیام صوتی"
+          >
+            <i className="fas fa-trash" aria-hidden="true" />
+          </button>
+
+          <span className="voice-rec-timer" role="timer">
+            <i className="fas fa-circle" aria-hidden="true" />
+            {formatDuration(elapsedMs)}
+          </span>
+
+          {/* The bars are the microphone's own level, sampled as it happens: they
+              say the recording is alive, and nothing more. They are not a picture
+              of the finished file, and the bubble does not pretend otherwise. */}
+          <span className="voice-rec-meter" aria-hidden="true">
+            {bars.map((level, index) => (
+              <b key={index} style={{ transform: `scaleY(${0.14 + Math.min(1, level) * 0.86})` }} />
+            ))}
+          </span>
+
+          <button
+            type="button"
+            ref={voiceSendRef}
+            className="send-btn"
+            onClick={sendRecording}
+            disabled={recording === 'sending'}
+            title="ارسال پیام صوتی"
+            aria-label="ارسال پیام صوتی"
+          >
+            <i className={`fas ${recording === 'sending' ? 'fa-spinner fa-spin' : 'fa-paper-plane'}`} aria-hidden="true" />
+          </button>
+        </div>
+      ) : (
       <form
         className="input-area"
         onSubmit={e => { e.preventDefault(); handleSend(); }}
@@ -296,18 +466,35 @@ export default function InputArea({
           </button>
         </div>
 
-        <button
-          type="submit"
-          className="send-btn"
-          title={blocked ?? (isEditing ? 'ذخیره ویرایش' : 'ارسال پیام')}
-          aria-label={isEditing ? 'ذخیره ویرایش' : 'ارسال پیام'}
-          disabled={!text.trim() || busy || !connected || Boolean(blocked)}
-        >
-          {sending
-            ? <i className="fas fa-spinner fa-spin" aria-hidden="true" />
-            : <i className={`fas ${isEditing ? 'fa-check' : 'fa-paper-plane'}`} aria-hidden="true" />}
-        </button>
+        {/* One button, two jobs, exactly as the phone app does it: an empty field
+            offers the microphone and a written one offers the plane. A browser
+            with no recording support simply never shows it. */}
+        {canRecordVoice && !text.trim() && !isEditing ? (
+          <button
+            type="button"
+            className="send-btn mic-btn"
+            onClick={startRecording}
+            disabled={busy || !connected || Boolean(blocked)}
+            title={blocked ?? 'ضبط پیام صوتی'}
+            aria-label="ضبط پیام صوتی"
+          >
+            <i className="fas fa-microphone" aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="send-btn"
+            title={blocked ?? (isEditing ? 'ذخیره ویرایش' : 'ارسال پیام')}
+            aria-label={isEditing ? 'ذخیره ویرایش' : 'ارسال پیام'}
+            disabled={!text.trim() || busy || !connected || Boolean(blocked)}
+          >
+            {sending
+              ? <i className="fas fa-spinner fa-spin" aria-hidden="true" />
+              : <i className={`fas ${isEditing ? 'fa-check' : 'fa-paper-plane'}`} aria-hidden="true" />}
+          </button>
+        )}
       </form>
+      )}
     </div>
   );
 }

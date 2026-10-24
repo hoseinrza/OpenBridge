@@ -2,17 +2,27 @@
   "expo": {
     "name": "OpenBridge",
     "slug": "openbridge-mobile",
-    "version": "1.1.25",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "backgroundColor": "#F6F3EE",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.openbridge.mobile"
+      "bundleIdentifier": "com.openbridge.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "OpenBridge برای تماس ویدیویی به دوربین نیاز دارد.",
+        "NSMicrophoneUsageDescription": "OpenBridge برای تماس صوتی و ویدیویی به میکروفون نیاز دارد."
+      }
     },
     "android": {
       "package": "com.openbridge.mobile",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.BLUETOOTH_CONNECT"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#C5161D",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -43,7 +53,16 @@
             "image": "./assets/splash-icon.png"
           }
         }
-      ]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "OpenBridge برای ضبط پیام صوتی و تماس به میکروفون نیاز دارد."
+        }
+      ],
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
+      "expo-asset"
     ]
   }
 }

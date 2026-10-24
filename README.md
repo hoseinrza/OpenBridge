@@ -22,6 +22,16 @@
   and nothing at all is drawn in its place, on the web and on the phone. «Delete for me»
   hides a row for one account only. The phone has no such menu yet.
 - 📎 Private file & image uploads behind signed, expiring URLs (optional ClamAV scan)
+- 🎙️ **Voice messages** on web and mobile — record, send with the length the
+  device measured, and play from a rail; in an MLS chat the recording travels as
+  an encrypted attachment, and the server validates the declared duration.
+- 📹 **Audio and video calls over a self-hosted LiveKit SFU** — 1:1 and group,
+  with ringing, busy/missed/timeout states, mute/camera/screen-share controls and
+  LiveKit room tokens minted only by the API. In an MLS conversation the web
+  client derives the media key locally from the conversation's MLS exporter; the
+  server sees only a SHA-256 fingerprint. Plaintext chats can call too, and are
+  labeled as not end-to-end encrypted. Mobile calls exist but cannot join an E2EE
+  room because the phone holds no MLS state.
 - 🔐 **End-to-end encrypted web direct chats and web-created groups** (MLS): text,
   images and files are sealed on the device; the server stores opaque envelopes
   and blobs. Mobile holds no keys yet and shows those chats as locked.
@@ -47,9 +57,12 @@
   See [docs/SECURITY.md](docs/SECURITY.md) for the exact boundary and
   [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md) for the
   design.
-- 📹 Video calls are not wired to any UI. Signalling events exist in the gateway
-  and orphaned components sit in `src/components/VideoCall/`, but neither client
-  can start a call.
+- 📵 **Calls are not equally encrypted everywhere.** Web calls in an MLS chat
+  derive the media key from MLS and are end-to-end encrypted; plaintext chats and
+  all mobile calls are not, and say so in the call UI. Mobile cannot join an E2EE
+  call because it has no MLS state. Active call state is in-process: an API
+  restart ends calls, and call history is not stored. See
+  [docs/engineering/CALLING_ARCHITECTURE.md](docs/engineering/CALLING_ARCHITECTURE.md).
 
 ## 🔐 Sign-in & sign-up
 
@@ -114,10 +127,11 @@ numbers already has an account?* — without turning the server into a phone boo
 
 | Layer      | Stack                                                          |
 |------------|----------------------------------------------------------------|
-| Web        | React 19, Vite, React Router, Socket.IO client                 |
-| Mobile     | Expo SDK 57, React Native, React Navigation, SecureStore, expo-contacts |
-| Backend    | NestJS 10, Socket.IO, Prisma, JWT + Passport                   |
+| Web        | React 19, Vite, React Router, Socket.IO client, LiveKit client |
+| Mobile     | Expo SDK 57, React Native, React Navigation, SecureStore, expo-contacts, LiveKit RN SDK |
+| Backend    | NestJS 10, Socket.IO, Prisma, JWT + Passport, LiveKit server SDK |
 | Data       | PostgreSQL 16 (Prisma)                                         |
+| Media      | Self-hosted LiveKit SFU (pinned image), UDP 7882 / TCP 7881     |
 | Infra      | Docker Compose, nginx (SPA + API/WebSocket proxy), ClamAV (opt)|
 
 > `backend/src/redis/redis.service.ts` is an in-process presence map despite its
@@ -137,6 +151,10 @@ plaintext into them. See [docs/SECURITY.md](docs/SECURITY.md) for the
 confidentiality model, implemented controls, threat model, and known
 limitations; [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md)
 §11 is the authoritative statement of what is and is not encrypted today.
+Calls follow the same line: web calls in an MLS chat derive the media key from
+MLS, plaintext and mobile calls are labeled as not E2EE, and the server never
+receives a call key (only a SHA-256 fingerprint). See
+[docs/engineering/CALLING_ARCHITECTURE.md](docs/engineering/CALLING_ARCHITECTURE.md).
 
 The API requires `JWT_SECRET` and refuses to start without it. In production it
 must be at least 32 characters. Cross-origin browser access is deny-by-default
@@ -152,7 +170,7 @@ no numbers. `users.phone` remains excluded from every other user response.
 ## 🧪 Tests & checks
 
 ```bash
-cd backend && npm run test:e2e     # 51 tests: OTP signup, sessions, uploads, CORS, socket, contacts, E2EE, message actions
+cd backend && npm run test:e2e     # 62 tests: OTP signup, sessions, uploads, CORS, socket, contacts, E2EE, message actions, calling
 npm run test:e2ee                  # MLS library gate, including the no-WebCrypto (Hermes) run
 npm run lint                       # web ESLint
 npm run build                      # web production build
@@ -243,6 +261,21 @@ npm run start:dev               # → http://localhost:3000/api
 No SMS provider is configured, so in development the OTP response carries the
 code as `testCode` and both clients show it in a «کد تست (فقط محیط توسعه)» box.
 
+#### Calls in local development
+
+Calls need a media server. The quickest local one is LiveKit in dev mode:
+
+```bash
+docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
+  livekit/livekit-server:v1.13.10 --dev --bind 0.0.0.0
+```
+
+The dev key/secret are `devkey` / `secret`; the backend `.env.example` already
+points at `ws://localhost:7880`. The web app and the mobile development build
+both use the token returned by the API, so no LiveKit secret is ever placed in a
+client bundle. Without a server, the call buttons report that calling is not
+configured and chat keeps working.
+
 ### 2. Web
 
 ```bash
@@ -266,27 +299,32 @@ npx expo start
 
 Use your machine's LAN IP (not `localhost`) when testing on a physical device.
 Access and refresh tokens live in SecureStore; the cached profile sits in
-AsyncStorage.
+AsyncStorage. Calls use the native LiveKit SDK and need a development build
+(`npx expo prebuild` + a native build, or EAS); Expo Go can still run the chat
+but shows a clear message when a call is attempted.
 
 ## ☁️ Deployment
 
 ### Docker on a VPS (what is actually running)
 
-`docker-compose.yml` at the repo root brings up four services — `postgres`,
-`redis`, `api` and `web` (nginx serving the built SPA and proxying `/api` plus
-`/socket.io` to the API). One command on a fresh Linux server:
+`docker-compose.yml` at the repo root brings up five services — `postgres`,
+`redis`, `api`, `web` (nginx serving the built SPA and proxying `/api`,
+`/socket.io` and `/livekit/`), and `livekit` (the self-hosted SFU). One command
+on a fresh Linux server:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hoseinrza/OpenBridge/main/deploy.sh | bash
 ```
 
 [`deploy.sh`](deploy.sh) installs Docker if needed, creates 2 GB of swap, clones
-the repo to `/opt/openbridge`, generates `.env` with random database password and
-JWT secret (first run only), builds and starts the stack, then installs a cron
-entry that runs `bash deploy.sh --redeploy` every 5 minutes — the same staged
-path the Deploy workflow uses (CI gate, backup, build, swap, health check,
-rollback). [`DEPLOY.md`](DEPLOY.md) (Persian) covers status, logs, manual
-updates, restarts, domain/HTTPS and common problems such as a busy `WEB_PORT`.
+the repo to `/opt/openbridge`, generates `.env` with random database password,
+JWT secret and LiveKit key/secret (first run only), builds and starts the stack,
+then installs a cron entry that runs `bash deploy.sh --redeploy` every 5 minutes
+— the same staged path the Deploy workflow uses (CI gate, backup, build, swap,
+health check, rollback). [`DEPLOY.md`](DEPLOY.md) (Persian) covers status, logs,
+manual updates, restarts, domain/HTTPS, the LiveKit UDP/TCP ports and common
+problems such as a busy `WEB_PORT`. Calls need inbound `7881/tcp` and `7882/udp`
+open in the provider firewall in addition to the web port.
 
 ### Alternative: Vercel + Render
 

@@ -1,12 +1,12 @@
 {
   "name": "chatapp-backend",
-  "version": "1.1.25",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "build": "nest build",
-    "test:e2e": "npm run build && node --test test/security.e2e.cjs test/message-actions.e2e.cjs test/e2ee-client.e2e.cjs",
+    "test:e2e": "npm run build && node --test test/security.e2e.cjs test/message-actions.e2e.cjs test/e2ee-client.e2e.cjs test/calls.e2e.cjs",
     "seed:dev": "node test/dev-chat-seed.mjs",
     "prisma:gen": "prisma generate",
     "prisma:validate": "prisma validate",
@@ -26,6 +26,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
     "dotenv": "^16.6.1",
+    "livekit-server-sdk": "2.19.2",
     "multer": "^1.4.5-lts.1",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",

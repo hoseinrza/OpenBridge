@@ -89,7 +89,9 @@ require_docker() {
 # just checking that a process is running.
 healthy() {
   compose exec -T web sh -c "wget -q -O- http://127.0.0.1$HEALTH_PATH" 2>/dev/null \
-    | grep -q '"status":"ok"'
+    | grep -q '"status":"ok"' \
+    && compose exec -T livekit sh -c "wget -q -O- http://127.0.0.1:7880/" 2>/dev/null \
+    | grep -q 'OK'
 }
 
 wait_healthy() {
@@ -108,6 +110,7 @@ wait_healthy() {
 report_failure() {
   compose ps || true
   compose logs --no-color api 2>/dev/null | tail -50 || true
+  compose logs --no-color livekit 2>/dev/null | tail -30 || true
 }
 
 # ── Stage: CI gate ─────────────────────────────────────────
@@ -186,13 +189,40 @@ ensure_env() {
   if [ ! -f .env ]; then
     log "Generating .env with random secrets"
     cp .env.example .env
-    local pg_pass jwt_secret
+    local pg_pass jwt_secret livekit_key livekit_secret public_ip
     pg_pass=$(openssl rand -hex 24)
     jwt_secret=$(openssl rand -hex 32)
+    livekit_key="lk_$(openssl rand -hex 12)"
+    livekit_secret=$(openssl rand -hex 32)
     sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=${pg_pass}#" .env
     sed -i "s#^JWT_SECRET=.*#JWT_SECRET=${jwt_secret}#" .env
+    sed -i "s#^LIVEKIT_API_KEY=.*#LIVEKIT_API_KEY=${livekit_key}#" .env
+    sed -i "s#^LIVEKIT_API_SECRET=.*#LIVEKIT_API_SECRET=${livekit_secret}#" .env
+
+    # The browser must reach the media server over the same public host. This
+    # bootstrap is HTTP-only; switch to wss:// once TLS is terminated in front.
+    public_ip=$(curl -s -4 --max-time 5 ifconfig.me || true)
+    if [ -n "$public_ip" ]; then
+      sed -i "s#^LIVEKIT_URL=.*#LIVEKIT_URL=ws://${public_ip}/livekit#" .env
+    fi
   else
     log ".env already exists, leaving it as-is"
+    # An older deployment predates calls. Add the media keys once, without ever
+    # rotating a value the operator may already have configured.
+    local livekit_key livekit_secret public_ip
+    if ! grep -q '^LIVEKIT_API_KEY=' .env; then
+      livekit_key="lk_$(openssl rand -hex 12)"
+      livekit_secret=$(openssl rand -hex 32)
+      printf '\nLIVEKIT_API_KEY=%s\nLIVEKIT_API_SECRET=%s\n' "$livekit_key" "$livekit_secret" >> .env
+      log "Added LiveKit credentials to .env"
+    fi
+    if ! grep -q '^LIVEKIT_API_URL=' .env; then
+      printf 'LIVEKIT_API_URL=http://livekit:7880\n' >> .env
+    fi
+    if ! grep -q '^LIVEKIT_URL=' .env; then
+      public_ip=$(curl -s -4 --max-time 5 ifconfig.me || true)
+      printf 'LIVEKIT_URL=ws://%s/livekit\n' "${public_ip:-YOUR_SERVER_IP}" >> .env
+    fi
   fi
 }
 

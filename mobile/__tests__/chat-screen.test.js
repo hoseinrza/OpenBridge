@@ -28,6 +28,7 @@ function makeChat(overrides = {}) {
     historyError: '',
     retryHistory: jest.fn(),
     sendMessage: jest.fn(async () => ({ ok: true })),
+    sendVoice: jest.fn(async () => ({ ok: true })),
     notifyTyping: jest.fn(),
     toggleReaction: jest.fn(() => true),
     ...overrides,
@@ -72,7 +73,7 @@ test('locks the composer of an encrypted chat instead of offering a send', () =>
   const input = view.getByLabelText('متن پیام');
   expect(input.props.editable).toBe(false);
   expect(input.props.placeholder).toBe('نوشتن در این گفتگو فقط از نسخهٔ وب ممکن است');
-  fireEvent.press(view.getByLabelText('ارسال پیام'));
+  expect(view.getByLabelText('ضبط پیام صوتی')).toBeDisabled();
   expect(chat.sendMessage).not.toHaveBeenCalled();
 });
 
@@ -109,6 +110,10 @@ test('disables sending while disconnected', () => {
   makeChat({ connected: false });
   const view = renderChat();
   expect(view.getByText('در حال اتصال به سرور…')).toBeTruthy();
+  expect(view.getByLabelText('ضبط پیام صوتی')).toBeDisabled();
+  // The empty composer offers voice, so the send path is exercised by typing
+  // first; with no connection the send button must stay disabled.
+  fireEvent.changeText(view.getByTestId('composer-input'), 'سلام');
   expect(view.getByLabelText('ارسال پیام')).toBeDisabled();
 });
 

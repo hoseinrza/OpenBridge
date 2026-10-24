@@ -1,6 +1,6 @@
 # OpenBridge Security Model
 
-Last updated: 2026-10-21
+Last updated: 2026-10-22
 
 ## E2EE status: web direct chats and web-created groups
 
@@ -32,6 +32,46 @@ No custom cryptography has been introduced: `shared/e2ee/provider.js` is glue
 over `ts-mls`, `hpke` and `@panva/hpke-noble`, and the library gate runs as
 `npm run test:e2ee`.
 
+## Calls
+
+- **Web calls in an MLS conversation are end-to-end encrypted.** The media key
+  is derived on each device from the conversation's MLS exporter secret and the
+  call id (`MLS-Exporter(exporter_secret, "openbridge-call-v1", "call:" + callId,
+  32)`). It is handed to LiveKit's key provider locally and is never sent to the
+  API, Socket.IO, the SFU, a database or a log.
+- The server receives and stores in memory only a SHA-256 fingerprint of that
+  key. It is compared at invite, accept and token time; a mismatch (including two
+  devices at different MLS epochs) refuses the call. The fingerprint is not
+  persisted and is not logged.
+- A call advertised as E2EE fails closed: no key means no ring; a missing or
+  mismatched fingerprint rejects the accept and the token; the lock indicator
+  appears only after `room.isE2EEEnabled` and every remote participant reports
+  `isEncrypted`. If that is not true within 25 seconds (45 for a group), the call
+  is ended.
+- **Plaintext conversations can be called too, but those calls are not E2EE.**
+  They rely on WebRTC DTLS-SRTP in transit and are labeled «بدون رمزنگاری
+  سرتاسری» in both clients. The SFU can see their media.
+- **Mobile calls are plaintext only for now.** The Expo build holds no MLS state,
+  so it cannot derive the call key. It refuses an E2EE ring and the server refuses
+  a mobile token for an E2EE room; it does not silently downgrade. LiveKit's RN
+  E2EE key provider exists, but there is no authenticated key source on mobile
+  yet.
+- **Room authorization is server-side.** A room token is minted only for a
+  participant of an existing direct conversation or a current group member, only
+  after the call reached an answerable state, and only with minimal grants
+  (`roomJoin`, `canPublish`, `canSubscribe`; no data publishing and no room
+  admin). The LiveKit API secret never leaves the API process.
+- **Session revocation applies to calls.** Socket operations that grant access
+  re-check the session row; the token endpoint uses the normal JWT guard; a
+  30-second sweep ends calls whose participants lost every active session.
+  Ending a call deletes the room when room administration is configured.
+- **Group calls** use the same server authorization and, for an encrypted group,
+  the group's MLS exporter. Every invited web device must be at the same epoch.
+  Mobile cannot join an encrypted group call.
+- **Not persisted:** call history, durations and missed-call badges are not in
+  PostgreSQL. Active calls are in-process; an API restart ends them and the next
+  boot deletes leftover `ob_*` rooms. The displayed duration is the client timer.
+
 ## Confidentiality model
 
 | Data                         | Where it lives                  | Who can read it                          |
@@ -43,6 +83,9 @@ over `ts-mls`, `hpke` and `@panva/hpke-noble`, and the library gate runs as
 | Group name, membership, timestamps, sizes | PostgreSQL         | Server operators and DB access           |
 | Usernames, display names     | PostgreSQL                      | Any authenticated user (`/api/users`)    |
 | JWTs                         | Browser localStorage / SecureStore (mobile) | User's device; bearer of the session |
+| E2EE call media key          | Device memory only              | The two/few call participants            |
+| Call key fingerprint         | API process memory (never DB/logs) | Server operators (a hash, not the key) |
+| LiveKit room token           | Client memory; short-lived      | That participant; room-scoped grants     |
 
 The API never returns password hashes (there are no passwords). User search
 exposes username, display name, avatar, bio, status, and creation date to any

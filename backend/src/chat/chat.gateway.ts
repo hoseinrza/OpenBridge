@@ -11,7 +11,6 @@ import { GroupEvents } from '../messages/group-events';
 import { RedisService } from '../redis/redis.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { JWT_SECRET, isOriginAllowed } from '../config/env';
-import { signedFileUrl } from '../uploads/file-urls';
 
 const MAX_PACKET_BYTES = 256 * 1024;
 
@@ -160,7 +159,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     @ConnectedSocket() socket: Socket,
     @MessageBody() body: {
       toId?: string; conversationId?: string; type?: string; text?: string;
-      fileUrl?: string; fileName?: string; fileSize?: number;
+      fileUrl?: string; fileName?: string; fileSize?: number; durationMs?: number;
     },
   ) {
     if (!this.allowRate(socket.id, 'message:send', 30, 10_000)) {
@@ -442,87 +441,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     }
   }
 
-  // ── WebRTC call signaling (plain relay between the two peers' rooms) ──
-  @SubscribeMessage('call:invite')
-  async onCallInvite(
-    @ConnectedSocket() s: Socket,
-    @MessageBody() body: { toId: string; callType: 'video' | 'audio' },
-  ) {
-    if (!this.allowRate(s.id, 'call', 40, 10_000)) return;
-    if (!isId(body?.toId) || body.toId === s.data.userId) return;
-    if (body.callType !== 'video' && body.callType !== 'audio') return;
-
-    try {
-      // Never trust caller metadata from the client.
-      const caller = await this.prisma.user.findUnique({
-        where:  { id: s.data.userId },
-        select: { id: true, username: true, displayName: true, avatar: true },
-      });
-      if (!caller) return;
-
-      this.server.to(body.toId).emit('call:incoming', {
-        fromId: s.data.userId,
-        callType: body.callType,
-        caller: {
-          id:     caller.id,
-          name:   caller.displayName || caller.username,
-          avatar: signedFileUrl(caller.avatar) ?? '',
-        },
-      });
-    } catch (err) {
-      console.error('[socket] call:invite failed', err);
-    }
-  }
-
-  @SubscribeMessage('call:cancel')
-  onCallCancel(@ConnectedSocket() s: Socket, @MessageBody() body: { toId: string }) {
-    if (!this.allowRate(s.id, 'call', 40, 10_000)) return;
-    if (!isId(body?.toId) || body.toId === s.data.userId) return;
-    this.server.to(body.toId).emit('call:cancelled', { fromId: s.data.userId });
-  }
-
-  @SubscribeMessage('call:accept')
-  onCallAccept(@ConnectedSocket() s: Socket, @MessageBody() body: { toId: string }) {
-    if (!this.allowRate(s.id, 'call', 40, 10_000)) return;
-    if (!isId(body?.toId) || body.toId === s.data.userId) return;
-    this.server.to(body.toId).emit('call:accepted', { fromId: s.data.userId });
-  }
-
-  @SubscribeMessage('call:reject')
-  onCallReject(@ConnectedSocket() s: Socket, @MessageBody() body: { toId: string }) {
-    if (!this.allowRate(s.id, 'call', 40, 10_000)) return;
-    if (!isId(body?.toId) || body.toId === s.data.userId) return;
-    this.server.to(body.toId).emit('call:rejected', { fromId: s.data.userId });
-  }
-
-  @SubscribeMessage('call:end')
-  onCallEnd(@ConnectedSocket() s: Socket, @MessageBody() body: { toId: string }) {
-    if (!this.allowRate(s.id, 'call', 40, 10_000)) return;
-    if (!isId(body?.toId) || body.toId === s.data.userId) return;
-    this.server.to(body.toId).emit('call:ended', { fromId: s.data.userId });
-  }
-
-  @SubscribeMessage('call:offer')
-  onCallOffer(@ConnectedSocket() s: Socket, @MessageBody() body: { toId: string; sdp: unknown }) {
-    if (!this.allowRate(s.id, 'call', 40, 10_000)) return;
-    if (!isId(body?.toId) || body.toId === s.data.userId) return;
-    if (!body.sdp || typeof body.sdp !== 'object') return;
-    this.server.to(body.toId).emit('call:offer', { fromId: s.data.userId, sdp: body.sdp });
-  }
-
-  @SubscribeMessage('call:answer')
-  onCallAnswer(@ConnectedSocket() s: Socket, @MessageBody() body: { toId: string; sdp: unknown }) {
-    if (!this.allowRate(s.id, 'call', 40, 10_000)) return;
-    if (!isId(body?.toId) || body.toId === s.data.userId) return;
-    if (!body.sdp || typeof body.sdp !== 'object') return;
-    this.server.to(body.toId).emit('call:answer', { fromId: s.data.userId, sdp: body.sdp });
-  }
-
-  @SubscribeMessage('call:ice-candidate')
-  onCallIceCandidate(@ConnectedSocket() s: Socket, @MessageBody() body: { toId: string; candidate: unknown }) {
-    if (!this.allowRate(s.id, 'call', 40, 10_000)) return;
-    if (!isId(body?.toId) || body.toId === s.data.userId) return;
-    if (!body.candidate || typeof body.candidate !== 'object') return;
-    this.server.to(body.toId).emit('call:ice-candidate', { fromId: s.data.userId, candidate: body.candidate });
-  }
+  // Calls live in CallsModule/CallsGateway. The old plain-relay call events
+  // were removed with the WebRTC prototype: two gateways subscribed to the same
+  // event names would race, and the server-authoritative flow is the only one
+  // allowed to mint room tokens.
 }

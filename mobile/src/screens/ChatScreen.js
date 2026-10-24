@@ -1,22 +1,39 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, FlatList, I18nManager, Image, KeyboardAvoidingView, Linking, Platform,
   Pressable, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { FontAwesome6 } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder,
+} from 'expo-audio';
 import { useAuth } from '../context/AuthContext';
+import { useCall } from '../context/CallContext';
 import { useChat } from '../hooks/useChat';
 import { fonts, radius, spacing, type, useAppTheme } from '../theme';
 import { dayKey, formatDayLabel } from '../utils/time';
+import { fa } from '../utils/persian';
 import Avatar from '../components/Avatar';
+import VoiceBubble from '../components/VoiceBubble';
 
 const GROUP_GAP = 5 * 60 * 1000;
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢'];
+// The recorder writes AAC inside an MP4 container on both platforms, which the
+// server accepts under the audio/mp4 name; the ceiling is the one a phone can
+// upload without a progress bar.
+const VOICE_EXT = 'm4a';
+const VOICE_MAX_MS = 10 * 60 * 1000;
 // Yoga resolves flex-start/flex-end against the device direction, so the rows
 // are pinned by physical side instead: own messages right, everyone else's left,
 // on both RTL and LTR phones.
 const RTL = I18nManager.isRTL;
+
+// A recording clock, written the way the rest of the app writes a length.
+function voiceClock(ms) {
+  const seconds = Math.max(0, Math.floor((ms ?? 0) / 1000));
+  return `${fa(String(Math.floor(seconds / 60)).padStart(2, '0'))}:${fa(String(seconds % 60).padStart(2, '0'))}`;
+}
 
 function buildRows(messages) {
   const rows = [];
@@ -40,25 +57,68 @@ function buildRows(messages) {
   return rows;
 }
 
-export default function ChatScreen({ route }) {
+export default function ChatScreen({ route, navigation }) {
   const peer = route.params?.peer;
   const { currentUser } = useAuth();
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
+  const { startCall } = useCall();
   const {
     messages, isTyping, typingName, connected, locked,
     historyState, historyError, retryHistory,
-    sendMessage, notifyTyping, toggleReaction,
+    sendMessage, sendVoice, notifyTyping, toggleReaction,
   } = useChat(peer, currentUser);
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [reactionPicker, setReactionPicker] = useState(null);
   const listRef = useRef(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const [isRecording, setIsRecording] = useState(false);
+  // True from the moment the recorder stops until the bytes are on the server:
+  // the row stays up with a spinner instead of blinking back to the keyboard.
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [voiceMs, setVoiceMs] = useState(0);
+  const voiceMsRef = useRef(0);
+  // The recorder is stopped by a tap and by the ceiling, and both can be in
+  // flight at the same instant; only one of them may hand a file to the server.
+  const voiceLockRef = useRef(false);
+  const finishRef = useRef(() => {});
 
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const isGroup = peer?.kind === 'group';
   const rows = useMemo(() => buildRows(messages).reverse(), [messages]);
+
+  // Calls sit in the header, next to the conversation they belong to. A chat
+  // that is encrypted on the web opens this screen locked, and the call context
+  // explains why mobile cannot join its E2EE room instead of downgrading it.
+  useLayoutEffect(() => {
+    if (!navigation?.setOptions) return undefined;
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => startCall(peer, 'audio')}
+            style={styles.headerCallBtn}
+            accessibilityRole="button"
+            accessibilityLabel="تماس صوتی"
+            hitSlop={6}
+          >
+            <FontAwesome6 name="phone" size={16} color={colors.text1} />
+          </Pressable>
+          <Pressable
+            onPress={() => startCall(peer, 'video')}
+            style={styles.headerCallBtn}
+            accessibilityRole="button"
+            accessibilityLabel="تماس ویدیویی"
+            hitSlop={6}
+          >
+            <FontAwesome6 name="video" size={16} color={colors.text1} />
+          </Pressable>
+        </View>
+      ),
+    });
+  }, [navigation, peer, startCall, styles, colors.text1]);
 
   useEffect(() => { setReactionPicker(null); }, [peer?.id]);
 
@@ -85,11 +145,86 @@ export default function ChatScreen({ route }) {
     setText('');
   }, [text, sending, sendMessage, locked]);
 
+  // ── Voice ────────────────────────────────────────────
+  // The phone counts the length while it records and that same number travels
+  // with the file: a streamed container reports nothing trustworthy until it has
+  // been read to the end, and the other side deserves the clock the sender
+  // actually watched.
+  async function startVoice() {
+    if (locked || voiceBusy || recorder.isRecording) return;
+    if (!connected) {
+      setError('اتصال به سرور برقرار نیست؛ دوباره تلاش کن');
+      return;
+    }
+    const permission = await requestRecordingPermissionsAsync();
+    if (!permission.granted) {
+      setError('برای ضبط پیام صوتی اجازهٔ استفاده از میکروفون لازم است');
+      return;
+    }
+    await setAudioModeAsync({ allowsRecording: true }).catch(() => {});
+    recorder.record();
+    voiceMsRef.current = 0;
+    setVoiceMs(0);
+    setError('');
+    setIsRecording(true);
+  }
+
+  const finishVoice = useCallback(async () => {
+    if (voiceLockRef.current || !recorder.isRecording) return;
+    voiceLockRef.current = true;
+    setIsRecording(false);
+    setVoiceBusy(true);
+    try {
+      await recorder.stop();
+      const result = await sendVoice({
+        uri: recorder.uri,
+        name: `voice-message.${VOICE_EXT}`,
+        durationMs: Math.round(recorder.getStatus().durationMillis || voiceMsRef.current),
+      });
+      if (!result.ok) setError(result.error);
+    } finally {
+      voiceLockRef.current = false;
+      setVoiceBusy(false);
+      // The speaker is only reachable once the mic hands the session back.
+      await setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+    }
+  }, [recorder, sendVoice]);
+
+  // Throwing a recording away still stops the recorder: a row that disappears
+  // while the microphone stays busy leaves the next attempt mute.
+  async function discardVoice() {
+    if (voiceLockRef.current) return;
+    voiceLockRef.current = true;
+    setIsRecording(false);
+    try {
+      await recorder.stop().catch(() => {});
+    } finally {
+      voiceLockRef.current = false;
+      await setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+    }
+  }
+
+  // The ceiling and a tap can arrive in the same moment, so the interval calls
+  // through a ref that always holds the current stop-and-send.
+  useEffect(() => { finishRef.current = () => { void finishVoice(); }; });
+
+  useEffect(() => {
+    if (!isRecording) return undefined;
+    const tick = setInterval(() => {
+      const ms = recorder.getStatus().durationMillis;
+      voiceMsRef.current = ms;
+      setVoiceMs(ms);
+      if (ms >= VOICE_MAX_MS) finishRef.current();
+    }, 250);
+    return () => clearInterval(tick);
+  }, [isRecording, recorder]);
+
   function openFile(msg) {
     if (msg.src) Linking.openURL(msg.src).catch(() => setError('باز کردن فایل ناموفق بود'));
   }
 
   const canSend = !!text.trim() && !sending && connected && !locked;
+  const canRecord = !text.trim() && connected && !locked && !sending && !voiceBusy;
 
   function renderItem({ item }) {
     if (item.type === 'day') {
@@ -126,7 +261,14 @@ export default function ChatScreen({ route }) {
               <Text style={styles.sender} numberOfLines={1}>{msg.sender || 'کاربر'}</Text>
             )}
 
-            {msg.type === 'image' && msg.src ? (
+            {msg.type === 'audio' && msg.src ? (
+              <VoiceBubble
+                id={msg.id}
+                src={msg.src}
+                durationMs={msg.durationMs}
+                mine={isMine}
+              />
+            ) : msg.type === 'image' && msg.src ? (
               <Pressable
                 onPress={() => openFile(msg)}
                 onLongPress={() => setReactionPicker(pickerOpen ? null : msg.id)}
@@ -355,35 +497,87 @@ export default function ChatScreen({ route }) {
         </View>
       )}
 
-      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
-        <TextInput
-          style={[styles.input, locked && styles.inputLocked]}
-          value={text}
-          onChangeText={(value) => { setText(value); setError(''); notifyTyping(); }}
-          editable={!locked}
-          placeholder={locked
-            ? 'نوشتن در این گفتگو فقط از نسخهٔ وب ممکن است'
-            : (connected ? 'پیامت را بنویس…' : 'در انتظار اتصال…')}
-          placeholderTextColor={colors.text3}
-          multiline
-          maxLength={4000}
-          testID="composer-input"
-          accessibilityLabel="متن پیام"
-        />
-        <Pressable
-          testID="composer-send"
-          style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
-          onPress={onSend}
-          disabled={!canSend}
-          accessibilityRole="button"
-          accessibilityLabel="ارسال پیام"
-          accessibilityState={{ disabled: !canSend }}
-        >
-          {sending
-            ? <ActivityIndicator color={colors.onAccent} size="small" />
-            : <FontAwesome6 name="paper-plane" size={15} color={canSend ? colors.onAccent : colors.text3} />}
-        </Pressable>
-      </View>
+      {isRecording || voiceBusy ? (
+        <View style={[styles.voiceRow, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+          <Pressable
+            testID="voice-cancel"
+            onPress={discardVoice}
+            disabled={voiceBusy}
+            hitSlop={8}
+            style={styles.voiceAction}
+            accessibilityRole="button"
+            accessibilityLabel="حذف پیام صوتی"
+          >
+            <FontAwesome6 name="trash-can" size={15} color={voiceBusy ? colors.text3 : colors.text2} />
+          </Pressable>
+
+          <View style={styles.voiceMeter}>
+            <View style={[styles.voiceDot, voiceBusy && styles.voiceDotBusy]} />
+            <Text style={styles.voiceClock}>{voiceClock(voiceMs)}</Text>
+            <Text style={styles.voiceHint}>{voiceBusy ? 'در حال ارسال…' : 'در حال ضبط…'}</Text>
+          </View>
+
+          <Pressable
+            testID="voice-send"
+            onPress={finishVoice}
+            disabled={voiceBusy || !connected}
+            style={[styles.sendBtn, (voiceBusy || !connected) && styles.sendBtnDisabled]}
+            accessibilityRole="button"
+            accessibilityLabel="ارسال پیام صوتی"
+            accessibilityState={{ disabled: voiceBusy || !connected }}
+          >
+            {voiceBusy
+              ? <ActivityIndicator color={colors.onAccent} size="small" />
+              : <FontAwesome6 name="paper-plane" size={15} color={connected ? colors.onAccent : colors.text3} />}
+          </Pressable>
+        </View>
+      ) : (
+        <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+          <TextInput
+            style={[styles.input, locked && styles.inputLocked]}
+            value={text}
+            onChangeText={(value) => { setText(value); setError(''); notifyTyping(); }}
+            editable={!locked}
+            placeholder={locked
+              ? 'نوشتن در این گفتگو فقط از نسخهٔ وب ممکن است'
+              : (connected ? 'پیامت را بنویس…' : 'در انتظار اتصال…')}
+            placeholderTextColor={colors.text3}
+            multiline
+            maxLength={4000}
+            testID="composer-input"
+            accessibilityLabel="متن پیام"
+          />
+          {/* One button, two jobs, the same rule the web composer uses: an empty
+              field offers the microphone, a written one offers the plane. */}
+          {text.trim() ? (
+            <Pressable
+              testID="composer-send"
+              style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
+              onPress={onSend}
+              disabled={!canSend}
+              accessibilityRole="button"
+              accessibilityLabel="ارسال پیام"
+              accessibilityState={{ disabled: !canSend }}
+            >
+              {sending
+                ? <ActivityIndicator color={colors.onAccent} size="small" />
+                : <FontAwesome6 name="paper-plane" size={15} color={canSend ? colors.onAccent : colors.text3} />}
+            </Pressable>
+          ) : (
+            <Pressable
+              testID="composer-mic"
+              style={[styles.sendBtn, !canRecord && styles.sendBtnDisabled]}
+              onPress={startVoice}
+              disabled={!canRecord}
+              accessibilityRole="button"
+              accessibilityLabel="ضبط پیام صوتی"
+              accessibilityState={{ disabled: !canRecord }}
+            >
+              <FontAwesome6 name="microphone" size={15} color={canRecord ? colors.onAccent : colors.text3} />
+            </Pressable>
+          )}
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -392,6 +586,21 @@ function makeStyles(colors) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.chat },
     list: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md },
+
+    headerActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      paddingHorizontal: spacing.xs,
+    },
+    headerCallBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface2,
+    },
 
     offlineBar: { backgroundColor: colors.surface2, paddingVertical: 5, alignItems: 'center' },
     offlineText: { color: colors.text2, fontFamily: fonts.regular, fontSize: type.xs },
@@ -617,5 +826,23 @@ function makeStyles(colors) {
       alignItems: 'center', justifyContent: 'center',
     },
     sendBtnDisabled: { backgroundColor: colors.surface3 },
+
+    // The recording row keeps the composer's shape so the button the thumb is
+    // already resting on still sends; only the field gives way to the clock.
+    voiceRow: {
+      flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,
+      paddingHorizontal: spacing.md, paddingTop: spacing.sm,
+      borderTopWidth: 1, borderTopColor: colors.border,
+      backgroundColor: colors.chat,
+    },
+    voiceAction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+    voiceMeter: {
+      flex: 1, flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,
+      minHeight: 44,
+    },
+    voiceDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.danger },
+    voiceDotBusy: { backgroundColor: colors.text3 },
+    voiceClock: { color: colors.text1, fontFamily: fonts.medium, fontSize: type.base },
+    voiceHint: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.xs },
   });
 }

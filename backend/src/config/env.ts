@@ -108,6 +108,30 @@ export const E2EE_ENVELOPE_PAGE = positiveInt('E2EE_ENVELOPE_PAGE', 200);
 export const E2EE_REGISTER_LIMIT = positiveInt('E2EE_REGISTER_LIMIT', 30);
 export const E2EE_REGISTER_WINDOW_SECONDS = positiveInt('E2EE_REGISTER_WINDOW_SECONDS', 600);
 
+// LiveKit is the media SFU. It is optional at boot so the app keeps working
+// (and CI keeps building) before a server is provisioned; every call path fails
+// closed with a clear 503 until all three values exist.
+export const LIVEKIT_URL = process.env.LIVEKIT_URL?.trim() || '';
+export const LIVEKIT_API_URL = process.env.LIVEKIT_API_URL?.trim() || '';
+export const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY?.trim() || '';
+export const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET?.trim() || '';
+export const LIVEKIT_CONFIGURED = Boolean(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_API_SECRET);
+// Room administration (delete a finished room, remove a revoked member) talks
+// to LiveKit's HTTP API. It stays off unless an explicit API URL is provided,
+// which also keeps tests from reaching a real server.
+export const LIVEKIT_ROOM_ADMIN = LIVEKIT_CONFIGURED && Boolean(LIVEKIT_API_URL);
+
+// A direct call rings for this long before it is recorded as missed. Group
+// calls use the same window to wait for a first participant.
+export const CALL_RING_TIMEOUT_SECONDS = positiveInt('CALL_RING_TIMEOUT_SECONDS', 45);
+// The room token is only needed to establish the session; reconnects use the
+// same LiveKit session. Ten minutes leaves room for a slow join.
+export const CALL_TOKEN_TTL_SECONDS = positiveInt('CALL_TOKEN_TTL_SECONDS', 600);
+// A backstop for calls whose end event was lost. The UI timer is the displayed
+// duration, not this limit.
+export const CALL_MAX_DURATION_SECONDS = positiveInt('CALL_MAX_DURATION_SECONDS', 4 * 60 * 60);
+export const CALL_MAX_GROUP_PARTICIPANTS = positiveInt('CALL_MAX_GROUP_PARTICIPANTS', 20);
+
 // Comma-separated list of browser origins allowed to call the HTTP API and
 // the Socket.IO endpoint. Native apps and same-origin requests send no Origin
 // header and are always allowed. When unset in development we allow only

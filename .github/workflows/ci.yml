@@ -431,6 +431,12 @@ jobs:
       POSTGRES_PASSWORD: ci-only-password
       JWT_SECRET: ci-only-secret-at-least-32-characters-long-0000
       WEB_PORT: '8080'
+      # The compose stack includes the self-hosted media server. These are test
+      # values; no call is placed by the smoke test.
+      LIVEKIT_API_KEY: ci-only-livekit-key
+      LIVEKIT_API_SECRET: ci-only-livekit-secret-at-least-32-characters
+      LIVEKIT_URL: ws://localhost/livekit
+      LIVEKIT_API_URL: http://livekit:7880
     steps:
       - uses: actions/checkout@v4
       - run: docker compose config --quiet

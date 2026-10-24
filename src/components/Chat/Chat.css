@@ -829,6 +829,178 @@ button.msg-sender {
 
 .bubble-file-dl { font-size: 13px; opacity: 0.7; flex-shrink: 0; }
 
+/* ── Voice message ───────────────────────────────────────────── */
+/* The Telegram shape: a round play, a rail that is also the scrubber, and the
+   length at the inline end. The rail is one styled range input rather than a
+   painted div, so a keyboard reaches the middle of a recording and a screen
+   reader is told what moving it means without any of that being invented here.
+   Nothing in a bubble is drawn from the file's own amplitude — the bars that
+   scroll during recording are the microphone speaking, and once sent the only
+   truth left is how far the sound has got. */
+.voice-bubble {
+  --voice-track: var(--surface-3);
+  --voice-fill:  var(--accent);
+  --voice-thumb: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 210px;
+  max-width: 300px;
+  width: 100%;
+}
+
+.msg-wrapper.mine .voice-bubble {
+  --voice-track: rgba(255, 255, 255, 0.26);
+  --voice-fill:  var(--on-bubble-out);
+  --voice-thumb: var(--on-bubble-out);
+}
+
+.voice-play {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 13px;
+  transition: transform var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+}
+
+.voice-play:hover:not(:disabled) { transform: scale(1.06); }
+.voice-play:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Heard once, the circle steps back: the mark that says "nobody has listened
+   here yet" is the filled play itself, so a bubble that has been heard loses it. */
+.voice-bubble:not(.is-unplayed) .voice-play {
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.msg-wrapper.mine .voice-play { background: var(--on-bubble-out); color: var(--accent); }
+.msg-wrapper.mine .voice-bubble:not(.is-unplayed) .voice-play {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--on-bubble-out);
+}
+
+.voice-track { flex: 1; display: flex; min-width: 0; }
+
+.voice-rail {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  margin: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: linear-gradient(to left, var(--voice-fill) var(--fill, 0%), var(--voice-track) var(--fill, 0%));
+  cursor: pointer;
+}
+
+.voice-rail:disabled { cursor: default; }
+
+.voice-rail::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--voice-thumb);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.voice-rail::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--voice-thumb);
+  opacity: 0;
+}
+
+/* The handle appears for the recording being listened to, and for anything the
+   pointer is over — a rail on a bubble that is not playing cannot be moved. */
+.voice-bubble.is-active .voice-rail::-webkit-slider-thumb,
+.voice-bubble:hover .voice-rail::-webkit-slider-thumb { opacity: 1; }
+.voice-bubble.is-active .voice-rail::-moz-range-thumb,
+.voice-bubble:hover .voice-rail::-moz-range-thumb { opacity: 1; }
+.voice-rail:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+.voice-time {
+  font-size: 11px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.voice-fallback {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--danger);
+  text-decoration: none;
+}
+
+.msg-wrapper.mine .voice-fallback { color: var(--on-bubble-out); }
+.voice-fallback:hover { text-decoration: underline; }
+
+/* ── Recording bar ───────────────────────────────────────────── */
+/* The composer's third mode. It holds the same height as the row it replaces, so
+   opening a microphone does not shove the thread up the screen. */
+.voice-recording { align-items: center; }
+
+.voice-rec-timer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+  min-width: 58px;
+  color: var(--danger);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-rec-timer > i { font-size: 9px; animation: voice-pulse 1.1s var(--ease) infinite; }
+
+@keyframes voice-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-rec-timer > i { animation: none; }
+}
+
+.voice-rec-meter {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 26px;
+  overflow: hidden;
+}
+
+.voice-rec-meter > b {
+  display: block;
+  width: 2px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: var(--danger);
+  opacity: 0.6;
+  transform: scaleY(0.14);
+}
+
 /* ── States ──────────────────────────────────────────────────── */
 .history-error {
   align-self: center;

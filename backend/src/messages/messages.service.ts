@@ -38,6 +38,11 @@ const lastMessageInclude = (userId: string) => ({
   select:  LAST_MESSAGE_SELECT,
 });
 
+// A voice message is refused past a quarter of an hour. The upload ceiling of
+// ten megabytes already bounds the bytes; this bounds the listening, and it is
+// the number a recording client stops its own timer at.
+const MAX_DURATION_MS = 15 * 60 * 1000;
+
 // Photos and films in one list, documents and voice recordings in the other: the
 // split a profile panel is judged by, not the enum's own vocabulary.
 const SHARED_TYPES = {
@@ -231,7 +236,7 @@ export class MessagesService {
   }
 
   async create(senderId: string, receiverId: string, data: {
-    type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number;
+    type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number; durationMs?: number;
   }) {
     const conversation = await this.getOrCreateDirectConversation(senderId, receiverId);
     return this.sendToConversation(conversation.id, senderId, data);
@@ -635,7 +640,7 @@ export class MessagesService {
   }
 
   private normalizeOutgoingMessage(data: {
-    type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number;
+    type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number; durationMs?: number;
   }) {
     const type = (typeof data.type === 'string' ? data.type : 'TEXT').toUpperCase();
     const allowedTypes = ['TEXT', 'IMAGE', 'FILE', 'AUDIO', 'VIDEO'];
@@ -646,7 +651,7 @@ export class MessagesService {
 
     if (type === 'TEXT') {
       if (!text) throw new BadRequestException('متن پیام نمی‌تواند خالی باشد');
-      return { type: type as any, text, fileUrl: null, fileName: null, fileSize: null };
+      return { type: type as any, text, fileUrl: null, fileName: null, fileSize: null, durationMs: null };
     }
 
     const fileUrl = typeof data.fileUrl === 'string' ? data.fileUrl.trim() : '';
@@ -659,11 +664,30 @@ export class MessagesService {
       throw new BadRequestException('حجم فایل نامعتبر است');
     }
 
-    return { type: type as any, text: text || null, fileUrl, fileName, fileSize: data.fileSize ?? null };
+    // A refused duration is always the better answer than a stored one nobody
+    // can play: a voice bubble counts down from this number, so a length that
+    // never ends, or has no length at all, is a bubble that lies about its file.
+    const durationMs = data.durationMs ?? null;
+    if (durationMs !== null && (!Number.isInteger(durationMs)
+      || durationMs < 0 || durationMs > MAX_DURATION_MS)) {
+      throw new BadRequestException('مدت پیام نامعتبر است');
+    }
+    // Only media that plays has a length worth keeping. A picture or a plain
+    // file drops the field rather than storing a number nothing will show.
+    const plays = type === 'AUDIO' || type === 'VIDEO';
+
+    return {
+      type: type as any,
+      text: text || null,
+      fileUrl,
+      fileName,
+      fileSize: data.fileSize ?? null,
+      durationMs: plays ? durationMs : null,
+    };
   }
 
   async sendToConversation(conversationId: string, senderId: string, data: {
-    type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number;
+    type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number; durationMs?: number;
   }) {
     await this.assertMember(conversationId, senderId);
     // An encrypted conversation has no plaintext path: accepting one here would
@@ -770,7 +794,7 @@ export class MessagesService {
       await this.prisma.$transaction(async tx => {
         await tx.message.update({
           where: { id: messageId },
-          data:  { deletedAt: new Date(), text: null, fileUrl: null, fileName: null, fileSize: null },
+          data:  { deletedAt: new Date(), text: null, fileUrl: null, fileName: null, fileSize: null, durationMs: null },
         });
         await tx.reaction.deleteMany({ where: { messageId } });
         await tx.messageRead.deleteMany({ where: { messageId } });

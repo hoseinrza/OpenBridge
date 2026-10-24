@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Avatar from '../ui/Avatar.jsx';
 import EncryptedMedia from './EncryptedMedia.jsx';
 import MessageActionsMenu from './MessageActionsMenu.jsx';
+import VoiceBubble from './VoiceBubble.jsx';
+import { playableFromSrc } from '../../services/voice.js';
 import { formatSize } from '../../utils/format.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢'];
@@ -32,6 +34,17 @@ function BubbleBody({ message, searchQuery, onOpenImage }) {
         name={message.name}
         size={message.size}
         onOpen={onOpenImage}
+      />
+    );
+  }
+
+  if (message.type === 'audio') {
+    return (
+      <VoiceBubble
+        id={message.id}
+        durationMs={message.durationMs}
+        resolve={() => playableFromSrc(message.src)}
+        download={message.src}
       />
     );
   }
@@ -236,7 +249,8 @@ export default function MessageGroup({
     lastMenu.current = menu;
   }, [menu]);
 
-  const bubbleClass = `bubble ${message.type === 'image' ? 'bubble-image' : ''}`;
+  const bubbleClass = `bubble ${message.type === 'image' ? 'bubble-image' : ''}`
+    + `${message.type === 'audio' ? ' bubble-voice' : ''}`;
   const wrapperClass = `msg-wrapper ${isMine ? 'mine' : 'other'} `
     + `${first ? 'first' : ''} ${last ? 'last' : ''} ${leaving ? 'leaving' : ''}`;
 

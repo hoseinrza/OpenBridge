@@ -12,6 +12,8 @@ import InputArea from './InputArea.jsx';
 import ProfileModal from '../Profile/ProfileModal.jsx';
 import ChatProfilePanel from '../Profile/ChatProfilePanel.jsx';
 import NewChatModal from '../NewChat/NewChatModal.jsx';
+import CallLayer from '../Call/CallLayer.jsx';
+import { useCall } from '../../hooks/useCall.js';
 import './Chat.css';
 
 function previewFromServer(lastMessage, myId) {
@@ -166,6 +168,10 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     sendMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
   } = useChat(activeUser, currentUser, handleIncoming, handleGroupUpdated);
 
+  // Calls are mounted for the whole signed-in page, not per chat: an incoming
+  // ring must reach a user who is reading a different conversation.
+  const call = useCall(currentUser);
+
   // A toast is the only answer some actions get: nothing on screen changes for
   // a copy, and a failure that leaves the message as it was has nowhere else to
   // be said. It says itself once and then goes away on its own.
@@ -311,6 +317,9 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               onSearchChange={setSearchQuery}
               onOpenProfile={openChatProfile}
               onBack={handleBackToList}
+              onStartCall={(type) => call.startCall(activeUser, type)}
+              callsEnabled={call.callsConfigured}
+              callBusy={call.phase !== 'idle'}
             />
 
             {!connected && (
@@ -415,6 +424,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           onGroupCreated={handleGroupCreated}
         />
       )}
+
+      <CallLayer call={call} currentUser={currentUser} />
     </div>
   );
 }

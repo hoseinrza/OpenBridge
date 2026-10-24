@@ -5,6 +5,7 @@ const STATUS_TEXT = { online: 'آنلاین', idle: 'غیرفعال', dnd: 'مش
 
 export default function ChatHeader({
   user, encrypted = false, encryptionNote = null, searchQuery, onSearchChange, onOpenProfile, onBack,
+  onStartCall, callsEnabled = true, callBusy = false,
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const inputRef = useRef(null);
@@ -123,6 +124,34 @@ export default function ChatHeader({
                 <i className="fas fa-lock-open" aria-hidden="true" />
                 بدون رمزنگاری
               </span>
+            )}
+            {onStartCall && (
+              <>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => onStartCall('audio')}
+                  disabled={!callsEnabled || callBusy}
+                  title={!callsEnabled
+                    ? 'تماس روی این سرور فعال نیست'
+                    : callBusy ? 'در تماس دیگری هستید' : 'تماس صوتی'}
+                  aria-label="تماس صوتی"
+                >
+                  <i className="fas fa-phone" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => onStartCall('video')}
+                  disabled={!callsEnabled || callBusy}
+                  title={!callsEnabled
+                    ? 'تماس روی این سرور فعال نیست'
+                    : callBusy ? 'در تماس دیگری هستید' : 'تماس ویدیویی'}
+                  aria-label="تماس ویدیویی"
+                >
+                  <i className="fas fa-video" aria-hidden="true" />
+                </button>
+              </>
             )}
             <button
               type="button"

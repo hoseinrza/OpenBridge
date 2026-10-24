@@ -9,6 +9,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { fontAssets, fonts, navFonts, useAppTheme } from './src/theme';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { SocketProvider } from './src/context/SocketContext';
+import { CallProvider } from './src/context/CallContext';
+import CallOverlay from './src/components/CallOverlay';
 import LoginScreen from './src/screens/LoginScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatScreen from './src/screens/ChatScreen';
@@ -101,10 +103,13 @@ export default function App() {
   return (
     <AuthProvider>
       <SocketProvider>
-        <NavigationContainer theme={navTheme}>
-          <StatusBar style={dark ? 'light' : 'dark'} />
-          <RootNavigator />
-        </NavigationContainer>
+        <CallProvider>
+          <NavigationContainer theme={navTheme}>
+            <StatusBar style={dark ? 'light' : 'dark'} />
+            <RootNavigator />
+          </NavigationContainer>
+          <CallOverlay />
+        </CallProvider>
       </SocketProvider>
     </AuthProvider>
   );

@@ -7,7 +7,9 @@ import { AppModule } from './app.module';
 import { isOriginAllowed, TRUST_PROXY } from './config/env';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody is required by the LiveKit webhook: its signature covers the exact
+  // bytes LiveKit sent, not the parser's re-serialization.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
   if (TRUST_PROXY !== false) app.set('trust proxy', TRUST_PROXY);
   app.setGlobalPrefix('api');
