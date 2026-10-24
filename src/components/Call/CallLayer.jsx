@@ -4,19 +4,34 @@ import Avatar from '../ui/Avatar.jsx';
 import './Call.css';
 
 const ENC = {
-  none:     { icon: 'fa-lock-open', text: 'بدون رمزنگاری سرتاسری', className: 'is-off', title: 'این تماس فقط با رمزنگاری لایهٔ انتقال (DTLS-SRTP) محافظت می‌شود؛ سرور رسانه می‌تواند آن را ببیند' },
-  pending:  { icon: 'fa-lock', text: 'رمزنگاری سرتاسری · در انتظار تأیید', className: 'is-pending', title: 'کلید روی دستگاه‌ها ساخته شده است؛ تا تأیید رمزنگاری هر دو طرف، نشان «تأییدشده» نمایش داده نمی‌شود' },
+  none:     { icon: 'fa-lock-open', text: 'بدون رمزنگاری سرتاسری', className: 'is-off', title: 'این تماس فقط با رمزنگاری لایهٔ انتقال محافظت می‌شود؛ سرور رسانه می‌تواند آن را ببیند' },
+  pending:  { icon: 'fa-lock', text: 'در انتظار تأیید رمزنگاری', className: 'is-pending', title: 'کلید روی دستگاه‌ها ساخته شده است؛ تا تأیید هر دو طرف، نشان تأییدشده نمایش داده نمی‌شود' },
   verified: { icon: 'fa-lock', text: 'رمزنگاری سرتاسری', className: 'is-on', title: 'رسانه روی دستگاه‌ها رمز و رمزگشایی می‌شود؛ سرور رسانه کلید ندارد' },
   failed:   { icon: 'fa-triangle-exclamation', text: 'رمزنگاری تأیید نشد', className: 'is-failed', title: 'تماس به دلیل عدم تأیید رمزنگاری بسته شد' },
 };
 
-function EncryptionChip({ state }) {
+function CallLock({ state }) {
   const item = ENC[state] ?? ENC.none;
   return (
-    <span className={`call-enc ${item.className}`} title={item.title}>
+    <span className={`call-lock ${item.className}`} title={item.title} aria-label={item.text}>
       <i className={`fas ${item.icon}`} aria-hidden="true" />
-      {item.text}
+      <span className="call-lock-text">{item.text}</span>
     </span>
+  );
+}
+
+function CallLockFor(call) {
+  return <CallLock state={call.callInfo?.e2ee ? call.encryptionState : 'none'} />;
+}
+
+function CallBackdrop({ avatar }) {
+  return (
+    <div className="call-backdrop" aria-hidden="true">
+      {avatar
+        ? <div className="call-backdrop-image" style={{ backgroundImage: `url("${avatar}")` }} />
+        : <div className="call-backdrop-fallback" />}
+      <div className="call-veil" />
+    </div>
   );
 }
 
@@ -42,16 +57,13 @@ function CameraSurface({ track, muted = false, local = false, screen = false, na
         />
       ) : (
         <div className="call-video-empty">
-          <Avatar src={avatar} name={name} size={72} />
+          <Avatar src={avatar} name={name} size={88} />
         </div>
       )}
     </div>
   );
 }
 
-// LiveKit delivers remote audio as tracks; the SDK does not create an audio
-// element for us. One hidden sink keeps every remote microphone and shared
-// screen audio audible without a per-participant UI concern.
 function AudioElement({ track }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -97,14 +109,13 @@ function isMuted(participant) {
   return Boolean(participant?.getTrackPublication(Track.Source.Microphone)?.isMuted);
 }
 
-function Tile({ participant, local, currentUser, active, micOn }) {
+function ParticipantTile({ participant, local, currentUser, active, micOn }) {
   const name = local ? (currentUser?.name ?? 'شما') : (participant?.name || participant?.identity || 'کاربر');
   const track = cameraTrack(participant);
   const muted = local ? !micOn : isMuted(participant);
-  const speaking = participant?.isSpeaking;
 
   return (
-    <div className={`call-tile ${active ? 'is-speaking' : ''} ${speaking ? 'is-speaking' : ''}`}>
+    <div className={`call-tile ${active ? 'is-speaking' : ''}`}>
       <CameraSurface
         track={track}
         muted={local}
@@ -112,6 +123,7 @@ function Tile({ participant, local, currentUser, active, micOn }) {
         name={name}
         avatar={local ? currentUser?.avatar : undefined}
       />
+      <div className="call-tile-shade" />
       <div className="call-tile-footer">
         <span className="call-tile-name" title={name}>{name}{local ? ' (شما)' : ''}</span>
         {muted && <i className="fas fa-microphone-slash call-tile-muted" aria-label="میکروفون بسته است" />}
@@ -120,28 +132,21 @@ function Tile({ participant, local, currentUser, active, micOn }) {
   );
 }
 
-function EncryptionChipFor(call) {
-  return <EncryptionChip state={call.callInfo?.e2ee ? call.encryptionState : 'none'} />;
-}
+/* ── Ringing screens ─────────────────────────────────────────── */
 
-function Preparing({ call, title, avatar, isGroup }) {
+function RingScreen({ title, avatar, isGroup, subtitle, children }) {
   return (
-    <div className="call-center-card">
-      <Avatar src={avatar} name={title} size={92} group={isGroup} />
-      <h2 id="call-title" className="call-title">{title}</h2>
-      <p className="call-subtitle"><span className="call-spinner" aria-hidden="true" /> در حال آماده‌سازی تماس…</p>
-      <EncryptionChipFor call={call} />
-      <div className="call-actions">
-        <button
-          type="button"
-          className="call-btn call-btn-end"
-          onClick={() => call.cancelCall()}
-          aria-label="انصراف از تماس"
-        >
-          <i className="fas fa-xmark" aria-hidden="true" />
-          <span>انصراف</span>
-        </button>
+    <div className="call-screen">
+      <div className="call-hero">
+        <span className="call-pulse" aria-hidden="true" />
+        <span className="call-pulse is-late" aria-hidden="true" />
+        <Avatar src={avatar} name={title} size={128} group={isGroup} />
       </div>
+      <div className="call-identity">
+        <h2 id="call-title" className="call-name">{title}</h2>
+        {subtitle}
+      </div>
+      {children}
     </div>
   );
 }
@@ -154,121 +159,172 @@ function Incoming({ call, title, avatar, isGroup, callType, callerName }) {
 
   const waitingForKey = call.callInfo?.e2ee && !call.keyReady;
   const accepting = call.busy;
+  const acceptIcon = callType === 'video' ? 'fa-video' : 'fa-phone';
 
   return (
-    <div className="call-center-card call-incoming">
-      <div className="call-rings" aria-hidden="true">
-        <span /><span /><span />
-      </div>
-      <Avatar src={avatar} name={title} size={104} group={isGroup} />
-      <h2 id="call-title" className="call-title">{title}</h2>
-      <p className="call-subtitle">
-        {callerName && isGroup ? `${callerName} · ` : ''}
-        تماس {callType === 'video' ? 'ویدیویی' : 'صوتی'} ورودی
-      </p>
-      <EncryptionChipFor call={call} />
-      {waitingForKey && (
-        <p className="call-hint" role="status">
-          <span className="call-spinner" aria-hidden="true" /> در حال آماده‌سازی کلید رمزنگاری…
-        </p>
+    <RingScreen
+      title={title}
+      avatar={avatar}
+      isGroup={isGroup}
+      subtitle={(
+        <>
+          {callerName && isGroup && <span className="call-from">{callerName}</span>}
+          <p className="call-status">
+            {waitingForKey ? 'در حال آماده‌سازی رمزنگاری…' : `تماس ${callType === 'video' ? 'ویدیویی' : 'صوتی'} ورودی`}
+          </p>
+          <CallLockFor call={call} />
+        </>
       )}
-
-      <div className="call-actions">
+    >
+      <div className="call-decision">
         <button
           type="button"
-          className="call-btn call-btn-reject"
+          className="call-round call-round-reject"
           onClick={() => call.rejectCall()}
           aria-label="رد تماس"
+          title="رد تماس"
         >
           <i className="fas fa-phone-slash" aria-hidden="true" />
-          <span>رد</span>
         </button>
         <button
           ref={acceptRef}
           type="button"
-          className="call-btn call-btn-accept"
+          className="call-round call-round-accept"
           onClick={() => call.acceptCall()}
           disabled={accepting || waitingForKey}
           aria-label="پاسخ به تماس"
+          title="پاسخ به تماس"
         >
-          {accepting
+          {accepting || waitingForKey
             ? <span className="call-spinner" aria-hidden="true" />
-            : <i className="fas fa-phone" aria-hidden="true" />}
-          <span>پاسخ</span>
+            : <i className={`fas ${acceptIcon}`} aria-hidden="true" />}
         </button>
       </div>
-    </div>
+    </RingScreen>
   );
 }
 
 function Outgoing({ call, title, avatar, isGroup, callType }) {
   return (
-    <div className="call-center-card">
-      <Avatar src={avatar} name={title} size={104} group={isGroup} />
-      <h2 id="call-title" className="call-title">{title}</h2>
-      <p className="call-subtitle">
-        <span className="call-spinner" aria-hidden="true" />
-        در حال زنگ زدن · تماس {callType === 'video' ? 'ویدیویی' : 'صوتی'}
-      </p>
-      <EncryptionChipFor call={call} />
-      <div className="call-actions">
+    <RingScreen
+      title={title}
+      avatar={avatar}
+      isGroup={isGroup}
+      subtitle={(
+        <>
+          <p className="call-status">
+            <span className="call-spinner" aria-hidden="true" />
+            در حال زنگ زدن
+          </p>
+          <span className="call-type">{callType === 'video' ? 'تماس ویدیویی' : 'تماس صوتی'}</span>
+          <CallLockFor call={call} />
+        </>
+      )}
+    >
+      <div className="call-decision is-single">
         <button
           type="button"
-          className="call-btn call-btn-end"
+          className="call-round call-round-reject"
           onClick={() => call.cancelCall()}
           aria-label="لغو تماس"
+          title="لغو تماس"
         >
           <i className="fas fa-phone-slash" aria-hidden="true" />
-          <span>لغو</span>
         </button>
       </div>
-    </div>
+    </RingScreen>
   );
 }
 
-function CallControls({ call, connecting }) {
+function Preparing({ call, title, avatar, isGroup }) {
+  return (
+    <RingScreen
+      title={title}
+      avatar={avatar}
+      isGroup={isGroup}
+      subtitle={(
+        <>
+          <p className="call-status">
+            <span className="call-spinner" aria-hidden="true" />
+            در حال آماده‌سازی…
+          </p>
+          <CallLockFor call={call} />
+        </>
+      )}
+    >
+      <div className="call-decision is-single">
+        <button
+          type="button"
+          className="call-round call-round-reject"
+          onClick={() => call.cancelCall()}
+          aria-label="انصراف از تماس"
+          title="انصراف از تماس"
+        >
+          <i className="fas fa-xmark" aria-hidden="true" />
+        </button>
+      </div>
+    </RingScreen>
+  );
+}
+
+/* ── Active call ─────────────────────────────────────────────── */
+
+function Controls({ call, connecting }) {
   const canShareScreen = typeof navigator !== 'undefined'
     && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 
   return (
-    <div className="call-controls" role="toolbar" aria-label="کنترل‌های تماس">
-      <button
-        type="button"
-        className={`call-ctrl ${call.micOn ? '' : 'is-off'}`}
-        onClick={() => call.toggleMic()}
-        aria-pressed={call.micOn}
-        title={call.micOn ? 'قطع میکروفون' : 'روشن‌کردن میکروفون'}
-      >
-        <i className={`fas fa-${call.micOn ? 'microphone' : 'microphone-slash'}`} aria-hidden="true" />
-        <span>میکروفون</span>
-      </button>
-
-      <button
-        type="button"
-        className={`call-ctrl ${call.camOn ? '' : 'is-off'}`}
-        onClick={() => call.toggleCam()}
-        aria-pressed={call.camOn}
-        title={call.camOn ? 'خاموش‌کردن دوربین' : 'روشن‌کردن دوربین'}
-      >
-        <i className={`fas fa-${call.camOn ? 'video' : 'video-slash'}`} aria-hidden="true" />
-        <span>دوربین</span>
-      </button>
-
-      {canShareScreen && (
+    <div className="call-dock">
+      <div className="call-dock-inner">
         <button
           type="button"
-          className={`call-ctrl ${call.screenOn ? 'is-on' : ''}`}
-          onClick={() => call.toggleScreen()}
-          aria-pressed={call.screenOn}
-          title={call.screenOn ? 'پایان اشتراک صفحه' : 'اشتراک صفحه'}
+          className={`call-round ${call.micOn ? '' : 'is-off'}`}
+          onClick={() => call.toggleMic()}
+          aria-pressed={call.micOn}
+          aria-label={call.micOn ? 'قطع میکروفون' : 'روشن‌کردن میکروفون'}
+          title={call.micOn ? 'قطع میکروفون' : 'روشن‌کردن میکروفون'}
         >
-          <i className="fas fa-display" aria-hidden="true" />
-          <span>صفحه</span>
+          <i className={`fas fa-${call.micOn ? 'microphone' : 'microphone-slash'}`} aria-hidden="true" />
         </button>
-      )}
+
+        <button
+          type="button"
+          className={`call-round ${call.camOn ? '' : 'is-off'}`}
+          onClick={() => call.toggleCam()}
+          aria-pressed={call.camOn}
+          aria-label={call.camOn ? 'خاموش‌کردن دوربین' : 'روشن‌کردن دوربین'}
+          title={call.camOn ? 'خاموش‌کردن دوربین' : 'روشن‌کردن دوربین'}
+        >
+          <i className={`fas fa-${call.camOn ? 'video' : 'video-slash'}`} aria-hidden="true" />
+        </button>
+
+        {canShareScreen && (
+          <button
+            type="button"
+            className={`call-round ${call.screenOn ? 'is-active' : ''}`}
+            onClick={() => call.toggleScreen()}
+            aria-pressed={call.screenOn}
+            aria-label={call.screenOn ? 'پایان اشتراک صفحه' : 'اشتراک صفحه'}
+            title={call.screenOn ? 'پایان اشتراک صفحه' : 'اشتراک صفحه'}
+          >
+            <i className="fas fa-display" aria-hidden="true" />
+          </button>
+        )}
+
+        <button
+          type="button"
+          className="call-round call-round-end"
+          onClick={() => call.hangUp()}
+          disabled={connecting && !call.room}
+          aria-label="پایان تماس"
+          title="پایان تماس"
+        >
+          <i className="fas fa-phone-slash" aria-hidden="true" />
+        </button>
+      </div>
 
       {call.audioDevices.length > 1 && (
-        <label className="call-device">
+        <label className="call-audio-pill">
           <i className="fas fa-volume-high" aria-hidden="true" />
           <span className="sr-only">خروجی صدا</span>
           <select
@@ -284,18 +340,15 @@ function CallControls({ call, connecting }) {
           </select>
         </label>
       )}
+    </div>
+  );
+}
 
-      <button
-        type="button"
-        className="call-ctrl call-ctrl-end"
-        onClick={() => call.hangUp()}
-        disabled={connecting && !call.room}
-        aria-label="پایان تماس"
-        title="پایان تماس"
-      >
-        <i className="fas fa-phone-slash" aria-hidden="true" />
-        <span>پایان</span>
-      </button>
+function AudioView({ peer, group, avatar, status }) {
+  return (
+    <div className="call-audio-view">
+      <Avatar src={avatar} name={peer?.name || group?.name || 'تماس'} size={156} group={!peer} />
+      <span className="call-audio-status">{status}</span>
     </div>
   );
 }
@@ -303,13 +356,7 @@ function CallControls({ call, connecting }) {
 function DirectStage({ call, currentUser }) {
   const room = call.room;
   if (!room) {
-    const name = call.peer?.name || 'طرف مقابل';
-    return (
-      <div className="call-waiting">
-        <Avatar src={call.peer?.avatar} name={name} size={104} />
-        <p className="call-subtitle"><span className="call-spinner" aria-hidden="true" /> در انتظار اتصال…</p>
-      </div>
-    );
+    return <AudioView peer={call.peer} avatar={call.peer?.avatar} status="در انتظار اتصال…" />;
   }
 
   const remotes = [...room.remoteParticipants.values()];
@@ -319,9 +366,11 @@ function DirectStage({ call, currentUser }) {
   const localScreen = screenTrack(local);
   const shared = remoteScreen || localScreen;
   const sharedByMe = Boolean(localScreen);
+  const remoteCamera = remote ? cameraTrack(remote) : undefined;
+  const localCamera = cameraTrack(local);
 
   return (
-    <div className="call-stage-direct">
+    <div className="call-direct-stage">
       {shared ? (
         <div className="call-share-stage">
           <CameraSurface track={shared} screen name={sharedByMe ? currentUser?.name : (remote?.name || 'طرف مقابل')} />
@@ -335,31 +384,25 @@ function DirectStage({ call, currentUser }) {
             </div>
           )}
         </div>
-      ) : remote ? (
-        <div className="call-remote-stage">
-          <CameraSurface track={cameraTrack(remote)} name={remote.name || 'طرف مقابل'} />
-          <div className="call-remote-name">
-            {remote.name || 'طرف مقابل'}
-            {isMuted(remote) && <i className="fas fa-microphone-slash" aria-label="میکروفون بسته است" />}
-          </div>
+      ) : remoteCamera ? (
+        <div className="call-remote-full">
+          <CameraSurface track={remoteCamera} name={remote.name || 'طرف مقابل'} />
         </div>
       ) : (
-        <div className="call-waiting">
-          <Avatar src={call.peer?.avatar} name={call.peer?.name || 'طرف مقابل'} size={104} />
-          <p className="call-subtitle"><span className="call-spinner" aria-hidden="true" /> در انتظار اتصال…</p>
-        </div>
+        <AudioView
+          peer={remote ? { name: remote.name } : call.peer}
+          avatar={remote ? undefined : call.peer?.avatar}
+          status={remote
+            ? (call.callInfo?.type === 'video' ? 'دوربین خاموش است' : 'در حال تماس')
+            : 'در انتظار اتصال…'}
+        />
       )}
 
-      <div className="call-local-pip">
-        <CameraSurface
-          track={cameraTrack(local)}
-          muted
-          local
-          name={currentUser?.name}
-          avatar={currentUser?.avatar}
-        />
-        {!cameraTrack(local) && <span className="call-pip-label">دوربین خاموش است</span>}
-      </div>
+      {localCamera && (
+        <div className="call-pip">
+          <CameraSurface track={localCamera} muted local name={currentUser?.name} avatar={currentUser?.avatar} />
+        </div>
+      )}
     </div>
   );
 }
@@ -367,12 +410,7 @@ function DirectStage({ call, currentUser }) {
 function GroupStage({ call, currentUser }) {
   const room = call.room;
   if (!room) {
-    return (
-      <div className="call-waiting">
-        <Avatar src={call.group?.avatar} name={call.group?.name || 'گروه'} size={104} group />
-        <p className="call-subtitle"><span className="call-spinner" aria-hidden="true" /> در انتظار اتصال…</p>
-      </div>
-    );
+    return <AudioView group={call.group} avatar={call.group?.avatar} status="در انتظار اتصال…" />;
   }
 
   const remotes = [...room.remoteParticipants.values()];
@@ -386,14 +424,15 @@ function GroupStage({ call, currentUser }) {
   ];
 
   return (
-    <div className={`call-stage-grid count-${Math.min(tiles.length, 9)}`}>
+    <div className={`call-grid ${tiles.length > 4 ? 'is-dense' : ''}`}>
       {share && (
-        <div className="call-tile call-tile-screen">
+        <div className="call-tile call-tile-share">
           <CameraSurface
             track={share.track}
             screen
             name={share.participant === local ? currentUser?.name : share.participant.name}
           />
+          <div className="call-tile-shade" />
           <div className="call-tile-footer">
             <span className="call-tile-name">
               <i className="fas fa-display" aria-hidden="true" />
@@ -404,7 +443,7 @@ function GroupStage({ call, currentUser }) {
         </div>
       )}
       {tiles.map(({ participant, local: isLocal }) => (
-        <Tile
+        <ParticipantTile
           key={participant.sid || participant.identity}
           participant={participant}
           local={isLocal}
@@ -413,8 +452,11 @@ function GroupStage({ call, currentUser }) {
           micOn={call.micOn}
         />
       ))}
-      {remotes.length === 0 && (
-        <p className="call-grid-hint"><span className="call-spinner" aria-hidden="true" /> در انتظار پیوستن اعضا…</p>
+      {!remotes.length && (
+        <p className="call-grid-hint">
+          <span className="call-spinner" aria-hidden="true" />
+          در انتظار پیوستن اعضا…
+        </p>
       )}
     </div>
   );
@@ -422,22 +464,25 @@ function GroupStage({ call, currentUser }) {
 
 function Active({ call, currentUser, connecting }) {
   const room = call.room;
-  const typeLabel = call.callInfo?.type === 'video' ? 'ویدیویی' : 'صوتی';
+  const isGroup = call.callInfo?.kind === 'group';
+  const title = (isGroup ? call.group?.name : call.peer?.name) || 'تماس';
   const reconnecting = call.connectionState === 'reconnecting';
 
   return (
     <div className="call-active">
-      <header className="call-active-head">
-        <div className="call-active-title">
-          <span className="call-active-kicker">تماس {typeLabel}</span>
-          <h2 id="call-title" className="call-active-name">
-            {call.group?.name || call.peer?.name || 'تماس'}
-          </h2>
-        </div>
-        <div className="call-active-meta">
-          {call.phase === 'active' && <span className="call-timer" aria-label="مدت تماس">{call.timerLabel}</span>}
-          {connecting && <span className="call-timer">در حال اتصال…</span>}
-          <EncryptionChipFor call={call} />
+      <div className="call-stage">
+        {isGroup
+          ? <GroupStage call={call} currentUser={currentUser} />
+          : <DirectStage call={call} currentUser={currentUser} />}
+      </div>
+
+      <header className="call-top">
+        <div className="call-top-text">
+          <h2 id="call-title" className="call-top-name">{title}</h2>
+          <div className="call-top-sub">
+            {call.phase === 'active' ? <span className="call-timer">{call.timerLabel}</span> : <span>در حال اتصال…</span>}
+            <CallLockFor call={call} />
+          </div>
         </div>
       </header>
 
@@ -448,12 +493,6 @@ function Active({ call, currentUser, connecting }) {
         </div>
       )}
 
-      <div className="call-stage">
-        {call.callInfo?.kind === 'group'
-          ? <GroupStage call={call} currentUser={currentUser} />
-          : <DirectStage call={call} currentUser={currentUser} />}
-      </div>
-
       {room && !room.canPlaybackAudio && (
         <button type="button" className="call-audio-unlock" onClick={() => call.startAudio()}>
           <i className="fas fa-volume-high" aria-hidden="true" />
@@ -461,29 +500,22 @@ function Active({ call, currentUser, connecting }) {
         </button>
       )}
 
-      <CallControls call={call} connecting={connecting} />
+      <Controls call={call} connecting={connecting} />
     </div>
   );
 }
 
 function Ended({ call, title, avatar, isGroup }) {
   return (
-    <div className="call-center-card">
-      <Avatar src={avatar} name={title} size={84} group={isGroup} />
-      <h2 id="call-title" className="call-title">{title}</h2>
+    <div className="call-screen call-ended">
+      <Avatar src={avatar} name={title} size={96} group={isGroup} />
+      <h2 id="call-title" className="call-name">{title}</h2>
       <p className={`call-ended-text ${call.error ? 'is-error' : ''}`} role="status">
         {call.error || call.notice || 'تماس پایان یافت'}
       </p>
-      <div className="call-actions">
-        <button
-          type="button"
-          className="call-btn call-btn-secondary"
-          onClick={() => call.dismiss()}
-          aria-label="بستن"
-        >
-          <span>بستن</span>
-        </button>
-      </div>
+      <button type="button" className="call-text-btn" onClick={() => call.dismiss()} aria-label="بستن">
+        بستن
+      </button>
     </div>
   );
 }
@@ -520,6 +552,7 @@ export default function CallLayer({ call, currentUser }) {
 
   return (
     <div className="call-layer" role="dialog" aria-modal="true" aria-labelledby="call-title">
+      <CallBackdrop avatar={avatar} />
       <RemoteAudio room={call.room} />
       {open && (call.error || call.notice) && phase !== 'ended' && (
         <div className={`call-toast ${call.error ? 'is-error' : ''}`} role="status" aria-live="polite">

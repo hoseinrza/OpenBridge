@@ -10,15 +10,13 @@ import {
 } from '@livekit/react-native';
 import { ConnectionState, Track } from 'livekit-client';
 import Avatar from './Avatar';
-import { fonts, radius, spacing, type, useAppTheme } from '../theme';
+import { fonts, type } from '../theme';
 
 // Must run before any LiveKit object uses WebRTC.
 registerGlobals();
 
-function Centered({ children, colors }) {
-  return (
-    <View style={[styles.centered, { backgroundColor: colors.bg }]}>{children}</View>
-  );
+function Centered({ children }) {
+  return <View style={styles.centered}>{children}</View>;
 }
 
 function VideoTile({ trackRef, style, mirror = false, zOrder = 0 }) {
@@ -35,42 +33,94 @@ function VideoTile({ trackRef, style, mirror = false, zOrder = 0 }) {
   );
 }
 
-function ConnChip({ state, colors }) {
-  if (state === ConnectionState.Connected) return null;
-  const reconnecting = state === ConnectionState.Reconnecting || state === ConnectionState.SignalReconnecting;
+function LockNote({ e2ee }) {
   return (
-    <View style={[styles.connChip, { backgroundColor: reconnecting ? colors.warmSoft : colors.surface2 }]}>
-      {reconnecting && <ActivityIndicator size="small" color={colors.warmInk} />}
-      <Text style={[styles.connText, { color: reconnecting ? colors.warmInk : colors.text2 }]}>
-        {reconnecting ? 'اتصال دوباره…' : 'در حال اتصال…'}
+    <View style={styles.lock}>
+      <FontAwesome6
+        name={e2ee ? 'lock' : 'lock-open'}
+        size={9}
+        color={e2ee ? '#9fe7b5' : 'rgba(255,255,255,0.55)'}
+      />
+      <Text style={[styles.lockText, e2ee && styles.lockTextOn]}>
+        {e2ee ? 'رمزنگاری' : 'بدون رمزنگاری'}
       </Text>
     </View>
   );
 }
 
-function ParticipantTile({ participant, isLocal, currentUser, trackRef, micOn, colors }) {
-  const name = participant.name || participant.identity || 'کاربر';
+function ConnChip({ state }) {
+  const reconnecting = state === ConnectionState.Reconnecting || state === ConnectionState.SignalReconnecting;
+  if (!reconnecting) return null;
   return (
-    <View style={[styles.tile, participant.isSpeaking && { borderColor: colors.success, borderWidth: 2 }]}>
+    <View style={styles.conn}>
+      <ActivityIndicator size="small" color="#fff" />
+      <Text style={styles.connText}>اتصال دوباره…</Text>
+    </View>
+  );
+}
+
+function ControlButton({ icon, label, onPress, off = false, end = false, size = 56 }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [
+        styles.ctrl,
+        { width: size, height: size, borderRadius: size / 2 },
+        off && styles.ctrlOff,
+        end && styles.ctrlEnd,
+        pressed && styles.ctrlPressed,
+      ]}
+    >
+      <FontAwesome6 name={icon} size={Math.round(size * 0.34)} color={off ? '#111' : '#fff'} />
+    </Pressable>
+  );
+}
+
+function ParticipantTile({ participant, isLocal, currentUser, trackRef, micOn }) {
+  const name = isLocal ? (currentUser?.name ?? 'شما') : (participant?.name || participant?.identity || 'کاربر');
+  const muted = isLocal ? !micOn : participant?.isMicrophoneEnabled === false;
+
+  return (
+    <View style={[styles.tile, participant?.isSpeaking && styles.tileSpeaking]}>
       {trackRef ? (
-        <VideoTile trackRef={trackRef} style={StyleSheet.absoluteFill} mirror={isLocal} zOrder={isLocal ? 1 : 0} />
+        <VideoTile
+          trackRef={trackRef}
+          style={StyleSheet.absoluteFill}
+          mirror={isLocal}
+          zOrder={isLocal ? 1 : 0}
+        />
       ) : (
         <View style={styles.tileAvatar}>
-          <Avatar name={isLocal ? (currentUser?.name ?? name) : name} size={72} />
+          <Avatar
+            uri={isLocal ? currentUser?.avatar : undefined}
+            name={name}
+            size={64}
+          />
         </View>
       )}
+      <View style={styles.tileShade} />
       <View style={styles.tileFooter}>
         <Text style={styles.tileName} numberOfLines={1}>
           {name}{isLocal ? ' (شما)' : ''}
         </Text>
-        {!micOn && <FontAwesome6 name="microphone-slash" size={11} color="#FF8A85" />}
+        {muted && <FontAwesome6 name="microphone-slash" size={10} color="#ff8a85" />}
       </View>
     </View>
   );
 }
 
-function CallUI({ call, currentUser, video, onEnd }) {
-  const { colors } = useAppTheme();
+function AudioView({ avatar, name, status, size = 150 }) {
+  return (
+    <View style={styles.audioView}>
+      <Avatar uri={avatar} name={name} size={size} />
+      <Text style={styles.audioStatus}>{status}</Text>
+    </View>
+  );
+}
+
+function CallUI({ call, currentUser, onEnd }) {
   const insets = useSafeAreaInsets();
   const room = useRoomContext();
   const participants = useParticipants();
@@ -88,11 +138,9 @@ function CallUI({ call, currentUser, video, onEnd }) {
   }, [connected]);
 
   useEffect(() => {
-    if (notice) {
-      const id = setTimeout(() => setNotice(''), 2500);
-      return () => clearTimeout(id);
-    }
-    return undefined;
+    if (!notice) return undefined;
+    const id = setTimeout(() => setNotice(''), 2500);
+    return () => clearTimeout(id);
   }, [notice]);
 
   const localIdentity = localParticipant?.identity ?? room?.localParticipant?.identity;
@@ -131,26 +179,21 @@ function CallUI({ call, currentUser, video, onEnd }) {
   }
 
   return (
-    <View style={[styles.screen, { backgroundColor: '#08090d', paddingTop: insets.top }]}>
-      <View style={styles.head}>
-        <View style={styles.headText}>
-          <Text style={styles.headTitle} numberOfLines={1}>{title}</Text>
-          <Text style={styles.headSub}>
-            {call.info?.type === 'video' ? 'تماس ویدیویی' : 'تماس صوتی'} · {timer}
-          </Text>
-        </View>
-        <View style={[styles.encChip, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.12)' }]}>
-          <FontAwesome6 name="lock-open" size={10} color="rgba(255,255,255,0.72)" />
-          <Text style={styles.encText}>بدون رمزنگاری سرتاسری</Text>
+    <View style={styles.screen}>
+      <View style={[styles.top, { paddingTop: insets.top + 10 }]}>
+        <Text style={styles.title} numberOfLines={1}>{title}</Text>
+        <View style={styles.subRow}>
+          <Text style={styles.timer}>{connected ? timer : 'در حال اتصال…'}</Text>
+          <LockNote e2ee={call.info?.e2ee === true} />
         </View>
       </View>
 
-      <ConnChip state={connection} colors={colors} />
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+      <ConnChip state={connection} />
+      {notice ? <Text style={[styles.notice, { top: insets.top + 92 }]}>{notice}</Text> : null}
 
       <View style={styles.stage}>
         {isGroup ? (
-          <View style={styles.grid}>
+          <View style={[styles.grid, { top: insets.top + 70, bottom: insets.bottom + 98 }]}>
             {participants.map((participant) => {
               const isLocal = participant.identity === localIdentity;
               return (
@@ -161,83 +204,63 @@ function CallUI({ call, currentUser, video, onEnd }) {
                   currentUser={currentUser}
                   trackRef={isLocal ? localTrack : cameraByIdentity.get(participant.identity)}
                   micOn={isLocal ? isMicrophoneEnabled : participant.isMicrophoneEnabled !== false}
-                  colors={colors}
                 />
               );
             })}
-            {remoteParticipants.length === 0 && (
-              <Text style={styles.waiting}>در انتظار پیوستن اعضا…</Text>
+            {!remoteParticipants.length && (
+              <Text style={styles.gridHint}>در انتظار پیوستن اعضا…</Text>
             )}
           </View>
         ) : (
           <>
-            <View style={styles.remote}>
-              {remoteTrack ? (
-                <VideoTile trackRef={remoteTrack} style={StyleSheet.absoluteFill} />
-              ) : (
-                <View style={styles.remoteEmpty}>
-                  <Avatar name={remote?.name || call.info?.peer?.name} size={104} />
-                  <Text style={styles.remoteEmptyText}>
-                    {remote ? 'دوربین خاموش است' : 'در انتظار اتصال طرف مقابل…'}
-                  </Text>
-                </View>
-              )}
-              {remote?.name ? (
-                <View style={styles.remoteName}>
-                  <Text style={styles.remoteNameText}>{remote.name}</Text>
-                </View>
-              ) : null}
-            </View>
-            <View style={styles.localPip}>
-              {localTrack ? (
+            {remoteTrack ? (
+              <VideoTile trackRef={remoteTrack} style={StyleSheet.absoluteFill} />
+            ) : (
+              <AudioView
+                avatar={remote ? undefined : call.info?.peer?.avatar}
+                name={remote?.name || call.info?.peer?.name || 'طرف مقابل'}
+                status={remote
+                  ? (call.info?.type === 'video' ? 'دوربین خاموش است' : 'در حال تماس')
+                  : 'در انتظار اتصال…'}
+              />
+            )}
+            {localTrack && (
+              <View style={[styles.pip, { top: insets.top + 70 }]}>
                 <VideoTile trackRef={localTrack} style={StyleSheet.absoluteFill} mirror zOrder={1} />
-              ) : (
-                <View style={styles.localPipEmpty}>
-                  <Avatar name={currentUser?.name} size={40} />
-                </View>
-              )}
-            </View>
+              </View>
+            )}
           </>
         )}
       </View>
 
-      <View style={[styles.controls, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
-        <Pressable
-          onPress={toggleMic}
-          accessibilityRole="button"
-          accessibilityLabel={isMicrophoneEnabled ? 'قطع میکروفون' : 'روشن‌کردن میکروفون'}
-          style={[styles.ctrl, !isMicrophoneEnabled && styles.ctrlOff]}
-        >
-          <FontAwesome6 name={isMicrophoneEnabled ? 'microphone' : 'microphone-slash'} size={22} color="#fff" />
-          <Text style={styles.ctrlLabel}>میکروفون</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={toggleCamera}
-          accessibilityRole="button"
-          accessibilityLabel={isCameraEnabled ? 'خاموش‌کردن دوربین' : 'روشن‌کردن دوربین'}
-          style={[styles.ctrl, !isCameraEnabled && styles.ctrlOff]}
-        >
-          <FontAwesome6 name={isCameraEnabled ? 'video' : 'video-slash'} size={22} color="#fff" />
-          <Text style={styles.ctrlLabel}>دوربین</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={onEnd}
-          accessibilityRole="button"
-          accessibilityLabel="پایان تماس"
-          style={[styles.ctrl, styles.ctrlEnd]}
-        >
-          <FontAwesome6 name="phone-slash" size={22} color="#fff" />
-          <Text style={styles.ctrlLabel}>پایان</Text>
-        </Pressable>
+      <View style={[styles.controls, { paddingBottom: insets.bottom + 12 }]}>
+        <View style={styles.controlsRow}>
+          <ControlButton
+            icon={isMicrophoneEnabled ? 'microphone' : 'microphone-slash'}
+            label={isMicrophoneEnabled ? 'قطع میکروفون' : 'روشن‌کردن میکروفون'}
+            onPress={toggleMic}
+            off={!isMicrophoneEnabled}
+          />
+          <ControlButton
+            icon={isCameraEnabled ? 'video' : 'video-slash'}
+            label={isCameraEnabled ? 'خاموش‌کردن دوربین' : 'روشن‌کردن دوربین'}
+            onPress={toggleCamera}
+            off={!isCameraEnabled}
+          />
+          <ControlButton
+            icon="phone-slash"
+            label="پایان تماس"
+            onPress={onEnd}
+            end
+            size={60}
+          />
+        </View>
       </View>
     </View>
   );
 }
 
 export default function CallRoom({ call, currentUser }) {
-  const { colors } = useAppTheme();
   const [ready, setReady] = useState(Platform.OS !== 'android');
   const [permissionError, setPermissionError] = useState('');
   const endingRef = useRef(false);
@@ -289,19 +312,20 @@ export default function CallRoom({ call, currentUser }) {
     endingRef.current = true;
     call.hangUp();
   }
+
   if (!ready) {
     return (
-      <Centered colors={colors}>
-        <ActivityIndicator color={colors.accent} />
-        <Text style={[styles.loadingText, { color: colors.text2 }]}>در حال گرفتن دسترسی دوربین و میکروفون…</Text>
+      <Centered>
+        <ActivityIndicator color="#fff" />
+        <Text style={styles.loadingText}>در حال گرفتن دسترسی دوربین و میکروفون…</Text>
       </Centered>
     );
   }
 
   if (!call.token || !call.url) {
     return (
-      <Centered colors={colors}>
-        <ActivityIndicator color={colors.accent} />
+      <Centered>
+        <ActivityIndicator color="#fff" />
       </Centered>
     );
   }
@@ -323,128 +347,151 @@ export default function CallRoom({ call, currentUser }) {
       onError={(error) => failRoom(error?.message ?? 'برقراری تماس ناموفق بود')}
       onEncryptionError={() => failRoom('رمزنگاری رسانه با خطا مواجه شد')}
     >
-      <CallUI
-        call={call}
-        currentUser={currentUser}
-        video={video}
-        onEnd={handleEnd}
-      />
+      <CallUI call={call} currentUser={currentUser} onEnd={handleEnd} />
     </LiveKitRoom>
   );
 }
 
 const styles = StyleSheet.create({
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
-  loadingText: { fontFamily: fonts.regular, fontSize: type.base, writingDirection: 'rtl' },
-  screen: { flex: 1 },
-  head: {
-    flexDirection: 'row',
+  centered: {
+    flex: 1,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xs,
+    justifyContent: 'center',
+    gap: 12,
+    backgroundColor: '#050608',
   },
-  headText: { flex: 1, minWidth: 0 },
-  headTitle: {
-    fontFamily: fonts.bold,
-    fontSize: type.md,
-    color: '#F2EEE6',
-    textAlign: 'right',
-    writingDirection: 'rtl',
-  },
-  headSub: {
+  loadingText: {
+    color: 'rgba(255,255,255,0.7)',
     fontFamily: fonts.regular,
-    fontSize: type.xs,
-    color: 'rgba(242,238,230,0.6)',
-    textAlign: 'right',
+    fontSize: type.base,
     writingDirection: 'rtl',
   },
-  encChip: {
+  screen: { flex: 1, backgroundColor: 'transparent' },
+  top: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 4,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    backgroundColor: 'rgba(0,0,0,0.28)',
+  },
+  title: {
+    maxWidth: '86%',
+    color: '#fff',
+    fontFamily: fonts.semibold,
+    fontSize: 16,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  subRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    borderWidth: 1,
+    gap: 8,
+    marginTop: 2,
   },
-  encText: {
+  timer: {
+    color: 'rgba(255,255,255,0.7)',
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+  },
+  lock: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  lockText: {
+    color: 'rgba(255,255,255,0.55)',
     fontFamily: fonts.medium,
     fontSize: 10,
-    color: 'rgba(255,255,255,0.72)',
     writingDirection: 'rtl',
   },
-  connChip: {
+  lockTextOn: { color: '#9fe7b5' },
+  conn: {
+    position: 'absolute',
+    top: 78,
     alignSelf: 'center',
+    zIndex: 6,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    marginBottom: spacing.xs,
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
-  connText: { fontFamily: fonts.medium, fontSize: type.xs, writingDirection: 'rtl' },
+  connText: {
+    color: 'rgba(255,255,255,0.82)',
+    fontFamily: fonts.medium,
+    fontSize: 11,
+    writingDirection: 'rtl',
+  },
   notice: {
+    position: 'absolute',
     alignSelf: 'center',
-    color: '#FFC95A',
+    zIndex: 6,
+    color: '#ffc95a',
     fontFamily: fonts.regular,
-    fontSize: type.xs,
-    marginBottom: spacing.xs,
+    fontSize: 11,
     writingDirection: 'rtl',
   },
-  stage: { flex: 1, marginHorizontal: spacing.sm, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: '#0b0c11' },
-  remote: { flex: 1 },
-  remoteEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
-  remoteEmptyText: {
-    color: 'rgba(242,238,230,0.65)',
-    fontFamily: fonts.regular,
-    fontSize: type.sm,
-    writingDirection: 'rtl',
-  },
-  remoteName: {
-    position: 'absolute',
-    bottom: spacing.md,
-    right: spacing.md,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  remoteNameText: { color: '#fff', fontFamily: fonts.medium, fontSize: type.xs, writingDirection: 'rtl' },
-  localPip: {
-    position: 'absolute',
-    top: spacing.sm,
-    left: spacing.sm,
-    width: 96,
-    height: 132,
-    borderRadius: radius.md,
-    overflow: 'hidden',
-    backgroundColor: '#151821',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  localPipEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  grid: {
+  stage: { ...StyleSheet.absoluteFillObject },
+  audioView: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+    paddingBottom: 80,
+  },
+  audioStatus: {
+    color: 'rgba(255,255,255,0.6)',
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    writingDirection: 'rtl',
+  },
+  pip: {
+    position: 'absolute',
+    right: 12,
+    width: 100,
+    height: 140,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: '#111',
+    zIndex: 3,
+  },
+  grid: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignContent: 'center',
-    padding: spacing.sm,
-    gap: spacing.sm,
+    justifyContent: 'space-between',
+    rowGap: 6,
   },
   tile: {
     width: '48%',
     aspectRatio: 3 / 4,
-    borderRadius: radius.md,
+    borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: '#151821',
+    backgroundColor: '#10131a',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
+  tileSpeaking: {
+    borderColor: '#34c759',
+    borderWidth: 2,
+  },
   tileAvatar: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  tileShade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '45%',
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
   tileFooter: {
     position: 'absolute',
     left: 0,
@@ -453,49 +500,57 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
+    gap: 4,
+    paddingHorizontal: 8,
     paddingVertical: 6,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.38)',
   },
   tileName: {
     flex: 1,
     color: '#fff',
     fontFamily: fonts.medium,
-    fontSize: type.xs,
+    fontSize: 10,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  waiting: {
+  gridHint: {
     width: '100%',
-    textAlign: 'center',
-    color: 'rgba(242,238,230,0.65)',
+    paddingVertical: 18,
+    color: 'rgba(255,255,255,0.6)',
     fontFamily: fonts.regular,
-    fontSize: type.sm,
+    fontSize: 12,
+    textAlign: 'center',
     writingDirection: 'rtl',
-    paddingVertical: spacing.xl,
   },
   controls: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 5,
+    paddingTop: 24,
+    backgroundColor: 'rgba(0,0,0,0.34)',
+  },
+  controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.md,
-    paddingTop: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    backgroundColor: '#08090d',
+    gap: 16,
   },
   ctrl: {
-    minWidth: 82,
-    height: 58,
-    borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.14)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.14)',
   },
-  ctrlOff: { backgroundColor: 'rgba(197,22,29,0.28)', borderColor: 'rgba(197,22,29,0.45)' },
-  ctrlEnd: { backgroundColor: '#C5161D', borderColor: 'transparent', minWidth: 92 },
-  ctrlLabel: { color: 'rgba(255,255,255,0.85)', fontFamily: fonts.medium, fontSize: 10, writingDirection: 'rtl' },
+  ctrlOff: {
+    backgroundColor: '#fff',
+    borderColor: '#fff',
+  },
+  ctrlEnd: {
+    backgroundColor: '#ff3b30',
+    borderColor: 'transparent',
+  },
+  ctrlPressed: { transform: [{ scale: 0.95 }] },
 });
