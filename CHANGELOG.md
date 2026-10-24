@@ -4,6 +4,33 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.3.3] - 2026-10-24
+
+### Changed
+- **لبخندِ گوشهٔ حباب و نوار پنج‌ایموجیِ سریعش حذف شد.** تا پیش از این با هاور روی
+  هر پیام (و روی صفحهٔ لمسی، همیشه با کمرنگیِ هفتادودو درصد) یک دکمهٔ 24px گوشهٔ
+  حباب می‌نشست که نوار انتخاب واکنش را باز می‌کرد. واکنش دادن حالا فقط از همان
+  مسیری می‌رود که بقیهٔ کارهای پیام می‌روند: راست‌کلیک (یا Shift+F10) روی حباب، و
+  ردیف ایموجی‌های بالای همان منو.
+- چیپ‌های واکنشِ زیر پیام دست‌نخورده‌اند: نمایش داده می‌شوند، با کلیک روی خود
+  چیپ برداشته می‌شوند، و دادنِ دوباره‌شان از منو همان مسیر قبلی است.
+
+### Notes
+- فقط سمت وب. اپ موبایل هیچ‌وقت این دکمه را نداشت، چون هاور ندارد؛ منوی بلندکلیک
+  موبایل هنوز ساخته نشده است.
+- روی سرور و در داده‌ها چیزی تغییر نکرد — فقط ظاهرِ دادنِ واکنش یک درِ کمتر گرفت.
+
+### Verified
+`npm run lint` and `npm run build` clean. Live DOM on the running app (vite on :5173, backend on
+:3000): an open chat now holds 0 `.msg-react-toggle` and 0 `.reaction-bar` elements, a right-click
+on a bubble still opens the action menu with its five emoji rows plus «حذف», tapping 👍 added one
+`msg-reaction mine` chip under that bubble, and tapping the chip removed it (0 chips left, so the
+test reaction is not in the history). The removal itself is 196 lines across three files: the
+button, its picker, the two effects that positioned and dismissed it, and their CSS.
+Limits: keyboard focus behaviour of the removed picker is gone with it, and no mobile device was
+touched.
+
+
 ## [1.3.2] - 2026-10-24
 
 ### Changed

@@ -519,92 +519,6 @@ button.msg-sender {
 
 .msg-wrapper.mine .msg-lock { color: rgba(255, 255, 255, 0.9); opacity: 0.8; }
 
-/* ── Quick reaction button ───────────────────────────────────── */
-/* Telegram reveals the smiley at the message corner on hover; on touch screens
-   there is no hover, so it stays faintly visible and tappable. */
-.msg-react-toggle {
-  position: absolute;
-  top: -9px;
-  inset-inline-end: -9px;
-  z-index: 7;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 12px;
-  box-shadow: var(--shadow-1);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-}
-
-.bubble:hover > .msg-react-toggle,
-.bubble:focus-within > .msg-react-toggle,
-.msg-react-toggle:focus-visible,
-.msg-react-toggle[aria-expanded='true'] {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.msg-react-toggle:hover,
-.msg-react-toggle[aria-expanded='true'] {
-  background: var(--surface-2);
-  color: var(--accent-text);
-}
-
-@media (hover: none) {
-  .msg-react-toggle { opacity: 0.72; pointer-events: auto; }
-}
-
-/* ── Reaction picker ─────────────────────────────────────────── */
-/* Floats over the conversation so opening it never changes the bubble height.
-   It opens above the bubble, or below when there is no room above. */
-.reaction-bar {
-  position: absolute;
-  inset-inline-end: 0;
-  bottom: calc(100% + 8px);
-  z-index: 8;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  width: max-content;
-  max-width: min(calc(100vw - 32px), 240px);
-  padding: 3px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  box-shadow: var(--shadow-2);
-}
-
-.reaction-bar.below {
-  bottom: auto;
-  top: calc(100% + 8px);
-}
-
-.reaction-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  font-size: 15px;
-  transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
-}
-
-.reaction-btn:hover { background: var(--surface-2); transform: scale(1.12); }
-
-.reaction-btn.active {
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 2px var(--accent);
-}
 
 /* ── Inline reactions ────────────────────────────────────────── */
 /* Chips are their own row, and they sit above the clock: they read as a comment
@@ -1651,8 +1565,6 @@ button.msg-sender {
   .bubble { font-size: 14px; padding: 6px 10px 7px; }
 
   .msg-image { max-width: min(240px, 62vw); }
-
-  .msg-react-toggle { opacity: 0.72; pointer-events: auto; }
 
   .composer {
     padding: var(--sp-2) var(--sp-3) calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
