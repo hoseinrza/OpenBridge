@@ -4,6 +4,34 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.5.0] - 2026-10-24
+
+### Added
+- **پیام صوتی حالا شکل صدایش را نشان می‌دهد.** ضبط‌کننده هنگام ضبط، سطح صدا را
+  هر 100ms نمونه می‌گیرد و در پایان 40 ستون می‌سازد؛ هر ستون بلندترین لحظهٔ
+  برش خودش است، نسبت به بلندترین لحظهٔ کل ضبط. حباب ویس همان ستون‌ها را نشان
+  می‌دهد، با پخش/توقف، اسکراب روی خود ستون‌ها و زمان؛ ستون‌های شنیده‌شده رنگ
+  می‌گیرند و پیام شنیده‌نشده نشان خودش را دارد.
+- **موج در بستهٔ رمزنگاری‌شده سفر می‌کند.** `peaks` به‌عنوان دادهٔ اختیاری
+  (حداکثر 64 عدد صحیح 0 تا 100) داخل همان توصیف‌گر پیوست می‌نشیند؛ سرور نه آن را
+  می‌بیند و نه جایی برای ذخیره‌اش دارد. ستون‌های بد یا ناقص پیام را رد نمی‌کنند.
+- **پیام صوتی بدون موج، الگوی ثابت می‌گیرد.** پیام ساده ردیفی روی سرور برای
+  `peaks` ندارد و پیام‌های قدیمی هم آن را ندارند؛ این حباب‌ها از روی شناسهٔ پیام
+  یک الگوی 40 ستونی ثابت می‌کشند، پس در هر بارگذاری و روی هر دستگاه همان شکل
+  است.
+- **پخش‌کنندهٔ مشترک.** `useVoicePlayback` منطق پخش، اسکراب و شنیده‌شدن را از
+  `VoiceBubble` بیرون کشید تا حباب موج و ریل صدا یک رفتار داشته باشند. فایل
+  صوتی (آهنگ) همان ریل را نگه می‌دارد؛ ضبط میکروفن موج می‌گیرد. صدای قدیمی که
+  پرچم `voice` ندارد ولی طول دارد هم ویس شمرده می‌شود.
+
+### Verified
+`npm run lint` and `npm run build` are clean. `npm run test:e2ee` passes 17/17
+(5 new waveform round-trip/trim/junk tests plus the 12 existing). In the live web
+app one plaintext VOICE row rendered a single `.voice-wave-bubble` with 40 bars,
+its play button and the 3-second time; the E2EE `peaks` path is covered by the
+attachment tests, not by a live encrypted recording (no microphone was captured).
+Mobile was not touched and no on-device check was done.
+
 ## [1.4.2] - 2026-10-24
 
 ### Changed

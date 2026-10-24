@@ -616,6 +616,13 @@ Landed as Phase 4 on web (`shared/e2ee/attachments.js`, `src/services/attachment
   that travels as the MLS message payload. So a file's name, type and size exist
   only inside ciphertext: the server stores `enc-<uuid>.bin` and a row with no
   filename, no MIME and no hash of the plaintext.
+- A recording may also carry its waveform as optional descriptor data (`peaks`):
+  at most 64 whole percentages of the loudest slice, measured by the recording
+  device while the microphone was open. It is drawn before a byte of sound is
+  fetched, and it is derived from the sound itself, so it is only as trustworthy
+  as the sender. The server has no column for it: a plaintext recording carries
+  no bars, and its bubble draws a stable pattern from the message id instead. A
+  descriptor with missing or junk bars still delivers its recording.
 - Ciphertext has to travel as a blob because an envelope is capped at
   `E2EE_MAX_ENVELOPE_CHARS` (16384 chars, ≈12 KB): a photo inside an envelope
   would be refused by the transport, and a per-recipient ciphertext would be
