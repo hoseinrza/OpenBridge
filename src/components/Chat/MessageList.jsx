@@ -28,10 +28,16 @@ function buildRows(messages) {
     prevEncrypted = msg.encrypted;
 
     const next = messages[index + 1];
-    const samePrev = prevMsg
+    // A forwarded message opens with a header naming its source, so it reads as
+    // its own unit: grouping it under the previous bubble in the same send
+    // session makes that header look like part of the message above it, and
+    // glues the two bubbles together with no room between them.
+    const standalone = Boolean(msg.forwardedFrom);
+    const nextStandalone = Boolean(next?.forwardedFrom);
+    const samePrev = !standalone && prevMsg
       && prevMsg.senderId === msg.senderId
       && msg.createdAt - prevMsg.createdAt < GROUP_GAP;
-    const sameNext = next
+    const sameNext = !standalone && !nextStandalone && next
       && next.senderId === msg.senderId
       && next.createdAt - msg.createdAt < GROUP_GAP
       && dayKey(next.createdAt) === day;

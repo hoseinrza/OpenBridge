@@ -4,6 +4,23 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.4.1] - 2026-10-24
+
+### Fixed
+- **پیام فرواردشده دیگر به پیام قبلیِ خودِ فرستنده نمی‌چسبد.** برچسب «فروارد از …»
+  بالای حباب می‌نشیند، اما منطق گروه‌بندی آن را با پیام قبلی — وقتی کمتر از پنج
+  دقیقه فاصله داشت — یکی می‌کرد و دو حباب بدون فاصله روی هم می‌نشستند. حالا هر
+  پیام فرواردشده یک واحد مستقل است: گوشه‌های گرد خودش، فاصلهٔ معمول با پیام بالا
+  و پایین، و دنبالهٔ حباب.
+
+### Verified
+`npm run lint` and `npm run build` clean. In the live app, an own message
+followed by a forwarded copy of it (less than five minutes apart) now renders as
+two rows with `first last` each, both carrying the usual 8px bottom margin; the
+measured gap between the first bubble's bottom and the forwarded bubble's top is
+8px, where the old grouping placed them flush. The spacing was measured with DOM
+geometry, not a screenshot.
+
 ## [1.4.0] - 2026-10-24
 
 ### Added
