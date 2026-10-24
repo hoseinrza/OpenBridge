@@ -1,6 +1,6 @@
 {
   "name": "chatapp-backend",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "private": true,
   "scripts": {
     "start:dev": "nest start --watch",

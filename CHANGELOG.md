@@ -4,6 +4,27 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.2.3] - 2026-10-24
+
+### Fixed
+- **صفحهٔ «در حال آماده‌سازی تماس» دیگر بی‌نهایت منتظر نمی‌ماند.** علت اصلی،
+  اتصال UI جدید به بک‌اندی بود که ماژول `calls` را نداشت: invite فرستاده می‌شد
+  ولی هیچ ackای برنمی‌گشت. حالا `calls/status` با 404 بک‌اند قدیمی، دکمه‌های
+  تماس را غیرفعال می‌کند؛ کل فاز preparing سقف ۱۲ ثانیه دارد؛ مشتق‌کردن کلید
+  MLS سقف ۱۰ ثانیه دارد؛ و در صورت تایم‌اوت، `call:cancel` فرستاده و پیام
+  روشن «سرور تماس پاسخ نداد…» نمایش داده می‌شود.
+- بک‌اند محلی روی `:3000` با build جدید (شامل `CallsModule`) ری‌استارت شد و
+  LiveKit `1.13.10` در حالت dev روی `:7880` بالا آمد؛ `LIVEKIT_*` در
+  `backend/.env` محلی تنظیم شد.
+
+### Verified
+- تست مرورگر واقعی (DOM، بدون pointer/screenshot): دکمهٔ تماس ویدیویی از
+  حالت idle خارج شد، `preparing` عملاً صفر بود، «در حال زنگ زدن» نمایش داده
+  شد و پس از رد طرف مقابل «طرف مقابل تماس را رد کرد» آمد. هیچ گیرکردنی نبود.
+- `npm run lint` و `npm run build` وب: موفق. این اصلاح فقط سمت کلاینت وب و
+  local dev است؛ برای محیط deployشده باید push/merge شود و API باید بالا باشد
+  (سرویس Render فعلی در دسترس نیست).
+
 ## [1.2.2] - 2026-10-24
 
 ### Security

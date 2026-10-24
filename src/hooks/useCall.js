@@ -8,6 +8,8 @@ import { exportCallKey } from '../services/e2ee.js';
 const RING_BACKSTOP_MS = 60_000;
 const SOCKET_LOSS_GRACE_MS = 12_000;
 const END_NOTICE_MS = 3_200;
+const PREPARING_TIMEOUT_MS = 12_000;
+const KEY_TIMEOUT_MS = 10_000;
 const CALL_PHASES = new Set(['outgoing', 'incoming', 'connecting', 'active']);
 
 function newCallId() {
@@ -22,6 +24,17 @@ function newCallId() {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** A promise that cannot leave the preparing screen waiting forever. */
+function withTimeout(promise, ms, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
 }
 
 function reasonText(payload, info) {
@@ -103,6 +116,7 @@ export function useCall(currentUser) {
   const verifyTimerRef = useRef(null);
   const endTimerRef = useRef(null);
   const socketTimerRef = useRef(null);
+  const preparingTimerRef = useRef(null);
   const connectingRef = useRef(false);
   const endingRef = useRef(false);
   const verifiedRef = useRef(false);
@@ -154,6 +168,11 @@ export function useCall(currentUser) {
     endTimerRef.current = null;
   }, []);
 
+  const clearPreparingTimer = useCallback(() => {
+    clearTimeout(preparingTimerRef.current);
+    preparingTimerRef.current = null;
+  }, []);
+
   const removeRoomListeners = useCallback(() => {
     for (const [event, handler] of roomListenersRef.current) {
       roomRef.current?.off(event, handler);
@@ -194,11 +213,12 @@ export function useCall(currentUser) {
     clearTimeout(verifyTimerRef.current);
     clearTimeout(endTimerRef.current);
     clearTimeout(socketTimerRef.current);
+    clearPreparingTimer();
     verifyTimerRef.current = null;
     endTimerRef.current = null;
     socketTimerRef.current = null;
     cleanupRoom();
-  }, [clearRing, cleanupRoom]);
+  }, [clearPreparingTimer, clearRing, cleanupRoom]);
 
   const scheduleIdle = useCallback((ms = END_NOTICE_MS) => {
     clearEndTimer();
@@ -214,6 +234,7 @@ export function useCall(currentUser) {
 
   const finishWithNotice = useCallback((text, { isError = false, ms = END_NOTICE_MS } = {}) => {
     clearRing();
+    clearPreparingTimer();
     clearTimeout(verifyTimerRef.current);
     verifyTimerRef.current = null;
     cleanupRoom();
@@ -228,7 +249,7 @@ export function useCall(currentUser) {
     setError(isError ? text : '');
     changePhase('ended');
     scheduleIdle(ms);
-  }, [changePhase, cleanupRoom, clearRing, markBusy, scheduleIdle]);
+  }, [changePhase, cleanupRoom, clearPreparingTimer, clearRing, markBusy, scheduleIdle]);
 
   const failCall = useCallback((text) => {
     if (phaseRef.current === 'ended' || phaseRef.current === 'idle') return;
@@ -243,6 +264,7 @@ export function useCall(currentUser) {
   const resetToIdle = useCallback(() => {
     clearRing();
     clearEndTimer();
+    clearPreparingTimer();
     cleanupRoom();
     keyRef.current = null;
     keyReadyRef.current = false;
@@ -255,7 +277,7 @@ export function useCall(currentUser) {
     setError('');
     changePhase('idle');
     setInfo(null);
-  }, [changePhase, cleanupRoom, clearEndTimer, clearRing, markBusy, setInfo]);
+  }, [changePhase, cleanupRoom, clearEndTimer, clearPreparingTimer, clearRing, markBusy, setInfo]);
 
   const startTimer = useCallback(() => {
     clearInterval(timerRef.current);
@@ -664,7 +686,11 @@ export function useCall(currentUser) {
     let active = true;
     apiCall('calls/status')
       .then((data) => { if (active && data && data.configured === false) setCallsConfigured(false); })
-      .catch(() => undefined);
+      .catch((err) => {
+        // A backend from before the calls module answers 404. Keep the buttons
+        // from opening a screen that can never receive an invite ack.
+        if (active && err?.status === 404) setCallsConfigured(false);
+      });
     return () => { active = false; };
   }, [currentUser?.id]);
 
@@ -717,10 +743,24 @@ export function useCall(currentUser) {
     setError('');
     setNotice('');
 
+    // The preparing screen must always end. This covers an old backend that
+    // never acks, a stalled MLS derivation and a lost invite packet alike.
+    clearPreparingTimer();
+    preparingTimerRef.current = setTimeout(() => {
+      if (phaseRef.current !== 'preparing') return;
+      startGenRef.current += 1;
+      if (socket.connected) socket.emit('call:cancel', { callId });
+      finishWithNotice('سرور تماس پاسخ نداد؛ بک‌اند یا اتصال را بررسی کن', { isError: true, ms: 4_500 });
+    }, PREPARING_TIMEOUT_MS);
+
     try {
       let key = null;
       if (encrypted) {
-        key = await exportCallKey(currentUser, chat, callId);
+        key = await withTimeout(
+          exportCallKey(currentUser, chat, callId),
+          KEY_TIMEOUT_MS,
+          'آماده‌سازی کلید رمزنگاری طول کشید؛ دوباره تلاش کن',
+        );
         if (startGen !== startGenRef.current) return;
         if (!key) throw new Error('کلید رمزنگاری این گفتگو در دسترس نیست؛ تماس بسته ماند');
       }
@@ -752,6 +792,7 @@ export function useCall(currentUser) {
       }
 
       setInfo({ ...next, conversationId: ack?.conversationId ?? next.conversationId, e2ee: ack?.e2ee === true });
+      clearPreparingTimer();
       changePhase('outgoing');
       scheduleRingBackstop();
       if (kind === 'group' && ack?.reachable === 0) {
