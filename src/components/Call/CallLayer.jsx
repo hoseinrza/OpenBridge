@@ -391,7 +391,7 @@ function DirectStage({ call, currentUser }) {
       ) : (
         <AudioView
           peer={remote ? { name: remote.name } : call.peer}
-          avatar={remote ? undefined : call.peer?.avatar}
+          avatar={call.peer?.avatar}
           status={remote
             ? (call.callInfo?.type === 'video' ? 'دوربین خاموش است' : 'در حال تماس')
             : 'در انتظار اتصال…'}

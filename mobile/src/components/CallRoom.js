@@ -217,7 +217,7 @@ function CallUI({ call, currentUser, onEnd }) {
               <VideoTile trackRef={remoteTrack} style={StyleSheet.absoluteFill} />
             ) : (
               <AudioView
-                avatar={remote ? undefined : call.info?.peer?.avatar}
+                avatar={call.info?.peer?.avatar}
                 name={remote?.name || call.info?.peer?.name || 'طرف مقابل'}
                 status={remote
                   ? (call.info?.type === 'video' ? 'دوربین خاموش است' : 'در حال تماس')
