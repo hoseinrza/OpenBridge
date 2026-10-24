@@ -11,7 +11,8 @@ function previewText(preview) {
   switch (preview.type) {
     case 'image': return 'عکس';
     case 'video': return 'ویدیو';
-    case 'audio': return 'پیام صوتی';
+    case 'audio':
+    case 'voice': return 'پیام صوتی';
     case 'file':  return preview.fileName || 'فایل';
     default:      return preview.text || 'پیام';
   }

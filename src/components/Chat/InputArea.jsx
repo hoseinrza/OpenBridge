@@ -244,7 +244,7 @@ export default function InputArea({
     setUploading(true);
     // No object URL is made for a preview: the bubble that appears is the one the
     // server broadcasts back, with its own signed address on it.
-    const result = await onSend({ type: 'audio', name: file.name, size: file.size, durationMs, _file: file });
+    const result = await onSend({ type: 'voice', name: file.name, size: file.size, durationMs, _file: file });
     setUploading(false);
     setRecording(null);
     setElapsedMs(0);

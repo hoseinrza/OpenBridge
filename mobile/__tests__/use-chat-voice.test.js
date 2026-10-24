@@ -63,7 +63,9 @@ test('a recording is uploaded and the message names it with the length the phone
     'message:send',
     {
       toId: 'p1',
-      type: 'AUDIO',
+      // A recording is its own kind of message, not an audio file somebody
+      // picked: the shelf it lands in and the bubble it draws both follow this.
+      type: 'VOICE',
       fileUrl: '/uploads/voice.m4a',
       fileName: 'voice.m4a',
       fileSize: 61544,
@@ -84,10 +86,29 @@ test('a group recording goes to the conversation instead of a person', async () 
 
   expect(mockAckEmit.mock.calls[0][1]).toMatchObject({
     conversationId: 'g1',
-    type: 'AUDIO',
+    type: 'VOICE',
     fileUrl: '/uploads/voice.m4a',
     durationMs: 1200,
   });
+});
+
+test('a recording stored under its own type arrives as one', async () => {
+  mockFetchMessages.mockResolvedValue([{
+    id: 'm2',
+    type: 'VOICE',
+    senderId: 'p1',
+    receiverId: 'me',
+    fileUrl: '/uploads/voice.weba',
+    fileName: 'voice-message.weba',
+    durationMs: 3200,
+    createdAt: '2026-10-22T08:00:00.000Z',
+    reactions: [],
+  }]);
+
+  const { result } = renderHook(() => useChat(peer, me, jest.fn()));
+  await waitFor(() => expect(result.current.messages).toHaveLength(1));
+
+  expect(result.current.messages[0]).toMatchObject({ type: 'voice', durationMs: 3200 });
 });
 
 test('a stored voice message keeps the length it was sent with', async () => {

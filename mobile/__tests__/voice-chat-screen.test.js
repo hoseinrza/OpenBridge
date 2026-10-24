@@ -69,6 +69,15 @@ test('a voice message shows the length its sender measured', () => {
   expect(view.getByText('۰۰:۰۵')).toBeTruthy();
 });
 
+// Two labels draw the same bubble: the type a recording is stored under now,
+// and the audio type the rows written before it still carry.
+test('a recording shows its bubble whatever type the row is filed under', () => {
+  makeChat([voice('b10', 'other', { type: 'voice' }), voice('b11', 'mine', { type: 'audio' })]);
+  const view = renderChat();
+  expect(view.getByTestId('voice-play-b10')).toBeTruthy();
+  expect(view.getByTestId('voice-play-b11')).toBeTruthy();
+});
+
 test('tapping a bubble opens the stream and the button turns into a pause', async () => {
   makeChat([voice('b2', 'other')]);
   const view = renderChat();

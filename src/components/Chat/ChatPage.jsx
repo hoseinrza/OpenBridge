@@ -32,9 +32,12 @@ function previewFromEncrypted(message, chat, myId) {
   const mime = attachment?.mime ?? '';
   return {
     // The sender wrote the MIME type into its own descriptor, so the row can
-    // say what arrived instead of reciting the filename the recorder chose.
+    // say what arrived instead of reciting the filename the recorder chose —
+    // except for a recording, whose MIME is the same as a song's. Only the
+    // sender's own microphone flag knows the difference.
     type: attachment
-      ? (mime.startsWith('image/') ? 'image'
+      ? (attachment.voice ? 'voice'
+        : mime.startsWith('image/') ? 'image'
         : mime.startsWith('audio/') ? 'audio'
         : mime.startsWith('video/') ? 'video'
         : 'file')
@@ -80,6 +83,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const [users, setUsers]                 = useState([]);
   const [activeUser, setActiveUser]       = useState(null);
   const [searchQuery, setSearchQuery]     = useState('');
+  const [searchOpen, setSearchOpen]       = useState(false);
   const [profileTarget, setProfileTarget] = useState(null); // { user, isOwn } | null
   const [profileOpen, setProfileOpen]     = useState(false);
   const [newChatOpen, setNewChatOpen]     = useState(false);
@@ -222,6 +226,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     clearMessages();
     setEditing(null);
     setSearchQuery('');
+    setSearchOpen(false);
     setProfileOpen(false);
   }
 
@@ -234,6 +239,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     clearMessages();
     setEditing(null);
     setSearchQuery('');
+    setSearchOpen(false);
     setProfileOpen(false);
   }
 
@@ -246,10 +252,16 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     clearMessages();
     setEditing(null);
     setSearchQuery('');
+    setSearchOpen(false);
     setProfileOpen(false);
   }
 
-  function handleBackToList() { setActiveUser(null); setProfileOpen(false); setEditing(null); }
+  // The header's search field unmounts with the chat, so its open flag has to go
+  // back with it — otherwise the next chat opens straight into a search box.
+  function handleBackToList() {
+    setActiveUser(null); setProfileOpen(false); setEditing(null);
+    setSearchQuery(''); setSearchOpen(false);
+  }
 
   function openOwnProfile()       { setProfileTarget({ user: currentUser, isOwn: true }); }
   function openChatProfile()      { setProfileOpen(true); }
@@ -321,6 +333,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               encryptionNote={encryptionNote}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
+              searchOpen={searchOpen}
+              onSearchOpenChange={setSearchOpen}
               onOpenProfile={openChatProfile}
               onBack={handleBackToList}
               onStartCall={(type) => call.startCall(activeUser, type)}
@@ -408,6 +422,12 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           onClose={() => setProfileOpen(false)}
           onUpdated={handleGroupUpdated}
           onOpenUser={openUserProfile}
+          onCall={(type) => call.startCall(activeUser, type)}
+          callsEnabled={call.callsConfigured}
+          callBusy={call.phase !== 'idle'}
+          // Searching happens in the transcript, so the panel steps aside rather
+          // than covering the very thing it just asked for.
+          onSearch={() => { setProfileOpen(false); setSearchOpen(true); }}
         />
       )}
 

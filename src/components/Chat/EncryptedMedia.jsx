@@ -84,7 +84,7 @@ export default function EncryptedMedia({ attachment, kind, name, size, onOpen })
   // player is handed the decrypted object URL along with the reference this view
   // holds on it, so the bytes stay alive while they are being listened to and are
   // given back when the bubble leaves or the listen ends — whichever comes first.
-  if (kind === 'audio') {
+  if (kind === 'audio' || kind === 'voice') {
     return (
       <div className="enc-media" ref={boxRef}>
         <VoiceBubble

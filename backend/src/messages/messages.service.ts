@@ -43,13 +43,22 @@ const lastMessageInclude = (userId: string) => ({
 // the number a recording client stops its own timer at.
 const MAX_DURATION_MS = 15 * 60 * 1000;
 
-// Photos and films in one list, documents in the other. A voice recording is in
-// neither: it is a message you listen to where it stands, not a file you keep,
-// which is also how the encrypted lists this device builds for itself are split.
-const SHARED_TYPES = {
-  media: ['IMAGE', 'VIDEO'],
-  files: ['FILE'],
-} satisfies Record<'media' | 'files', ('IMAGE' | 'VIDEO' | 'FILE' | 'AUDIO')[]>;
+// Photos and films in one list, documents in another. A recording and an
+// uploaded audio file are separate shelves too: one is something you listen to
+// where it stands, the other is something you keep. This is also how the
+// encrypted lists this device builds for itself are split.
+//
+// The split between the two audio shelves is not the label the sender's composer
+// wrote. A recording is an audio file somebody timed, and before a recording had
+// its own type — as on every phone that has sent one since — it was an AUDIO row
+// with a length on it. An untimed AUDIO is a file someone chose from their
+// library and is kept, not listened to.
+const SHARED_WHERE = {
+  media: { type: { in: ['IMAGE', 'VIDEO'] } },
+  voice: { OR: [{ type: 'VOICE' }, { type: 'AUDIO', durationMs: { not: null } }] },
+  music: { type: 'AUDIO', durationMs: null },
+  files: { type: 'FILE' },
+} satisfies Record<'media' | 'voice' | 'music' | 'files', Prisma.MessageWhereInput>;
 
 type LinkRow = {
   id:         string;
@@ -611,13 +620,13 @@ export class MessagesService {
         conversationId: conversation.id,
         deletedAt:      null,
         hides:          { none: { userId: requesterId } },
-        type:           { in: SHARED_TYPES[kind] },
+        ...SHARED_WHERE[kind],
         ...(cursor ? { createdAt: { lt: cursor } } : {}),
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take:    take + 1,
       select:  {
-        id: true, type: true, fileUrl: true, fileName: true, fileSize: true, createdAt: true,
+        id: true, type: true, fileUrl: true, fileName: true, fileSize: true, durationMs: true, createdAt: true,
         sender: { select: { id: true, username: true, displayName: true } },
       },
     });
@@ -627,14 +636,17 @@ export class MessagesService {
       kind,
       encrypted: false,
       items: rows.slice(0, take).map(row => ({
-        id:        row.id,
+        id:         row.id,
         kind,
-        type:      row.type.toLowerCase(),
-        url:       signedFileUrl(row.fileUrl),
-        name:      row.fileName,
-        size:      row.fileSize,
-        createdAt: row.createdAt,
-        sender:    { id: row.sender.id, name: row.sender.displayName || row.sender.username },
+        type:       row.type.toLowerCase(),
+        url:        signedFileUrl(row.fileUrl),
+        name:       row.fileName,
+        size:       row.fileSize,
+        // The length a voice or music row counts down from. Nothing else keeps
+        // one, so a photo and a document answer null rather than no field.
+        durationMs: row.durationMs,
+        createdAt:  row.createdAt,
+        sender:     { id: row.sender.id, name: row.sender.displayName || row.sender.username },
       })),
       nextCursor: hasMore ? rows[take - 1].createdAt.toISOString() : null,
     };
@@ -644,7 +656,7 @@ export class MessagesService {
     type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number; durationMs?: number;
   }) {
     const type = (typeof data.type === 'string' ? data.type : 'TEXT').toUpperCase();
-    const allowedTypes = ['TEXT', 'IMAGE', 'FILE', 'AUDIO', 'VIDEO'];
+    const allowedTypes = ['TEXT', 'IMAGE', 'FILE', 'AUDIO', 'VIDEO', 'VOICE'];
     if (!allowedTypes.includes(type)) throw new BadRequestException('نوع پیام نامعتبر است');
 
     const text = typeof data.text === 'string' ? data.text.trim() : '';
@@ -675,7 +687,7 @@ export class MessagesService {
     }
     // Only media that plays has a length worth keeping. A picture or a plain
     // file drops the field rather than storing a number nothing will show.
-    const plays = type === 'AUDIO' || type === 'VIDEO';
+    const plays = type === 'AUDIO' || type === 'VIDEO' || type === 'VOICE';
 
     return {
       type: type as any,

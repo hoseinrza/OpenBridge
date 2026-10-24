@@ -650,6 +650,29 @@ test('an encrypted attachment descriptor carries a length only when the sender m
   }
 });
 
+test('an encrypted attachment descriptor says whether it came from a microphone', async () => {
+  const { packAttachment, parseAttachment } = await loadCore();
+  const blob = '00000000-0000-4000-8000-000000000000';
+  const key = randomBytes(32).toString('base64');
+  const iv = randomBytes(12).toString('base64');
+  const base = { blob, name: 'voice-message.weba', mime: 'audio/webm', size: 88120, key, iv, durationMs: 4600 };
+
+  const recording = parseAttachment(packAttachment({ ...base, voice: true }));
+  assert.equal(recording.voice, true, 'a recording is marked as one');
+  assert.equal(recording.durationMs, 4600, 'and keeps the length it travels with');
+
+  const song = parseAttachment(packAttachment({ ...base, name: 'a-song.mp3', mime: 'audio/mpeg' }));
+  assert.equal(song.voice, false, 'an uploaded audio file is not a recording');
+
+  // Anything but exactly true means the same as a missing field: a reader never
+  // guesses that an unknown attachment came from a microphone, which is also how
+  // a descriptor written before this field existed is read.
+  for (const forged of ['true', 1, {}, null, undefined]) {
+    const text = JSON.stringify({ k: 'openbridge.attachment.v1', ...base, voice: forged });
+    assert.equal(parseAttachment(text).voice, false, `${JSON.stringify(forged)} does not make a recording`);
+  }
+});
+
 test('a conversation that is not encrypted cannot be used as a file host', async () => {
   const { parseAttachment } = await loadCore();
   assert.equal(parseAttachment('hello'), null, 'an ordinary message is not mistaken for a descriptor');

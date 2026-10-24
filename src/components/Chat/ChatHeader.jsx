@@ -1,16 +1,17 @@
-import { useState, useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import Avatar from '../ui/Avatar.jsx';
 
 const STATUS_TEXT = { online: 'آنلاین', idle: 'غیرفعال', dnd: 'مشغول', offline: 'آفلاین' };
 
 export default function ChatHeader({
-  user, encrypted = false, encryptionNote = null, searchQuery, onSearchChange, onOpenProfile, onBack,
-  onStartCall, callsEnabled = true, callBusy = false,
+  user, encrypted = false, encryptionNote = null, searchQuery, onSearchChange, searchOpen, onSearchOpenChange,
+  onOpenProfile, onBack, onStartCall, callsEnabled = true, callBusy = false,
 }) {
-  const [searchOpen, setSearchOpen] = useState(false);
   const inputRef = useRef(null);
   const isGroup = user.kind === 'group';
 
+  // Search is open or closed wherever the chat is read from, because the profile
+  // panel offers it as an action too — so the flag is held above both.
   useEffect(() => {
     if (searchOpen) {
       inputRef.current?.focus();
@@ -20,7 +21,7 @@ export default function ChatHeader({
   }, [searchOpen, onSearchChange]);
 
   function closeSearch() {
-    setSearchOpen(false);
+    onSearchOpenChange(false);
   }
 
   return (
@@ -158,7 +159,7 @@ export default function ChatHeader({
               className="icon-btn"
               title="جستجو در پیام‌ها"
               aria-label="جستجو در پیام‌های این گفتگو"
-              onClick={() => setSearchOpen(true)}
+              onClick={() => onSearchOpenChange(true)}
             >
               <i className="fas fa-magnifying-glass" aria-hidden="true" />
             </button>

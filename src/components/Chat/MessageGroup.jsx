@@ -38,7 +38,7 @@ function BubbleBody({ message, searchQuery, onOpenImage }) {
     );
   }
 
-  if (message.type === 'audio') {
+  if (message.type === 'audio' || message.type === 'voice') {
     return (
       <VoiceBubble
         id={message.id}
@@ -250,7 +250,7 @@ export default function MessageGroup({
   }, [menu]);
 
   const bubbleClass = `bubble ${message.type === 'image' ? 'bubble-image' : ''}`
-    + `${message.type === 'audio' ? ' bubble-voice' : ''}`;
+    + `${message.type === 'audio' || message.type === 'voice' ? ' bubble-voice' : ''}`;
   const wrapperClass = `msg-wrapper ${isMine ? 'mine' : 'other'} `
     + `${first ? 'first' : ''} ${last ? 'last' : ''} ${leaving ? 'leaving' : ''}`;
 

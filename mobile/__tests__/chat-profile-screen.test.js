@@ -25,6 +25,11 @@ jest.mock('../src/context/SocketContext', () => ({
   useSocket: () => ({ socket, connected: true }),
 }));
 
+const mockStartCall = jest.fn();
+jest.mock('../src/context/CallContext', () => ({
+  useCall: () => ({ startCall: (...args) => mockStartCall(...args), phase: 'idle', connected: true }),
+}));
+
 const joinedLabel = date => new Date(date).toLocaleDateString('fa-IR', {
   year: 'numeric', month: 'long', day: 'numeric',
 });
@@ -58,6 +63,16 @@ const fileItem = {
 const linkItem = {
   id: 'l1', kind: 'links', type: 'TEXT', createdAt: '2026-03-03T10:00:00.000Z',
   text: 'ببین: https://example.com/a.', url: 'https://example.com/a', sender: { id: 'p1', name: 'سارا' },
+};
+const voiceItem = {
+  id: 'v1', kind: 'voice', type: 'VOICE', url: '/uploads/v1.weba',
+  name: 'voice-message.weba', size: 61544, durationMs: 4600,
+  createdAt: '2026-03-04T10:00:00.000Z', sender: { id: 'p1', name: 'سارا' },
+};
+const musicItem = {
+  id: 'a1', kind: 'music', type: 'AUDIO', url: '/uploads/a1.mp3',
+  name: 'یک آهنگ.mp3', size: 40200, durationMs: null,
+  createdAt: '2026-03-05T10:00:00.000Z', sender: { id: 'p1', name: 'سارا' },
 };
 
 function renderProfile(peer) {
@@ -152,6 +167,36 @@ test('a file row opens its signed url and a link row its own address', async () 
   expect(await view.findByText('example.org')).toBeTruthy();
   expect(view.getAllByTestId('profile-link-row')).toHaveLength(2);
   expect(view.queryByTestId('profile-load-more')).toBeNull();
+});
+
+test('the voice and music shelves play their rows instead of offering a download', async () => {
+  const itemsByKind = { media: [], voice: [voiceItem], music: [musicItem], files: [], links: [] };
+  fetchShared.mockImplementation((target, kind) => Promise.resolve({
+    kind, encrypted: false, items: itemsByKind[kind] ?? [], nextCursor: null,
+  }));
+  const view = renderProfile(groupPeer);
+  await view.findByText('تیم طراحی');
+
+  fireEvent.press(view.getByTestId('profile-tab-voice'));
+  await waitFor(() => expect(fetchShared).toHaveBeenCalledWith('g1', 'voice', undefined));
+  expect(await view.findByTestId('profile-audio-row')).toBeTruthy();
+  expect(view.getByTestId('voice-play-v1')).toBeTruthy();
+
+  fireEvent.press(view.getByTestId('profile-tab-music'));
+  await waitFor(() => expect(fetchShared).toHaveBeenCalledWith('g1', 'music', undefined));
+  expect(await view.findByText('یک آهنگ.mp3')).toBeTruthy();
+  expect(view.getByTestId('voice-play-a1')).toBeTruthy();
+});
+
+test('a call starts from the profile and video is its own tile', async () => {
+  const view = renderProfile(contact);
+  await view.findByText('سارا');
+
+  fireEvent.press(view.getByTestId('profile-action-call'));
+  fireEvent.press(view.getByTestId('profile-action-video'));
+
+  expect(mockStartCall).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: 'p1' }), 'audio');
+  expect(mockStartCall).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'p1' }), 'video');
 });
 
 test('an encrypted group explains itself but still lists members', async () => {

@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { updateGroup, uploadFile, resolveUrl, uploadPath, getSharedItems } from '../../services/api.js';
 import Avatar from '../ui/Avatar.jsx';
 import EncryptedMedia from '../Chat/EncryptedMedia.jsx';
+import VoiceBubble from '../Chat/VoiceBubble.jsx';
+import { playableFromSrc } from '../../services/voice.js';
+import ProfileActions from './ProfileActions.jsx';
 import { formatSize } from '../../utils/format.js';
 import './ChatProfilePanel.css';
 
@@ -14,14 +17,19 @@ const NAME_MAX = 60;
 const DESCRIPTION_MAX = 205;
 
 const SHARED_PAGE = 24;
+// Five shelves, named by what they hold rather than by the file behind them. The
+// labels carry no icons because the row has to hold six of them in a column this
+// narrow, and a count on a tab is a number the reference screen never shows.
 const SHARED_TABS = [
-  { kind: 'media', label: 'رسانه',    icon: 'fa-photo-film',  empty: 'تصویری در این گفتگو نیست' },
-  { kind: 'files', label: 'فایل‌ها',  icon: 'fa-file-lines',  empty: 'فایلی در این گفتگو نیست' },
-  { kind: 'links', label: 'لینک‌ها',  icon: 'fa-link',        empty: 'لینکی در این گفتگو نیست' },
+  { kind: 'media',  label: 'رسانه',   empty: 'تصویری در این گفتگو نیست' },
+  { kind: 'voice',  label: 'ویس',     empty: 'پیام صوتی‌ای در این گفتگو نیست' },
+  { kind: 'music',  label: 'موسیقی',  empty: 'فایل صوتی‌ای در این گفتگو نیست' },
+  { kind: 'files',  label: 'فایل‌ها', empty: 'فایلی در این گفتگو نیست' },
+  { kind: 'links',  label: 'لینک‌ها', empty: 'لینکی در این گفتگو نیست' },
 ];
 // Members are chat metadata the client already holds, so this tab never fetches
 // and a direct chat, which has no list, does not show it at all.
-const MEMBERS_TAB = { kind: 'members', label: 'اعضا', icon: 'fa-user-group' };
+const MEMBERS_TAB = { kind: 'members', label: 'اعضا' };
 
 // The same rule the server applies to a plaintext transcript: a link runs to the
 // first space or quote, and the punctuation a sentence puts after it is dropped.
@@ -44,20 +52,39 @@ function sharedDate(value) {
 // An encrypted chat has nothing on the server to ask, so its lists are built
 // from what this device has already decrypted. Newest first, like the server's
 // own pages, and a photo is carried as the descriptor its bubble opens.
+//
+// A recording and a song are the same kind of bytes and two different things to
+// keep, so neither shelf is decided by the label the composer wrote but by the
+// length the sender measured. This is the server's own rule, repeated here for
+// the rows it cannot read.
+function isRecording(m) {
+  return m.type === 'voice' || (m.type === 'audio' && m.durationMs != null);
+}
+
 function localLists(messages) {
   const media = [];
+  const voice = [];
+  const music = [];
   const files = [];
   const links = [];
 
   for (const m of messages) {
     const meta = { createdAt: m.createdAt, sender: m.side === 'mine' ? 'شما' : m.sender };
-    // A voice message is a message you listen to, not a document you keep, so
-    // it lives in the transcript and in none of this panel's lists.
-    if (m.attachment && m.type !== 'audio') {
-      const item = { ...meta, key: m.id, name: m.name, size: m.size, attachment: m.attachment };
-      (m.type === 'image' ? media : files).push(item);
+    if (m.attachment) {
+      const item = {
+        ...meta, key: m.id, name: m.name, size: m.size,
+        durationMs: m.durationMs, attachment: m.attachment,
+      };
+      if (m.type === 'image') media.push(item);
+      else if (isRecording(m)) voice.push(item);
+      else if (m.type === 'audio') music.push(item);
+      else files.push(item);
     } else if (m.type === 'image') {
       media.push({ ...meta, key: m.id, src: m.src, name: m.name, size: m.size });
+    } else if (isRecording(m)) {
+      voice.push({ ...meta, key: m.id, src: m.src, name: m.name, size: m.size, durationMs: m.durationMs });
+    } else if (m.type === 'audio') {
+      music.push({ ...meta, key: m.id, src: m.src, name: m.name, size: m.size, durationMs: m.durationMs });
     } else if (m.type === 'file') {
       files.push({ ...meta, key: m.id, src: m.src, name: m.name, size: m.size });
     }
@@ -66,6 +93,8 @@ function localLists(messages) {
 
   return {
     media: media.reverse(),
+    voice: voice.reverse(),
+    music: music.reverse(),
     files: files.reverse(),
     links: links.reverse(),
   };
@@ -82,6 +111,7 @@ function joinedAt(dateStr) {
 
 export default function ChatProfilePanel({
   chat, currentUser, encrypted, encryptionNote, messages = [], onClose, onUpdated, onOpenUser,
+  onCall, callsEnabled = true, callBusy = false, onSearch,
 }) {
   const isGroup = chat.kind === 'group';
   const myRole = isGroup
@@ -159,7 +189,7 @@ export default function ChatProfilePanel({
     }
   }, [chat.id]);
 
-  // A tab is fetched the first time it is opened, never all three at once.
+  // A tab is fetched the first time it is opened, never every tab at once.
   useEffect(() => {
     if (encrypted || pages[tab] || tab === MEMBERS_TAB.kind) return;
     loadPage(tab);
@@ -255,6 +285,18 @@ export default function ChatProfilePanel({
   // A local list is never in flight: it is whatever this device already holds.
   const sharedStatus = encrypted ? 'ready' : page.status;
 
+  // The card holds what the conversation says about itself. A phone number is
+  // not one of those rows yet: showing a number to a stranger is a rule the
+  // contacts feature has to decide, not this panel, so the row is absent rather
+  // than always-on or always-off.
+  const infoRows = [];
+  if (!isGroup && chat.username) {
+    infoRows.push({ key: 'username', label: 'نام کاربری', value: `@${chat.username}`, dir: 'ltr', accent: true });
+  }
+  if (isGroup && chat.description) infoRows.push({ key: 'about', label: 'درباره گروه', value: chat.description });
+  if (!isGroup && chat.bio) infoRows.push({ key: 'about', label: 'درباره', value: chat.bio });
+  if (!isGroup && chat.createdAt) infoRows.push({ key: 'joined', label: 'عضو از', value: joinedAt(chat.createdAt) });
+
   return (
     <aside className="chat-profile" aria-label={isGroup ? 'اطلاعات گروه' : 'اطلاعات مخاطب'}>
       <header className="panel-head">
@@ -276,27 +318,42 @@ export default function ChatProfilePanel({
       </header>
 
       <div className="panel-scroll">
-        <div className="panel-avatar-wrap">
-          <Avatar
-            src={displayName}
-            name={chat.name}
-            size={96}
-            group={isGroup}
-            status={isGroup ? undefined : chat.status}
-          />
-          {editing && (
-            <>
-              <button
-                type="button"
-                className="panel-avatar-edit"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                aria-label="تغییر تصویر گروه"
-              >
-                <i className={uploading ? 'fas fa-spinner fa-spin' : 'fas fa-camera'} aria-hidden="true" />
-              </button>
-              <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleAvatarPick} />
-            </>
+        {/* The hero is the person or the group, and nothing else: face, name, and
+            the one line that says who they are here — presence for a person, a
+            member count for a group. */}
+        <div className="panel-hero">
+          <div className="panel-avatar-wrap">
+            <Avatar
+              src={displayName}
+              name={chat.name}
+              size={96}
+              group={isGroup}
+            />
+            {editing && (
+              <>
+                <button
+                  type="button"
+                  className="panel-avatar-edit"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  aria-label="تغییر تصویر گروه"
+                >
+                  <i className={uploading ? 'fas fa-spinner fa-spin' : 'fas fa-camera'} aria-hidden="true" />
+                </button>
+                <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleAvatarPick} />
+              </>
+            )}
+          </div>
+
+          <div className="panel-name">{chat.name}</div>
+          {isGroup ? (
+            <div className="panel-hero-sub">
+              {chat.memberCount?.toLocaleString('fa-IR') ?? '۰'} عضو
+            </div>
+          ) : (
+            <div className={`panel-hero-sub status-${chat.status ?? 'offline'}`}>
+              {STATUS_TEXT[chat.status] ?? 'آفلاین'}
+            </div>
           )}
         </div>
 
@@ -376,31 +433,27 @@ export default function ChatProfilePanel({
           </form>
         ) : (
           <>
-            <div className="panel-name">{chat.name}</div>
-            {!isGroup && chat.username && (
-              <div className="panel-username" dir="ltr">@{chat.username}</div>
-            )}
-            {!isGroup && (
-              <div className={`panel-status status-${chat.status ?? 'offline'}`}>
-                <span className="panel-status-dot" aria-hidden="true" />
-                {STATUS_TEXT[chat.status] ?? 'آفلاین'}
-              </div>
-            )}
+            <ProfileActions
+              onStartCall={onCall}
+              callsEnabled={callsEnabled}
+              callBusy={callBusy}
+              onSearch={onSearch}
+            />
 
-            {isGroup && (
-              <div className="panel-meta">
-                <i className="fas fa-users" aria-hidden="true" />
-                {chat.memberCount?.toLocaleString('fa-IR') ?? '۰'} عضو
-              </div>
-            )}
-
-            {isGroup && chat.description && <p className="panel-bio">{chat.description}</p>}
-            {!isGroup && chat.bio && <p className="panel-bio">{chat.bio}</p>}
-
-            {!isGroup && chat.createdAt && (
-              <div className="panel-joined">
-                <i className="fas fa-calendar-day" aria-hidden="true" />
-                عضو از {joinedAt(chat.createdAt)}
+            {infoRows.length > 0 && (
+              <div className="panel-card">
+                {infoRows.map((row) => (
+                  <div className="panel-card-row" key={row.key}>
+                    <span className="panel-card-label">{row.label}</span>
+                    <span
+                      className={`panel-card-value ${row.accent ? 'is-accent' : ''}`}
+                      dir={row.dir}
+                      title={row.value}
+                    >
+                      {row.value}
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -425,11 +478,7 @@ export default function ChatProfilePanel({
                     className={`panel-tab ${tab === entry.kind ? 'is-active' : ''}`}
                     onClick={() => setTab(entry.kind)}
                   >
-                    <i className={`fas ${entry.icon}`} aria-hidden="true" />
                     {entry.label}
-                    {entry.kind === MEMBERS_TAB.kind && (
-                      <span className="panel-tab-count">{chat.memberCount?.toLocaleString('fa-IR') ?? '۰'}</span>
-                    )}
                   </button>
                 ))}
               </div>
@@ -495,6 +544,16 @@ export default function ChatProfilePanel({
                           <MediaCell key={item.key ?? item.id} item={item} onOpen={setViewer} />
                         ))}
                       </div>
+                    )}
+
+                    {sharedItems.length > 0 && (tab === 'voice' || tab === 'music') && (
+                      <ul className="panel-list">
+                        {sharedItems.map(item => (
+                          <li key={item.key ?? item.id} className="panel-row">
+                            <AudioRow item={item} kind={tab} />
+                          </li>
+                        ))}
+                      </ul>
                     )}
 
                     {sharedItems.length > 0 && tab === 'files' && (
@@ -633,5 +692,40 @@ function FileRow({ item }) {
         <span className="panel-row-meta">{formatSize(item.size)} · {meta}</span>
       </a>
     </>
+  );
+}
+
+// Both shelves of sound play from the bubble the transcript already uses, since
+// they are the same thing to listen to. What differs is the name: a song carries
+// one its owner chose, and a recording carries one whatever wrote it picked —
+// so only the song is worth printing.
+function AudioRow({ item, kind }) {
+  const meta = `${item.sender ?? '—'} · ${sharedDate(item.createdAt)}`;
+  const player = item.attachment
+    ? (
+      <EncryptedMedia
+        attachment={item.attachment}
+        kind={kind === 'voice' ? 'voice' : 'audio'}
+        name={item.name}
+        size={item.size}
+      />
+    )
+    : (
+      <VoiceBubble
+        id={item.key ?? item.id}
+        durationMs={item.durationMs}
+        resolve={() => playableFromSrc(item.src)}
+        download={item.src}
+      />
+    );
+
+  return (
+    <div className="panel-row-stack">
+      {kind === 'music' && (
+        <span className="panel-row-title" title={item.name}>{item.name || 'فایل صوتی'}</span>
+      )}
+      {player}
+      <span className="panel-row-meta">{meta}</span>
+    </div>
   );
 }

@@ -611,6 +611,106 @@ test('a chat lists its shared photos, files and links for its members only', asy
   );
 });
 
+test('a recorded voice note and an uploaded audio file fill different shelves', async () => {
+  const { alice, bob } = global.__ctx;
+
+  const chat = await api('/messages/groups', {
+    method: 'POST',
+    token:  alice.token,
+    body:   { name: `Voice shelf group ${suffix}`, memberIds: [bob.user.id] },
+  });
+  assert.equal(chat.status, 201, 'voice-shelf group');
+  const id = chat.data.id;
+
+  const recording = await upload(alice.token, Buffer.from('a recorded voice note'), 'audio/mp4', 'voice-message.m4a');
+  const song      = await upload(alice.token, Buffer.from('an uploaded audio file'), 'audio/mpeg', 'a-song.mp3');
+  assert.equal(recording.status, 201, 'recording upload');
+  assert.equal(song.status, 201, 'song upload');
+
+  const voiceSent = await emitAck(sockets.alice, 'message:send', {
+    conversationId: id,
+    type:           'VOICE',
+    fileUrl:        recording.data.url,
+    fileName:       'voice-message.m4a',
+    fileSize:       recording.data.size,
+    durationMs:     4600,
+  });
+  assert.equal(voiceSent.ok, true, 'a recording is its own message type');
+  const songSent = await emitAck(sockets.alice, 'message:send', {
+    conversationId: id,
+    type:           'AUDIO',
+    fileUrl:        song.data.url,
+    fileName:       'a-song.mp3',
+    fileSize:       song.data.size,
+  });
+  assert.equal(songSent.ok, true, 'an uploaded file keeps the audio type');
+
+  const voice = await api(`/messages/shared/${id}?kind=voice`, { token: bob.token });
+  assert.equal(voice.status, 200, 'the voice shelf answers');
+  assert.deepEqual(voice.data.items.map(item => item.name), ['voice-message.m4a']);
+  assert.equal(voice.data.items[0].type, 'voice', 'and says what kind of row it is');
+  assert.equal(voice.data.items[0].durationMs, 4600, 'a voice row carries the length the sender measured');
+
+  const music = await api(`/messages/shared/${id}?kind=music`, { token: bob.token });
+  assert.equal(music.status, 200, 'the music shelf answers');
+  assert.deepEqual(music.data.items.map(item => item.name), ['a-song.mp3'], 'an uploaded file is not a voice note');
+
+  assert.deepEqual((await api(`/messages/shared/${id}?kind=files`, { token: bob.token })).data.items, [], 'neither is a document');
+  assert.deepEqual((await api(`/messages/shared/${id}?kind=media`, { token: bob.token })).data.items, [], 'neither is a photo');
+
+  // A sender that measured nothing still sent a recording; the shelf holds it
+  // with a blank length rather than losing the message.
+  const unmeasured = await upload(alice.token, Buffer.from('a recording without a length'), 'audio/webm', 'voice-message.weba');
+  const unmeasuredSent = await emitAck(sockets.alice, 'message:send', {
+    conversationId: id,
+    type:           'VOICE',
+    fileUrl:        unmeasured.data.url,
+    fileName:       'voice-message.weba',
+    fileSize:       unmeasured.data.size,
+  });
+  assert.equal(unmeasuredSent.ok, true, 'a voice message with no duration');
+  const page = await api(`/messages/shared/${id}?kind=voice`, { token: bob.token });
+  assert.deepEqual(page.data.items.map(item => item.name), ['voice-message.weba', 'voice-message.m4a'], 'newest first');
+  assert.equal(page.data.items[0].durationMs, null, 'and the missing length stays missing');
+
+  // Before a recording got its own type it was an AUDIO row that happened to
+  // carry a length, and every such row is still in somebody's history. The
+  // length is the only thing that tells it from an uploaded song, so the
+  // shelves are sorted by it rather than by the label the sender used.
+  const legacy = await upload(alice.token, Buffer.from('a recording sent as audio'), 'audio/webm', 'legacy-voice.weba');
+  const legacySent = await emitAck(sockets.alice, 'message:send', {
+    conversationId: id,
+    type:           'AUDIO',
+    fileUrl:        legacy.data.url,
+    fileName:       'legacy-voice.weba',
+    fileSize:       legacy.data.size,
+    durationMs:     3200,
+  });
+  assert.equal(legacySent.ok, true, 'an audio row may carry a length');
+
+  const voiceAfterLegacy = await api(`/messages/shared/${id}?kind=voice`, { token: bob.token });
+  assert.deepEqual(
+    voiceAfterLegacy.data.items.map(item => item.name),
+    ['legacy-voice.weba', 'voice-message.weba', 'voice-message.m4a'],
+    'a timed audio row is read as a recording',
+  );
+  assert.equal(voiceAfterLegacy.data.items[0].durationMs, 3200, 'with the length it was sent with');
+
+  const musicAfterLegacy = await api(`/messages/shared/${id}?kind=music`, { token: bob.token });
+  assert.deepEqual(
+    musicAfterLegacy.data.items.map(item => item.name),
+    ['a-song.mp3'],
+    'and the music shelf keeps only the files nobody recorded',
+  );
+
+  // The length rule is the same rule: a voice note nobody can time out is refused.
+  const refused = await emitAck(sockets.alice, 'message:send', {
+    conversationId: id, type: 'VOICE', fileUrl: recording.data.url, durationMs: 900_001,
+  });
+  assert.equal(refused.ok, false, 'an impossible length is refused');
+  assert.match(refused.error, /مدت/);
+});
+
 test('an encrypted chat has nothing for the server to list', async () => {
   const { alice, bob, eve } = global.__ctx;
 
@@ -806,7 +906,7 @@ test('a voice message carries the length its sender measured', async () => {
   const delivered = waitEvent(sockets.bob, 'message:new', 4000);
   const sent = await emitAck(sockets.alice, 'message:send', {
     toId:       bob.user.id,
-    type:       'AUDIO',
+    type:       'VOICE',
     fileUrl:    weba.data.url,
     fileName:   'voice-message.weba',
     fileSize:   weba.data.size,
@@ -814,7 +914,7 @@ test('a voice message carries the length its sender measured', async () => {
   });
   assert.equal(sent.ok, true, 'the voice message is sent');
   const voice = await delivered;
-  assert.equal(voice?.type, 'AUDIO');
+  assert.equal(voice?.type, 'VOICE');
   assert.equal(voice?.durationMs, 4600, 'the length reaches every device with the message');
 
   const played = await fetch(`${origin}${API_PREFIX}${voice.fileUrl}`);

@@ -6,6 +6,7 @@ import {
 import { FontAwesome6 } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
+import { useCall } from '../context/CallContext';
 import { useSocket } from '../context/SocketContext';
 import Avatar from '../components/Avatar';
 import {
@@ -14,16 +15,23 @@ import {
 import { fonts, radius, spacing, type, useAppTheme } from '../theme';
 import { formatDayLabel } from '../utils/time';
 import { fa, formatSize } from '../utils/persian';
+import VoiceBubble from '../components/VoiceBubble';
 
 const TABS = [
-  { kind: 'media', label: 'رسانه',   icon: 'photo-film', empty: 'تصویری در این گفتگو نیست' },
-  { kind: 'files', label: 'فایل‌ها', icon: 'file-lines', empty: 'فایلی در این گفتگو نیست' },
-  { kind: 'links', label: 'لینک‌ها', icon: 'link',       empty: 'لینکی در این گفتگو نیست' },
+  { kind: 'media',  label: 'رسانه',   empty: 'تصویری در این گفتگو نیست' },
+  { kind: 'voice',  label: 'ویس',     empty: 'پیام صوتی‌ای در این گفتگو نیست' },
+  { kind: 'music',  label: 'موسیقی',  empty: 'فایل صوتی‌ای در این گفتگو نیست' },
+  { kind: 'files',  label: 'فایل‌ها', empty: 'فایلی در این گفتگو نیست' },
+  { kind: 'links',  label: 'لینک‌ها', empty: 'لینکی در این گفتگو نیست' },
 ];
 // Members are already on this screen with the chat, so the tab fetches nothing —
 // and it is the one tab an encrypted chat can still show, because a member list
 // is not message content.
-const MEMBERS_TAB = { kind: 'members', label: 'اعضا', icon: 'people-group' };
+const MEMBERS_TAB = { kind: 'members', label: 'اعضا' };
+const CALL_ACTIONS = [
+  { id: 'call',  icon: 'phone', label: 'تماس',    kind: 'audio' },
+  { id: 'video', icon: 'video', label: 'تصویری', kind: 'video' },
+];
 const ROLE_TEXT = { OWNER: 'مالک', ADMIN: 'مدیر' };
 // The same bounds the server enforces on PATCH /messages/groups/:id, so a draft
 // that cannot be saved is caught before the round trip.
@@ -48,6 +56,7 @@ export default function ChatProfileScreen({ route }) {
   const peer = route.params?.peer;
   const { currentUser } = useAuth();
   const { socket } = useSocket();
+  const { startCall, phase } = useCall();
   const { colors } = useAppTheme();
   const insets = useSafeAreaInsets();
 
@@ -146,7 +155,7 @@ export default function ChatProfileScreen({ route }) {
     }
   }, [peer?.id]);
 
-  // A tab is fetched the first time it is opened, never all three at once.
+  // A tab is fetched the first time it is opened, never every tab at once.
   useEffect(() => {
     if (locked || pages[tab] || tab === MEMBERS_TAB.kind) return;
     loadPage(tab);
@@ -212,6 +221,9 @@ export default function ChatProfileScreen({ route }) {
   const items = page.items;
   const tabs = isGroup ? [MEMBERS_TAB, ...TABS] : TABS;
   const onMembers = tab === MEMBERS_TAB.kind;
+  // A recording and a song are listened to where they stand, so their rows carry
+  // a player; a document and a link are kept, so theirs are doors.
+  const onAudio = tab === 'voice' || tab === 'music';
   const members = profile?.participants ?? [];
   // A locked chat has nothing to list except its members, so the strip only
   // appears where there is a tab that still works.
@@ -224,6 +236,9 @@ export default function ChatProfileScreen({ route }) {
         testID="profile-screen"
         keyboardShouldPersistTaps="handled"
       >
+        {/* The hero is the person or the group and nothing else: face, name, and
+            the one line that says who they are here. Everything that describes
+            them rather than identifies them goes in the card under it. */}
         <View style={styles.hero}>
           <Avatar
             uri={profile?.avatar}
@@ -233,29 +248,59 @@ export default function ChatProfileScreen({ route }) {
             status={isGroup ? undefined : profile?.status}
           />
           <Text style={styles.heroName}>{profile?.name}</Text>
-          {isGroup ? (
-            <Text style={styles.heroMeta}>{fa(profile?.memberCount ?? 0)} عضو</Text>
-          ) : (
-            <View style={styles.heroRow}>
-              <Text style={styles.heroHandle}>@{profile?.username}</Text>
-              <Text style={styles.heroDot}>·</Text>
-              <Text style={[styles.heroMeta, profile?.status === 'online' && styles.heroOnline]}>
-                {profile?.status === 'online' ? 'آنلاین' : 'آفلاین'}
+          <Text
+            style={[
+              styles.heroMeta,
+              !isGroup && profile?.status === 'online' && styles.heroOnline,
+            ]}
+          >
+            {isGroup
+              ? `${fa(profile?.memberCount ?? 0)} عضو`
+              : (profile?.status === 'online' ? 'آنلاین' : 'آفلاین')}
+          </Text>
+        </View>
+
+        {/* The two calls a phone can start from here. A search lives in the
+            transcript, which this screen does not hold, so it stays on the web. */}
+        <View style={styles.actions}>
+          {CALL_ACTIONS.map(action => (
+            <Pressable
+              key={action.id}
+              testID={`profile-action-${action.id}`}
+              style={[styles.action, phase !== 'idle' && styles.actionDisabled]}
+              onPress={() => startCall(profile, action.kind)}
+              disabled={phase !== 'idle'}
+              accessibilityRole="button"
+              accessibilityLabel={action.label}
+            >
+              <FontAwesome6 name={action.icon} size={17} color={colors.accentText} />
+              <Text style={styles.actionText}>{action.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <View style={styles.card}>
+          {!!profile?.username && !isGroup && (
+            <View style={styles.cardRow}>
+              <FontAwesome6 name="at" size={13} color={colors.text3} />
+              <Text style={[styles.rowText, styles.rowHandle]}>@{profile.username}</Text>
+            </View>
+          )}
+          {!!(isGroup ? profile?.description : profile?.bio) && (
+            <View style={styles.cardRow}>
+              <FontAwesome6 name="circle-info" size={13} color={colors.text3} />
+              <Text style={styles.rowText}>{isGroup ? profile.description : profile.bio}</Text>
+            </View>
+          )}
+          {!!longDate(profile?.createdAt) && (
+            <View style={styles.cardRow}>
+              <FontAwesome6 name="calendar" size={13} color={colors.text3} />
+              <Text style={styles.rowText}>
+                {isGroup ? 'گروه از' : 'پیوسته'} · {longDate(profile.createdAt)}
               </Text>
             </View>
           )}
-          {!!profile?.bio && !isGroup && <Text style={styles.bio}>{profile.bio}</Text>}
-          {!!profile?.description && isGroup && <Text style={styles.bio}>{profile.description}</Text>}
         </View>
-
-        {!!longDate(profile?.createdAt) && (
-          <View style={styles.row}>
-            <FontAwesome6 name="calendar" size={13} color={colors.text3} />
-            <Text style={styles.rowText}>
-              {isGroup ? 'گروه از' : 'پیوسته'} · {longDate(profile.createdAt)}
-            </Text>
-          </View>
-        )}
 
         <View style={styles.row}>
           <FontAwesome6 name={locked ? 'lock' : 'shield-halved'} size={13} color={locked ? colors.accentText : colors.text3} />
@@ -336,7 +381,12 @@ export default function ChatProfileScreen({ route }) {
         {(showTabs || locked) && (
           <View style={styles.section}>
             {showTabs && (
-              <View style={styles.tabs} accessibilityRole="tablist">
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.tabs}
+                accessibilityRole="tablist"
+              >
                 {tabs.map(entry => (
                   <Pressable
                     key={entry.kind}
@@ -349,17 +399,12 @@ export default function ChatProfileScreen({ route }) {
                       ? `${entry.label} ${fa(members.length)}`
                       : entry.label}
                   >
-                    <FontAwesome6
-                      name={entry.icon}
-                      size={12}
-                      color={tab === entry.kind ? colors.accentText : colors.text3}
-                    />
                     <Text style={[styles.tabText, tab === entry.kind && styles.tabTextActive]}>
                       {entry.kind === MEMBERS_TAB.kind ? `${entry.label} ${fa(members.length)}` : entry.label}
                     </Text>
                   </Pressable>
                 ))}
-              </View>
+              </ScrollView>
             )}
 
             {onMembers ? (
@@ -426,7 +471,25 @@ export default function ChatProfileScreen({ route }) {
                   </View>
                 )}
 
-                {tab !== 'media' && items.length > 0 && (
+                {onAudio && items.length > 0 && (
+                  <View style={styles.list}>
+                    {items.map(item => (
+                      <View key={item.id} style={styles.listRow} testID="profile-audio-row">
+                        <View style={styles.listBody}>
+                          {tab === 'music' && !!item.name && (
+                            <Text style={styles.listTitle} numberOfLines={1}>{item.name}</Text>
+                          )}
+                          <VoiceBubble id={item.id} src={item.src} durationMs={item.durationMs} />
+                          <Text style={styles.listMeta}>
+                            {item.sender ?? '—'} · {formatDayLabel(item.createdAt)}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {!onAudio && tab !== 'media' && items.length > 0 && (
                   <View style={styles.list}>
                     {items.map(item => (
                       <Pressable
@@ -516,15 +579,23 @@ function makeStyles(colors, insets) {
     content: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.md },
 
     hero: { alignItems: 'center', gap: spacing.xs, paddingBottom: spacing.md },
-    heroName: { color: colors.text1, fontFamily: fonts.semibold, fontSize: type.lg, marginTop: spacing.sm },
+    heroName: { color: colors.text1, fontFamily: fonts.semibold, fontSize: type.xl, marginTop: spacing.sm },
     heroMeta: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.sm },
     heroOnline: { color: colors.success },
-    heroRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-    heroHandle: { color: colors.accentText, fontFamily: fonts.medium, fontSize: type.sm },
-    heroDot: { color: colors.text3, fontFamily: fonts.regular, fontSize: type.sm },
-    bio: {
-      color: colors.text2, fontFamily: fonts.regular, fontSize: type.base, textAlign: 'center',
-      marginTop: spacing.sm, lineHeight: 22,
+
+    actions: { flexDirection: 'row', gap: spacing.sm },
+    action: {
+      flex: 1, height: 58, alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+      borderRadius: radius.lg, backgroundColor: colors.surface,
+    },
+    actionDisabled: { opacity: 0.5 },
+    actionText: { color: colors.accentText, fontFamily: fonts.medium, fontSize: type.xs },
+
+    card: { borderRadius: radius.lg, backgroundColor: colors.surface, overflow: 'hidden' },
+    cardRow: {
+      flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.md,
+      minHeight: 56, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
     },
 
     row: {
@@ -534,6 +605,7 @@ function makeStyles(colors, insets) {
       borderWidth: 1, borderColor: colors.border,
     },
     rowText: { flex: 1, color: colors.text2, fontFamily: fonts.regular, fontSize: type.sm, textAlign: 'right' },
+    rowHandle: { color: colors.accentText, fontFamily: fonts.medium },
 
     editBtn: {
       flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,
@@ -571,13 +643,15 @@ function makeStyles(colors, insets) {
 
     section: { gap: spacing.sm, marginTop: spacing.md },
 
+    // Five shelves plus members do not fit one row on a phone, so the capsule
+    // scrolls sideways instead of shrinking the labels below reading size.
     tabs: {
       flexDirection: 'row', gap: spacing.xs,
       borderRadius: radius.pill, backgroundColor: colors.surface2, padding: 4,
     },
     tab: {
-      flex: 1, minHeight: 40, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center',
-      gap: spacing.xs, borderRadius: radius.pill,
+      paddingHorizontal: spacing.lg, minHeight: 40, alignItems: 'center', justifyContent: 'center',
+      borderRadius: radius.pill,
     },
     tabActive: { backgroundColor: colors.surface },
     tabText: { color: colors.text3, fontFamily: fonts.medium, fontSize: type.xs },

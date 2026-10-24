@@ -304,7 +304,10 @@ export function useChat(peer, currentUser, onIncoming) {
       });
       await emitWithAck(socket, 'message:send', {
         ...target,
-        type: 'AUDIO',
+        // A recording is its own kind of message rather than an audio file, so
+        // a transcript can tell spoken bytes from a file somebody chose from
+        // their library.
+        type: 'VOICE',
         fileUrl: file.url,
         fileName: file.name,
         fileSize: file.size,

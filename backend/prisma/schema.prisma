@@ -19,6 +19,10 @@ enum MessageType {
   FILE
   AUDIO
   VIDEO
+  // A recording made by a microphone on the spot. An uploaded audio file is
+  // AUDIO; the two live on different shelves because one is something you keep
+  // and the other is something you listen to where it stands.
+  VOICE
 }
 
 enum ParticipantRole {

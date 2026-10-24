@@ -1,0 +1,49 @@
+/* Tiles the profile screen offers as its own, not icons crowded into a header:
+   the reference row is five equal tiles across the column with a small gap
+   between them, each one carrying its label under its icon. With three actions
+   the same rule leaves each tile wider, so the height stays at the measured
+   proportion rather than growing with the width. */
+.profile-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-5);
+}
+
+.profile-action {
+  flex: 1;
+  min-width: 0;
+  height: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 var(--sp-1);
+  border: 0;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.profile-action i { font-size: 17px; }
+
+.profile-action span {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.profile-action:hover:not(:disabled) { background: var(--surface-2); }
+.profile-action:active:not(:disabled) { background: var(--surface-3); }
+
+.profile-action:disabled {
+  color: var(--text-3);
+  background: var(--surface-2);
+  cursor: not-allowed;
+}

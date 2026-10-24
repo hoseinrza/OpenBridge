@@ -4,6 +4,77 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.3.2] - 2026-10-24
+
+### Changed
+- **ویس از فایل صوتی جدا شد.** ضبط‌کنندهٔ وب و موبایل حالا پیام را با نوع `VOICE`
+  می‌فرستند، نه `AUDIO`. در گفتگوی رمزنگاری‌شده ردیفی روی سرور وجود ندارد که این
+  نوع را نگه دارد، پس خودِ بستهٔ پیوست یک پرچم `voice: true` می‌برد — علتش این است
+  که یک ویس و یک آهنگ هر دو `audio/*` هستند و هیچ بایت دیگری در بسته فرقشان را
+  نمی‌گوید.
+- **دو قفسهٔ جدید در پروفایل گفتگو:** `رسانه · ویس · موسیقی · فایل‌ها · لینک‌ها`، هم
+  در پنل وب و هم در صفحهٔ موبایل. ردیف‌های ویس و موسیقی همان پخش‌کنندهٔ حباب
+  ترنسکریپت هستند (دکمهٔ پخش، ریل پیشرفت و طول)؛ دانلود یک فایل صوتیِ انتخاب‌شده
+  همان‌جا زیر حباب می‌ماند. اسم فایل فقط روی قفسهٔ موسیقی چاپ می‌شود، چون اسم یک
+  ضبط را همان‌طور که ضبط‌کننده گذاشته نشان دادن فایده‌ای ندارد.
+- **قفسهٔ «فایل‌ها» فقط سند نگه می‌دارد.** پیام صوتی چیزی است که همان‌جا گوش
+  می‌دهی، نه سندی که نگهش داری.
+- **پروفایل وب بازچیده شد:** هدر با آواتار 96px و نام و وضعیت زیرش، بعد یک ردیف
+  عملیات (`تماس · تصویری · جستجو`)، بعد کارتِ `نام کاربری / درباره / عضو از`.
+  قبلاً نام کاربری داخل هدر جا می‌شد و از خودِ پروفایل هیچ کاری شروع نمی‌شد.
+- **تماس و جستجو از داخل پروفایل هم شروع می‌شوند** (وب و موبایل). جستجو اول پنل را
+  می‌بندد و بعد کادر جستجوی ترنسکریپت را باز می‌کند — پس پرچم باز/بستهٔ آن از
+  هدر بالا رفته و با عوض شدن گفتگو هم صفر می‌شود، وگرنه گفتگوی بعدی مستقیم داخل
+  یک کادر جستجو باز می‌شد.
+- **تب‌های موبایل افقی اسکرول می‌شوند و آیکون ندارند**، چون پنج تب (شش در گروه) در
+  عرض گوشی جا نمی‌شوند.
+
+### Fixed
+- **ضبط‌های قدیمی روی قفسهٔ «ویس» پیدا می‌شوند.** پیش از `VOICE` هر ضبطی یک ردیف
+  `AUDIO` با `durationMs` بود و این ردیف‌ها در تاریخ همه باقی مانده‌اند. جدا کردن
+  دو قفسه پس بر اساس همان طول است: `AUDIO` با طول → ویس، `AUDIO` بی‌طول (فایلی که
+  کسی از گالری‌اش انتخاب کرده) → موسیقی. همان قاعده را فهرست‌های محلیِ گفتگوی
+  رمزنگاری‌شده هم می‌زنند.
+
+### Notes
+- `VOICE` یک مقدار جدید در enum `MessageType` است: روی هر دیتابیس مقصد باید
+  `npm run prisma:push` (یا یک migration هم‌ارز) اجرا شود، وگرنه اولین ویسِ ضبط‌شده
+  با خطای سرور می‌خورد.
+- کلاینتی که پرچم `voice` را نمی‌شناسد همان بستهٔ رمزنگاری‌شده را می‌شکند و به‌عنوان
+  فایل صوتی پخش می‌کند؛ فقط آن را در قفسهٔ ویس نمی‌بیند.
+- یک ویدیوی ضبط‌شده با دوربین هنوز همان حباب و قفسهٔ قبلی‌اش را دارد؛ این بچ فقط
+  صوت را دو تکه کرد.
+
+### Verified
+Backend: `npm run test:e2e` = 64 tests, 64 pass, 0 fail — including a new shelf test that
+sends a timed `VOICE` row, an untimed `AUDIO` row, an unmeasured `VOICE` row and a legacy
+timed `AUDIO` row into one group, and asserts the first, third and fourth answer `?kind=voice`
+(newest first, lengths 3200/4600 preserved and a missing one staying `null`), that only the
+untimed file answers `?kind=music`, and that `files` and `media` answer empty for all four; a
+`durationMs` of 900001 on a `VOICE` send is refused. `e2ee-client` gained a descriptor test:
+`voice: true` round-trips, an uploaded file reads back `false`, and `'true'`/1/{}/null/undefined
+all read `false`, which is also how every descriptor written before this field is read.
+Mobile: `npm test` = 69/69 across 9 suites (three of them assert the new shelves, the two call
+buttons and the audio rows), and `npx expo export --platform android` bundles at 4.8MB.
+Web: `npm run lint` and `npm run build` clean.
+Live DOM (real events, read back as text; no screenshots or pointer input on this machine):
+against the running backend on :3000 and vite on :5173, the plaintext chat with مریم احمدی
+shows a hero with a 96px avatar, the three action buttons and the five tabs; «ویس» lists
+2 rows (۰۰:۰۷ and ۰۰:۰۴) each with its own play button, rail and length, and «موسیقی»,
+«فایل‌ها», «لینک‌ها» and «رسانه» answer their empty lines. The encrypted chat with
+امیرممممممم lists 1 row under «ویس» and 0 under «فایل‌ها» from the local lists. The search
+button closed the panel and left the header search visible (placeholder «جستجو در پیام‌های
+این گفتگو…»). A real recording was then made in the browser with a WebAudio-synthesised
+microphone track — the app's own recorder, upload and send path, no API shortcut: the bubble
+came back as `bubble-voice` reading ۰۰:۱۱, the server row is `type: VOICE` with
+`durationMs: 10739`, its chat-list row reads «پیام صوتی», the shelf read back
+`voice-message.weba/voice` beside the two legacy `/audio` rows, «فایل‌ها» stayed at 0 items,
+and the message was deleted again with «حذف برای همه» (the voice shelf returns 2 rows, the
+test row is gone). Limits: mic permission was never granted, so the recording was synthesised
+rather than spoken; no incoming voice note from a second account was exercised; no mobile
+device was touched — the phone half is Jest plus a bundle, not a screen.
+
+
 ## [1.3.1] - 2026-10-24
 
 ### Fixed

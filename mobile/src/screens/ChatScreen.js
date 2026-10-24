@@ -35,6 +35,12 @@ function voiceClock(ms) {
   return `${fa(String(Math.floor(seconds / 60)).padStart(2, '0'))}:${fa(String(seconds % 60).padStart(2, '0'))}`;
 }
 
+// Both types are listened to where they stand. The older one is what every
+// recording on this phone was filed under before a recording got its own type.
+function isPlayable(msg) {
+  return msg.type === 'voice' || msg.type === 'audio';
+}
+
 function buildRows(messages) {
   const rows = [];
   let prevMsg = null;
@@ -261,7 +267,7 @@ export default function ChatScreen({ route, navigation }) {
               <Text style={styles.sender} numberOfLines={1}>{msg.sender || 'کاربر'}</Text>
             )}
 
-            {msg.type === 'audio' && msg.src ? (
+            {isPlayable(msg) && msg.src ? (
               <VoiceBubble
                 id={msg.id}
                 src={msg.src}

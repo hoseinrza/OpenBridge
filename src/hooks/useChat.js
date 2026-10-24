@@ -76,8 +76,11 @@ const MESSAGE_EXIT_MS = 240;
 // the bubble itself, so nothing readable is held in this list.
 // Which bubble an opened attachment draws. The rule is the MIME type the sender
 // wrote into its own descriptor, because an encrypted conversation gives the
-// server nothing to go on but those bytes.
-function attachmentKind(mime) {
+// server nothing to go on but those bytes — except for a recording, where even
+// the MIME lies: a voice note and a song are both audio. Only the flag the
+// sender's own microphone set can tell them apart.
+function attachmentKind(mime, voice) {
+  if (voice) return 'voice';
   if (mime?.startsWith('image/')) return 'image';
   if (mime?.startsWith('audio/')) return 'audio';
   return 'file';
@@ -93,7 +96,7 @@ function normalizeEncrypted(message, peer) {
     : peer;
   return {
     id:             `e2ee-${message.seq}`,
-    type:           attachment ? attachmentKind(attachment.mime) : 'text',
+    type:           attachment ? attachmentKind(attachment.mime, attachment.voice) : 'text',
     text:           message.text,
     attachment,
     name:           attachment?.name ?? null,
@@ -214,7 +217,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     // The order is the safety of this path: the group exists before a byte is
     // uploaded, so a peer with no keys to invite never leaves an orphan blob on
     // the server, and the file is encrypted before anything is sent at all.
-    attachmentSendRef.current = async (target, file, durationMs) => {
+    attachmentSendRef.current = async (target, file, durationMs, voice) => {
       const client = await initE2ee({ id: currentUserRef.current.id });
       const opened = secureRef.current?.conversationId
         ? null
@@ -229,6 +232,10 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
         // Travels inside the envelope rather than as a row: an encrypted
         // conversation has no message table entry for the server to measure.
         durationMs: durationMs ?? null,
+        // The same reason the length is here rather than on a row. A descriptor
+        // that says nothing about its origin reads as an uploaded file, which is
+        // why the composer has to say «microphone» out loud.
+        voice: voice === true,
         key,
         iv,
       }));
@@ -561,7 +568,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     if (msg._file && (status?.mode === 'open'
       || (!isGroup(target) && status?.mode === 'plain'))) {
       try {
-        return await attachmentSendRef.current(target, msg._file, msg.durationMs);
+        return await attachmentSendRef.current(target, msg._file, msg.durationMs, msg.type === 'voice');
       } catch (error) {
         if (!peerWithoutKeys(error) || isGroup(target)) {
           return { ok: false, error: error.message || 'رمزنگاری یا ارسال فایل ناموفق بود' };
@@ -585,7 +592,9 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
       try {
         await emitWithAck(socket, 'message:send', {
           ...targetPayload(target),
-          type:     uploaded.type,
+          // The upload only knows what the bytes look like, and a recording looks
+          // like any other audio file. What the composer asked for wins.
+          type:     msg.type === 'voice' ? 'VOICE' : uploaded.type,
           fileUrl:  uploaded.url,
           fileName: uploaded.name,
           fileSize: uploaded.size,

@@ -20,7 +20,7 @@ const BLOB_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const MAX_NAME = 255;
 
 /** Serialises one attachment payload. Refuses a descriptor it could not read back. */
-export function packAttachment({ blob, name, mime, size, key, iv, durationMs }) {
+export function packAttachment({ blob, name, mime, size, key, iv, durationMs, voice }) {
   if (typeof blob !== 'string' || !BLOB_ID.test(blob)) throw new Error('شناسه پیوست نامعتبر است');
   if (typeof key !== 'string' || fromBase64(key).length !== KEY_BYTES) throw new Error('کلید پیوست نامعتبر است');
   if (typeof iv !== 'string' || fromBase64(iv).length !== NONCE_BYTES) throw new Error('nonce پیوست نامعتبر است');
@@ -34,6 +34,10 @@ export function packAttachment({ blob, name, mime, size, key, iv, durationMs }) 
     // A voice note is only worth its length, and a reader that never heard of
     // this field still plays the file — it just cannot say how long it is.
     durationMs: Number.isInteger(durationMs) && durationMs >= 0 ? durationMs : null,
+    // Only a recording says so. An uploaded file, and every descriptor written
+    // before this existed, carries nothing, so the reader's answer is "not a
+    // microphone" rather than a guess.
+    ...(voice === true ? { voice: true } : {}),
     key,
     iv,
   });
@@ -74,6 +78,9 @@ export function parseAttachment(text) {
     // attachment never told us how long it is, so the bubble leaves the number
     // blank instead of inventing one.
     durationMs: Number.isInteger(payload.durationMs) && payload.durationMs >= 0 ? payload.durationMs : null,
+    // True only when the sender said so in as many bytes. A missing field, a
+    // string, a number — all of them mean this attachment is not a recording.
+    voice: payload.voice === true,
     key:  payload.key,
     iv:   payload.iv,
   };
