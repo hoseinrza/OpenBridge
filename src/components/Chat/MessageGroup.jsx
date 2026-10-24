@@ -89,13 +89,20 @@ function BubbleBody({ message, searchQuery, onOpenImage }) {
   );
 }
 
+const SWIPE_TRIGGER = 56;
+const SWIPE_MAX = 72;
+
 export default function MessageGroup({
   message, first = true, last = true, isGroup = false, onReact, searchQuery,
-  onOpenImage, onEdit, onDelete, onToast, chatEncrypted = false, onOpenProfile,
+  onOpenImage, onReply, onForward, onEdit, onDelete, onToast, chatEncrypted = false,
+  onOpenProfile, onJumpToMessage,
 }) {
   const [menu, setMenu] = useState(null); // { anchor, viaKeyboard } | null
+  const [swipeHint, setSwipeHint] = useState(0);
   const wrapperRef = useRef(null);
   const bubbleRef = useRef(null);
+  const swipeRef = useRef(null);
+  const suppressClickRef = useRef(false);
   const isMine = message.side === 'mine';
   // A row the list has marked as leaving is on its way out: it stops answering
   // taps while it collapses, and the list drops it a beat later.
@@ -169,6 +176,90 @@ export default function MessageGroup({
     }
   }
 
+  // Reply by dragging the bubble to the left, the way the phone app answers a
+  // message. The gesture only begins once the movement is clearly horizontal,
+  // so a vertical scroll keeps its own interpretation, and only leftward travel
+  // counts: the bubble follows the finger up to a stop and springs back if it
+  // was not far enough to mean "reply".
+  function handlePointerDown(event) {
+    if (!actionable) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (event.pointerType !== 'mouse' && !event.isPrimary) return;
+    swipeRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      active: false,
+      dx: 0,
+    };
+  }
+
+  function handlePointerMove(event) {
+    const start = swipeRef.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+
+    if (!start.active) {
+      if (Math.abs(dx) < 10 || Math.abs(dx) <= Math.abs(dy)) return;
+      if (dx > 0) {
+        swipeRef.current = null;
+        return;
+      }
+      start.active = true;
+      try {
+        bubbleRef.current?.setPointerCapture?.(event.pointerId);
+      } catch {
+        // A pointer that has already ended (or a synthetic one) cannot be
+        // captured; the drag still follows its own coordinates.
+      }
+    }
+
+    // Horizontal travel is the gesture's, not the text selection's.
+    if (event.cancelable) event.preventDefault();
+
+    // Past the stop the bubble barely moves, so the gesture cannot drag a row
+    // across the conversation.
+    const pull = -Math.min(SWIPE_MAX, Math.abs(dx));
+    start.dx = pull;
+    const bubble = bubbleRef.current;
+    if (bubble) {
+      bubble.style.transition = 'none';
+      bubble.style.transform = `translateX(${pull}px)`;
+    }
+    setSwipeHint(Math.min(1, Math.abs(pull) / SWIPE_TRIGGER));
+  }
+
+  function endSwipe(event, cancelled = false) {
+    const start = swipeRef.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    swipeRef.current = null;
+
+    const bubble = bubbleRef.current;
+    if (bubble) {
+      bubble.style.transition = 'transform var(--dur) var(--ease)';
+      bubble.style.transform = '';
+      setTimeout(() => { if (bubble) bubble.style.transition = ''; }, 260);
+    }
+    setSwipeHint(0);
+
+    if (!start.active) return;
+    // The release that ends a drag is not a tap on whatever the drag started
+    // on: an image must not open because it was used as a handle. The flag is
+    // cleared on the next tick of the clock too, because a touch drag may not
+    // produce that click at all and the next real tap must not be eaten.
+    suppressClickRef.current = true;
+    setTimeout(() => { suppressClickRef.current = false; }, 350);
+    if (!cancelled && start.dx <= -SWIPE_TRIGGER) onReply?.(message);
+  }
+
+  function handleClickCapture(event) {
+    if (!suppressClickRef.current) return;
+    suppressClickRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   // Only a menu opened by hand returns focus when it goes away; one dismissed
   // by the mouse would leave a ring on a bubble nobody meant to select. The
   // hand-back waits for the portal to leave the document, or the bubble would
@@ -185,7 +276,7 @@ export default function MessageGroup({
     + `${first ? 'first' : ''} ${last ? 'last' : ''} ${leaving ? 'leaving' : ''}`;
 
   return (
-    <div ref={wrapperRef} className={wrapperClass}>
+    <div ref={wrapperRef} className={wrapperClass} data-message-id={message.id}>
       <div className="msg-group">
         {!isMine && (
           last ? (
@@ -204,6 +295,12 @@ export default function MessageGroup({
         )}
 
         <div className="msg-bubbles">
+          {/* The arrow lives behind the bubble and is uncovered by the drag,
+              reaching full strength only at the point that means "reply". */}
+          <span className="swipe-reply" aria-hidden="true" style={{ opacity: swipeHint }}>
+            <i className="fas fa-reply" />
+          </span>
+
           <div
             className={bubbleClass}
             ref={bubbleRef}
@@ -214,10 +311,37 @@ export default function MessageGroup({
             aria-label={`${isMine ? 'شما' : (message.sender || 'کاربر')}، ${message.time}`}
             onContextMenu={handleContextMenu}
             onKeyDown={handleKeyDown}
+            onDragStart={event => event.preventDefault()}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={event => endSwipe(event)}
+            onPointerCancel={event => endSwipe(event, true)}
+            onClickCapture={handleClickCapture}
           >
             {!isMine && isGroup && first && (
               <button type="button" className="msg-sender" onClick={openProfile}>
                 {message.sender || 'کاربر'}
+              </button>
+            )}
+
+            {message.forwardedFrom && (
+              <span className="msg-forwarded">
+                <i className="fas fa-share" aria-hidden="true" />
+                فروارد از {message.forwardedFrom}
+              </span>
+            )}
+
+            {message.reply && (
+              <button
+                type="button"
+                className="msg-quote"
+                onClick={() => onJumpToMessage?.(message.reply.id)}
+                title="رفتن به پیام نقل‌شده"
+              >
+                <span className="msg-quote-name">{message.reply.senderName || 'کاربر'}</span>
+                <span className="msg-quote-text">
+                  {message.reply.deleted ? 'پیام حذف شد' : message.reply.preview}
+                </span>
               </button>
             )}
 
@@ -289,6 +413,8 @@ export default function MessageGroup({
           chatEncrypted={chatEncrypted}
           held={[...mine]}
           onReact={pickReaction}
+          onReply={() => onReply?.(message)}
+          onForward={() => onForward?.(message)}
           onEdit={onEdit}
           onDelete={scope => onDelete?.(message.id, scope)}
           onToast={onToast}

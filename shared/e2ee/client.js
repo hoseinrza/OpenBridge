@@ -32,6 +32,7 @@ import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
 import { pureCryptoProvider, SUPPORTED_CIPHERSUITES } from './provider.js';
 import { parseAttachment } from './attachments.js';
+import { packControl, packMessage, parseControl, parseMessage } from './payloads.js';
 import { decodeUtf8, encodeUtf8, fromBase64, toBase64 } from './wire.js';
 
 export const DEFAULT_CIPHERSUITE = SUPPORTED_CIPHERSUITES[0];
@@ -48,6 +49,10 @@ const SEQ_WIDTH = 9;
 // it tells its own echo apart from a sibling device that sends under the same
 // account identity.
 const OWN_IDS = 64;
+// "Delete for me" is a local mark, kept on the conversation rather than by
+// removing bytes: a second device of the same account applies the same mark
+// when the control reaches it, and the cap only stops the list growing forever.
+const HIDDEN_SEQS = 500;
 
 const DEVICE_KEY = 'device';
 const KEY_PACKAGE_PREFIX = 'kp/';
@@ -90,10 +95,32 @@ function identityOf(leaf) {
  * text on the wire — MLS carries bytes, and a descriptor is JSON — so the split
  * happens once here, on the way into the cache, and nothing downstream has to
  * know that a picture arrived as a sentence.
+ *
+ * A message that carries a reply quote or a forward label is wrapped in a
+ * marker so it stays one envelope rather than two; a message with neither keeps
+ * travelling as bare text, which is what older clients already know how to
+ * read. Control envelopes (edit/delete) are recognised before this runs and
+ * never enter the message cache.
  */
 function shapePayload(text) {
   const attachment = parseAttachment(text);
-  return attachment ? { text: '', attachment } : { text, attachment: null };
+  if (attachment) return { text: '', attachment, reply: null, forward: null, editedAt: null };
+  const message = parseMessage(text);
+  if (message) return { ...message, attachment: null, editedAt: null };
+  return { text, attachment: null, reply: null, forward: null, editedAt: null };
+}
+
+/** What goes inside the envelope: bare text when there is nothing extra to say. */
+function encodeMessage(input) {
+  if (typeof input === 'string') {
+    if (!input.length) throw fail('empty', 'پیام خالی است');
+    return input;
+  }
+  const text = typeof input?.text === 'string' ? input.text : '';
+  if (!text.length) throw fail('empty', 'پیام خالی است');
+  const reply = input.reply ?? null;
+  const forward = input.forward ?? null;
+  return reply || forward ? packMessage({ text, reply, forward }) : text;
 }
 
 /**
@@ -185,6 +212,7 @@ export async function createE2eeClient({
       readSeq: 0,
       members: [],
       own: [],
+      hidden: [],
       error: null,
     };
     const record = { ...base, ...patch, updatedAt: now() };
@@ -213,8 +241,8 @@ export async function createE2eeClient({
     return result;
   }
 
-  async function appendEnvelope(conversationId, content) {
-    const ack = await transport.append(conversationId, content);
+  async function appendEnvelope(conversationId, content, kind = 'MESSAGE') {
+    const ack = await transport.append(conversationId, content, kind);
     if (!ack || typeof ack.seq !== 'number') throw fail('append-failed', 'بسته به سرور نرسید');
     const record = await readRecord(conversationId);
     await patchRecord(conversationId, {
@@ -288,7 +316,7 @@ export async function createE2eeClient({
     if (!record?.state) throw fail('no-group', 'این گفتگو روی این دستگاه کلید ندارد');
     const state = loadState(record);
     const result = await processPrivateMessage(state, message.privateMessage, emptyPskIndex, impl);
-    const { text, attachment } = shapePayload(decodeUtf8(result.message));
+    const plain = decodeUtf8(result.message);
     result.consumed.forEach(zeroOutUint8Array);
 
     const members = membersOf(result.newState);
@@ -299,36 +327,85 @@ export async function createE2eeClient({
       throw fail('unknown-sender', 'فرستنده‌ی این بسته در عضوهای این گفتگو نیست');
     }
 
-    // Same account, different device: the interface still shows it as "mine",
-    // because the person on the other end of that leaf is the user of this app.
     const mine = envelope.senderId === me.id;
     const at = envelope.createdAt ?? now();
+    const applied = {
+      appliedSeq: envelope.seq,
+      state: saveState(result.newState),
+      members,
+      error: null,
+    };
+
+    const control = parseControl(plain);
+    if (control) {
+      const changed = await applyControl(conversationId, envelope.senderId, control, record, at);
+      // A control is part of the ratchet even when it is ignored: skipping its
+      // sequence would leave a hole the stream refuses to step over.
+      await patchRecord(conversationId, applied);
+      return {
+        kind: 'control',
+        conversationId,
+        seq: envelope.seq,
+        senderId: envelope.senderId,
+        at,
+        changed,
+        ...control,
+      };
+    }
+
+    const shaped = shapePayload(plain);
     await cacheMessage(conversationId, {
       conversationId,
       seq: envelope.seq,
       id: envelope.id,
       senderId: envelope.senderId,
-      text,
-      attachment,
+      ...shaped,
       at,
       mine,
     });
-    await patchRecord(conversationId, {
-      appliedSeq: envelope.seq,
-      state: saveState(result.newState),
-      members,
-      error: null,
-    });
+    await patchRecord(conversationId, applied);
     return {
       kind: 'message',
       conversationId,
       seq: envelope.seq,
       senderId: envelope.senderId,
-      text,
-      attachment,
+      ...shaped,
       at,
       mine,
     };
+  }
+
+  /**
+   * Applies one edit or delete to the local cache. Returns whether anything
+   * changed, which is also the answer to "was this allowed": an edit and a
+   * delete-for-everyone are the author's own rights, while a delete-for-me only
+   * means something to the account that owns the message.
+   */
+  async function applyControl(conversationId, senderId, control, record, at) {
+    const key = messageKey(conversationId, control.targetSeq);
+
+    if (control.op === 'delete' && control.scope === 'me') {
+      if (senderId !== me.id) return false;
+      const hidden = [...new Set([...(record?.hidden ?? []), control.targetSeq])]
+        .sort((a, b) => a - b)
+        .slice(-HIDDEN_SEQS);
+      await patchRecord(conversationId, { hidden });
+      return true;
+    }
+
+    const target = await store.get(key);
+    if (!target) return false;
+    if (target.senderId !== senderId) return false;
+
+    if (control.op === 'edit') {
+      // An attachment's visible content is the descriptor, not editable text.
+      if (target.attachment) return false;
+      await cacheMessage(conversationId, { ...target, text: control.text, editedAt: at });
+      return true;
+    }
+
+    await store.remove(key);
+    return true;
   }
 
   // Walks the stream from the last applied envelope upwards, pulling from the
@@ -353,7 +430,10 @@ export async function createE2eeClient({
       }
       queue = queue.filter((envelope) => envelope !== next);
       const appliedResult = await applyEnvelope(conversationId, next, record);
-      if (appliedResult.kind === 'message') handlers.forEach((handle) => handle(appliedResult));
+      if (appliedResult.kind === 'message'
+        || (appliedResult.kind === 'control' && appliedResult.changed)) {
+        handlers.forEach((handle) => handle(appliedResult));
+      }
     }
   }
 
@@ -638,12 +718,16 @@ export async function createE2eeClient({
     };
   }
 
-  /** Encrypts `text` into the next envelope of a conversation and hands it to the server. */
-  async function send(conversationId, text) {
-    if (typeof text !== 'string' || !text.length) throw fail('empty', 'پیام خالی است');
+  /**
+   * Encrypts one message into the next envelope of a conversation and hands it
+   * to the server. `input` is either text or `{text, reply, forward}`; a reply
+   * quote and a forward label travel inside the same ciphertext.
+   */
+  async function send(conversationId, input) {
+    const content = encodeMessage(input);
     return serialize(conversationId, async () => {
       const record = await requireGroup(conversationId);
-      const produced = await createApplicationMessage(loadState(record), encodeUtf8(text), impl);
+      const produced = await createApplicationMessage(loadState(record), encodeUtf8(content), impl);
       let ack;
       try {
         ack = await appendEnvelope(conversationId, pack(PRIVATE_MESSAGE(produced.privateMessage)));
@@ -661,13 +745,63 @@ export async function createE2eeClient({
         seq: ack.seq,
         id: ack.id,
         senderId: me.id,
-        ...shapePayload(text),
+        ...shapePayload(content),
         at: now(),
         mine: true,
       });
       return ack;
     });
   }
+
+  /**
+   * Sends one edit or delete. A control is an ordinary envelope with `kind:
+   * CONTROL`, so the server never has to read it: it only keeps unread badges
+   * from counting it as a new message. This device applies the control to its
+   * own cache as soon as the server acknowledges it, because the echo that comes
+   * back around the room is recognised as its own and skipped.
+   */
+  async function sendControl(conversationId, control) {
+    const content = packControl(control);
+    return serialize(conversationId, async () => {
+      const record = await requireGroup(conversationId);
+      const produced = await createApplicationMessage(loadState(record), encodeUtf8(content), impl);
+      let ack;
+      try {
+        ack = await appendEnvelope(
+          conversationId,
+          pack(PRIVATE_MESSAGE(produced.privateMessage)),
+          'CONTROL',
+        );
+      } catch (error) {
+        produced.consumed.forEach(zeroOutUint8Array);
+        throw error;
+      }
+      await patchRecord(conversationId, { state: saveState(produced.newState) });
+      produced.consumed.forEach(zeroOutUint8Array);
+
+      const latest = await readRecord(conversationId);
+      const at = now();
+      const changed = await applyControl(conversationId, me.id, control, latest, at);
+      if (changed) {
+        handlers.forEach((handle) => handle({
+          kind: 'control',
+          conversationId,
+          seq: ack.seq,
+          senderId: me.id,
+          at,
+          changed,
+          ...control,
+        }));
+      }
+      return ack;
+    });
+  }
+
+  const editMessage = (conversationId, targetSeq, text) =>
+    sendControl(conversationId, { op: 'edit', targetSeq, text });
+
+  const deleteMessage = (conversationId, targetSeq, scope) =>
+    sendControl(conversationId, { op: 'delete', targetSeq, scope });
 
   /**
    * Feeds one `e2ee:envelope` event into the ordered pipeline. This never
@@ -730,14 +864,20 @@ export async function createE2eeClient({
 
   /** Decrypted messages of a conversation, oldest first. Plaintext lives only here. */
   async function history(conversationId) {
+    const record = await readRecord(conversationId);
+    const hidden = new Set(record?.hidden ?? []);
     const entries = await store.list(MESSAGE_PREFIX + conversationId + '/');
-    return entries.sort((a, b) => a.seq - b.seq);
+    return entries.filter((entry) => !hidden.has(entry.seq)).sort((a, b) => a.seq - b.seq);
   }
 
   /** The newest decrypted message of a conversation, or null. For chat-list previews. */
   async function lastMessage(conversationId) {
+    const record = await readRecord(conversationId);
+    const hidden = new Set(record?.hidden ?? []);
     const entries = await store.list(MESSAGE_PREFIX + conversationId + '/');
-    return entries.reduce((latest, entry) => (latest === null || entry.seq > latest.seq ? entry : latest), null);
+    return entries
+      .filter((entry) => !hidden.has(entry.seq))
+      .reduce((latest, entry) => (latest === null || entry.seq > latest.seq ? entry : latest), null);
   }
 
   /**
@@ -801,7 +941,9 @@ export async function createE2eeClient({
     },
     conversations,
     createEncryptedGroupChat,
+    deleteMessage,
     devices,
+    editMessage,
     exportCallKey,
     exportCallKeyForGroup,
     exportCallKeyForPeer,

@@ -4,6 +4,61 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.4.0] - 2026-10-24
+
+### Added
+- **پاسخ و فروارد برای پیام‌ها، در هر دو نوع گفتگو.** منوی هر پیام حالا «پاسخ» و
+  «فروارد» دارد. با کشیدن پیام به سمت چپ (56 پیکسل) هم همان پاسخ باز می‌شود، و
+  نوار پاسخ بالای نوشتن‌جا نام فرستنده و یک خط از پیام را نگه می‌دارد تا پاسخ
+  فرستاده یا لغو شود. نقل‌قول داخل حباب می‌نشیند و با کلیک، گفتگو را به پیام
+  اصلی می‌برد.
+- **فروارد بین گفتگوها.** پنجرهٔ انتخاب مقصد، همهٔ گفتگوها و گروه‌ها را با
+  جستجو نشان می‌دهد. نسخهٔ فرواردشده از مسیر عادی ارسال همان مقصد می‌رود: اگر
+  مقصد رمزنگاری‌شده باشد، نسخه هم رمزنگاری می‌شود. پیوست رمزنگاری‌شده فروارد
+  نمی‌شود، چون بایت‌هایش فقط داخل همان گفتگو باز می‌شوند.
+- **ویرایش و حذف در گفتگوی رمزنگاری‌شده.** پیام رمزنگاری‌شده ردیفی روی سرور
+  ندارد، پس ویرایش و «حذف برای همه» به‌صورت بستهٔ کنترل رمزنگاری‌شده
+  (`openbridge.control.v1`) می‌روند. فرستنده فقط پیام خودش را می‌تواند عوض یا
+  حذف کند؛ «حذف برای من» فقط روی حساب خودش اثر دارد و روی همهٔ دستگاه‌های همان
+  حساب اعمال می‌شود. بستهٔ کنترل هرگز به‌عنوان پیام در تاریخ یا پیش‌نمایش
+  نمی‌نشیند و در شمارندهٔ پیام تازه هم شمرده نمی‌شود.
+- نقل‌قول و برچسب فروارد در بستهٔ پیام رمزنگاری‌شده (`openbridge.message.v1`)
+  سفر می‌کنند. اگر پیامی نه پاسخ داشته باشد نه فروارد، مثل قبل متن خالی می‌ماند
+  تا نسخه‌های قدیمی هم آن را بخوانند.
+
+### Fixed
+- **ویرایش پیام در گفتگوی خصوصی ساده در همان لحظه دیده می‌شود.** سرور رویداد
+  `message:edited` را بدون `receiverId` می‌فرستاد، درحالی‌که رابط با همان فیلد
+  تشخیص می‌داد ویرایش به کدام گفتگو تعلق دارد؛ نتیجه این بود که ویرایش ذخیره
+  می‌شد ولی تا بارگذاری بعدی روی صفحه نمی‌آمد. حالا رویداد برای گفتگوی خصوصی
+  `receiverId` را هم دارد و تست شبکه‌ای همین را بررسی می‌کند.
+- **منوی کارهای پیام با فوکوس خودش بسته نمی‌شد.** فوکوس روی اولین گزینه
+  می‌توانست صفحه را اسکرول کند و شنوندهٔ اسکرول منو را می‌بست؛ فوکوس حالا با
+  `preventScroll` انجام می‌شود.
+
+### Notes
+- فقط سمت وب. موبایل هنوز منوی بلندکلیک، پاسخ، فروارد و کنترل رمزنگاری‌شده
+  ندارد.
+- `shared/e2ee/client.test.mjs` اضافه شد (7 تست): رفت‌وبرگشت پاسخ و فروارد،
+  اعمال ویرایش، نادیده‌گرفتن ویرایش غیرمجاز، حذف برای همه، حذف برای من فقط روی
+  همان حساب، و بیرون‌ماندن کنترل‌ها از تاریخ و پیش‌نمایش.
+- یک تست شبکه‌ای به `backend/test/message-actions.e2e.cjs` اضافه شد که
+  `receiverId` ویرایش خصوصی را بررسی می‌کند.
+
+### Verified
+`npm run lint` and `npm run build` are clean. `npm run test:e2ee` passes
+12/12, and the backend `message-actions` + `e2ee-client` suites pass 22/22.
+A live run on a separate stack (backend on :3100, web on :5174, both stopped
+afterwards) used two throwaway MLS accounts and one account with no key
+material; all three were deleted afterwards. In the encrypted chat: reply with
+quote, drag-left reply, edit with the «ویرایش‌شده» marker, delete for everyone,
+delete for me (hidden for the actor, still visible to the peer), forward inside
+the chat, and an encrypted forward of a plaintext message from another chat. In
+the plaintext chat: reply persisted across reload, edit now updates live,
+delete-for-everyone, and the quote of the deleted original turns into
+«پیام حذف شد». Limits: mobile is untouched; encrypted attachments cannot be
+forwarded; no screenshot was taken (DOM assertions only).
+
 ## [1.3.3] - 2026-10-24
 
 ### Changed

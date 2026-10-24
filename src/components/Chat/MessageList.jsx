@@ -84,7 +84,7 @@ function e2eeNotice({ encrypted, secureMode, isGroup, reason }) {
 }
 
 export default function MessageList({
-  messages, activeUser, onReact, onEdit, onDelete, onToast, searchQuery,
+  messages, activeUser, onReact, onReply, onForward, onEdit, onDelete, onToast, searchQuery,
   encrypted, secureMode, encryptionNote,
   historyState, historyError, onRetryHistory, onOpenProfile,
 }) {
@@ -157,6 +157,17 @@ export default function MessageList({
     atBottomRef.current = true;
     setAtBottom(true);
     setSeenCount(messages.length);
+  }
+
+  // A quote names the message it answers; tapping it walks the thread to that
+  // row. Ids are compared, not interpolated into a selector, because an id from
+  // a quote is data and not a piece of CSS.
+  function jumpToMessage(id) {
+    const list = listRef.current;
+    if (!list) return;
+    const target = [...list.querySelectorAll('[data-message-id]')]
+      .find(node => node.dataset.messageId === id);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   return (
@@ -242,12 +253,15 @@ export default function MessageList({
               // out instead of offering a save the server always refuses.
               chatEncrypted={encrypted}
               onReact={onReact}
+              onReply={onReply}
+              onForward={onForward}
               onEdit={onEdit}
               onDelete={onDelete}
               onToast={onToast}
               searchQuery={searchQuery}
               onOpenImage={setOpenImageId}
               onOpenProfile={onOpenProfile}
+              onJumpToMessage={jumpToMessage}
             />
           )
         ))}

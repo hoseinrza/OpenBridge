@@ -55,8 +55,8 @@ model User {
   phone       String?    @unique
   avatar      String?
   bio         String?
-  status    UserStatus @default(OFFLINE)
-  createdAt DateTime   @default(now())
+  status      UserStatus @default(OFFLINE)
+  createdAt   DateTime   @default(now())
 
   messages       Message[]
   reactions      Reaction[]
@@ -77,21 +77,21 @@ model User {
 // per conversation with no gaps, and `content` is a base64 blob the server never
 // decodes. It cannot tell a Welcome from a chat message and stores no plaintext.
 model E2eeEnvelope {
-  id             String   @id @default(uuid())
+  id             String           @id @default(uuid())
   conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   // Which account submitted the blob. MLS authenticates the sender inside the
   // ciphertext; this is delivery metadata only, and lets a client skip its own
   // messages without decrypting them.
   senderId       String
-  sender         User        @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  sender         User             @relation(fields: [senderId], references: [id], onDelete: Cascade)
   seq            Int
-  content        String      @db.Text
+  content        String           @db.Text
   // Declared by the sending client, so it is delivery metadata rather than
   // something the server can verify: the plaintext inside is what proves a
   // control is a control.
   kind           E2eeEnvelopeKind @default(MESSAGE)
-  createdAt      DateTime    @default(now())
+  createdAt      DateTime         @default(now())
 
   @@unique([conversationId, seq])
   @@index([conversationId, kind])
@@ -106,14 +106,14 @@ model E2eeEnvelope {
 // what authorizes a fresh download URL. Size and which chat holds a blob are
 // metadata the server does learn; content it cannot.
 model EncryptedBlob {
-  id             String   @id @default(uuid())
-  filename       String   @unique
+  id             String       @id @default(uuid())
+  filename       String       @unique
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   ownerId        String
-  owner          User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner          User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   size           Int
-  createdAt      DateTime    @default(now())
+  createdAt      DateTime     @default(now())
 
   @@index([conversationId])
   @@map("encrypted_blobs")
@@ -239,21 +239,31 @@ model ConversationParticipant {
 }
 
 model Message {
-  id         String      @id @default(uuid())
-  type       MessageType @default(TEXT)
-  text       String?
-  fileUrl    String?
-  fileName   String?
-  fileSize   Int?
-  durationMs Int?
-  editedAt   DateTime?
-  deletedAt  DateTime?
-  createdAt  DateTime    @default(now())
+  id            String      @id @default(uuid())
+  type          MessageType @default(TEXT)
+  text          String?
+  fileUrl       String?
+  fileName      String?
+  fileSize      Int?
+  durationMs    Int?
+  // The message this one answers. A tombstone target still resolves, so the
+  // quote can say «پیام حذف‌شده» instead of losing its place.
+  replyToId     String?
+  // A forwarded copy names the original author as display metadata. It is not
+  // an account link: the source may live in an encrypted chat the server cannot
+  // read, so there is nothing stronger to verify here.
+  forwardedFrom String?
+  editedAt      DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime    @default(now())
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   senderId       String
   sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  replyTo Message?  @relation("MessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies Message[] @relation("MessageReply")
 
   reactions Reaction[]
   reads     MessageRead[]
@@ -261,6 +271,7 @@ model Message {
 
   @@index([conversationId, createdAt])
   @@index([senderId])
+  @@index([replyToId])
   @@map("messages")
 }
 
@@ -306,9 +317,9 @@ model Reaction {
   emoji     String
   createdAt DateTime @default(now())
   userId    String
-  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   messageId String
-  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@unique([userId, messageId])
   @@index([messageId])

@@ -160,6 +160,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     @MessageBody() body: {
       toId?: string; conversationId?: string; type?: string; text?: string;
       fileUrl?: string; fileName?: string; fileSize?: number; durationMs?: number;
+      replyToId?: string; forwardedFrom?: string;
     },
   ) {
     if (!this.allowRate(socket.id, 'message:send', 30, 10_000)) {
@@ -231,7 +232,17 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     try {
       const message = await this.messages.editMessage(body?.messageId, socket.data.userId, body?.text);
       const participantIds = await this.messages.getConversationParticipantIds(message.conversationId);
-      this.server.to(participantIds).emit('message:edited', message);
+      // A direct message carries `receiverId` on `message:new`, and the open
+      // chat uses it to tell one conversation from another when the edit
+      // arrives. A group has no single receiver: its members are told by
+      // conversation id instead.
+      const receiverId = participantIds.length === 2
+        ? participantIds.find(id => id !== message.senderId)
+        : undefined;
+      this.server.to(participantIds).emit(
+        'message:edited',
+        receiverId ? { ...message, receiverId } : message,
+      );
       return { ok: true, message };
     } catch (err) {
       return this.failure(err, 'ویرایش پیام ناموفق بود');
@@ -274,17 +285,21 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   @SubscribeMessage('e2ee:append')
   async onE2eeAppend(
     @ConnectedSocket() socket: Socket,
-    @MessageBody() body: { conversationId?: string; content?: string },
+    @MessageBody() body: { conversationId?: string; content?: string; kind?: string },
   ) {
     if (!this.allowRate(socket.id, 'e2ee:append', 30, 10_000)) {
       return { ok: false, error: 'تعداد بسته‌های ارسالی بیش از حد مجاز است' };
     }
     if (!isId(body?.conversationId)) return { ok: false, error: 'گفتگو مشخص نیست' };
+    if (body?.kind !== undefined && body.kind !== 'MESSAGE' && body.kind !== 'CONTROL') {
+      return { ok: false, error: 'نوع بسته نامعتبر است' };
+    }
 
     try {
+      const envelopeKind = body.kind === 'CONTROL' ? 'CONTROL' : 'MESSAGE';
       const envelope = await this.enqueueOrdered(body.conversationId, async () => {
         const stored = await this.messages.appendE2eeEnvelope(
-          body.conversationId, socket.data.userId, body.content,
+          body.conversationId, socket.data.userId, body.content, envelopeKind,
         );
         const participantIds = await this.messages.getConversationParticipantIds(body.conversationId);
         this.server.to(participantIds).emit('e2ee:envelope', stored);

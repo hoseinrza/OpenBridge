@@ -36,7 +36,7 @@ async function copyText(text) {
 // A zero-size anchor at the pointer and the bubble's own rect are the same thing
 // to this component: a place the menu hangs itself on.
 export default function MessageActionsMenu({
-  anchor, message, chatEncrypted, held, onReact, onEdit, onDelete, onToast, onClose,
+  anchor, message, chatEncrypted, held, onReact, onReply, onForward, onEdit, onDelete, onToast, onClose,
 }) {
   const [step, setStep] = useState('actions'); // actions | delete
   const [placed, setPlaced] = useState(null);
@@ -44,15 +44,18 @@ export default function MessageActionsMenu({
   const titleId  = `msg-actions-${message.id}`;
 
   const isMine = message.side === 'mine';
-  // The permissions of the server: an edit is the sender's own text row, and
-  // only the sender may take a message away from everybody. Neither exists for
-  // an encrypted message, whose text the server never holds — and a plaintext
-  // row inside an encrypted chat cannot be rewritten there either, because the
-  // replacement would be readable.
-  const canEdit               = isMine && message.type === 'text' && !message.encrypted && !chatEncrypted;
-  const canDeleteForEveryone  = isMine && !message.encrypted;
-  const canReact              = !message.encrypted;
-  const hasText               = Boolean(message.text);
+  // An encrypted row has no server-side row to rewrite, so edit and
+  // delete-for-everyone travel as control envelopes instead. The permissions
+  // are still the sender's: the message's own sequence is what a control
+  // addresses, and the client refuses one aimed at somebody else's message.
+  const canEdit = isMine && message.type === 'text'
+    && (message.encrypted ? Number.isInteger(message.seq) : !chatEncrypted);
+  const canDeleteForEveryone = isMine && (!message.encrypted || Number.isInteger(message.seq));
+  const canReact = !message.encrypted;
+  // An encrypted attachment only decrypts inside its own conversation, so a
+  // forward would arrive as bytes the destination cannot open.
+  const canForward = !(message.encrypted && message.attachment);
+  const hasText = Boolean(message.text);
 
   // Measured after the panel exists, before the browser paints: a menu that
   // appeared at the wrong place for one frame would shove the conversation
@@ -101,7 +104,7 @@ export default function MessageActionsMenu({
       const next = at < 0
         ? (forward ? 0 : items.length - 1)
         : (at + (forward ? 1 : -1) + items.length) % items.length;
-      items[next].focus();
+      items[next].focus({ preventScroll: true });
     }
     function dismiss() { onClose(); }
 
@@ -118,9 +121,12 @@ export default function MessageActionsMenu({
   }, [onClose]);
 
   // Every step opens with its first item focused: the keyboard never has to
-  // guess where the pointer left off.
+  // guess where the pointer left off. The focus must not scroll: the panel is
+  // placed one layout pass before this runs, and a scroll caused by focusing
+  // would reach the menu's own dismiss-on-scroll listener and close it.
   useEffect(() => {
-    panelRef.current?.querySelector('[data-menu-item]:not(:disabled)')?.focus();
+    panelRef.current?.querySelector('[data-menu-item]:not(:disabled)')
+      ?.focus({ preventScroll: true });
   }, [step]);
 
   // An action takes the menu away with it; the delete step's own cancel is the
@@ -139,6 +145,7 @@ export default function MessageActionsMenu({
       { key: 'cancel', icon: 'fa-xmark', label: 'انصراف', stay: true, onSelect: () => setStep('actions') },
     ]
     : [
+      { key: 'reply', icon: 'fa-reply', label: 'پاسخ', onSelect: () => onReply?.() },
       ...(hasText
         ? [{
           key: 'copy',
@@ -149,6 +156,9 @@ export default function MessageActionsMenu({
             onToast?.(ok ? 'کپی شد' : 'کپی ناموفق بود');
           },
         }]
+        : []),
+      ...(canForward
+        ? [{ key: 'forward', icon: 'fa-share', label: 'فروارد', onSelect: () => onForward?.() }]
         : []),
       ...(canEdit
         ? [{ key: 'edit', icon: 'fa-pen-to-square', label: 'ویرایش', onSelect: () => onEdit({ id: message.id, text: message.text }) }]

@@ -12,8 +12,10 @@ import InputArea from './InputArea.jsx';
 import ProfileModal from '../Profile/ProfileModal.jsx';
 import ChatProfilePanel from '../Profile/ChatProfilePanel.jsx';
 import NewChatModal from '../NewChat/NewChatModal.jsx';
+import ForwardModal from './ForwardModal.jsx';
 import CallLayer from '../Call/CallLayer.jsx';
 import { useCall } from '../../hooks/useCall.js';
+import { messagePreview } from '../../utils/message.js';
 import './Chat.css';
 
 function previewFromServer(lastMessage, myId) {
@@ -92,6 +94,10 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   // The message the composer is currently correcting, and the one-line notice
   // that says what just happened to a message (copied, or failed to be).
   const [editing, setEditing]             = useState(null); // { id, text } | null
+  // What the composer is answering, and the message the forward picker is
+  // holding. Both belong to the open chat, so leaving it drops them.
+  const [replying, setReplying]           = useState(null); // { id, senderName, preview } | null
+  const [forwarding, setForwarding]       = useState(null); // message | null
   const [toast, setToast]                 = useState('');
   const toastTimer = useRef(null);
 
@@ -175,7 +181,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     messages, isTyping, typingPeer, connected,
     historyState, historyError, retryHistory,
     encrypted, secureMode, encryptionNote, blockedReason,
-    sendMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
+    sendMessage, forwardMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
   } = useChat(activeUser, currentUser, handleIncoming, handleGroupUpdated);
 
   // Calls are mounted for the whole signed-in page, not per chat: an incoming
@@ -202,7 +208,44 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
 
   const cancelEdit = useCallback(() => setEditing(null), []);
 
-  const startEdit = useCallback((target) => setEditing(target), []);
+  const startEdit = useCallback((target) => {
+    setEditing(target);
+    setReplying(null);
+  }, []);
+
+  // A reply is a snapshot of the message the user pointed at: the quote travels
+  // with the answer, so it still reads correctly after the original is edited,
+  // deleted, or the chat is opened on another device.
+  const startReply = useCallback((message) => {
+    if (!message || message.leaving) return;
+    setEditing(null);
+    setReplying({
+      id: message.id,
+      senderName: message.side === 'mine'
+        ? (currentUser?.name || 'شما')
+        : (message.sender || 'کاربر'),
+      preview: messagePreview(message),
+      type: message.type,
+    });
+  }, [currentUser.name]);
+
+  const cancelReply = useCallback(() => setReplying(null), []);
+
+  // The composer sends through here so a successful send is also the end of
+  // the reply state; a failed one leaves the bar in place to try again.
+  const sendFromComposer = useCallback(async (payload) => {
+    const result = await sendMessage(payload);
+    if (result?.ok) setReplying(null);
+    return result;
+  }, [sendMessage]);
+
+  const submitForward = useCallback(async (target) => {
+    if (!forwarding) return { ok: false, error: 'پیامی برای فروارد نیست' };
+    const result = await forwardMessage(forwarding, target);
+    if (result.ok) showToast('فروارد شد');
+    else if (result.error) showToast(result.error);
+    return result;
+  }, [forwarding, forwardMessage, showToast]);
 
   // A delete that the server refuses leaves the message exactly where it was,
   // so the refusal itself is the only thing the screen can say about it.
@@ -225,6 +268,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     setUsers(prev => prev.map(u => u.id === user.id ? { ...u, unread: 0 } : u));
     clearMessages();
     setEditing(null);
+    setReplying(null);
+    setForwarding(null);
     setSearchQuery('');
     setSearchOpen(false);
     setProfileOpen(false);
@@ -238,6 +283,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     setActiveUser(user);
     clearMessages();
     setEditing(null);
+    setReplying(null);
+    setForwarding(null);
     setSearchQuery('');
     setSearchOpen(false);
     setProfileOpen(false);
@@ -251,6 +298,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     setActiveUser(group);
     clearMessages();
     setEditing(null);
+    setReplying(null);
+    setForwarding(null);
     setSearchQuery('');
     setSearchOpen(false);
     setProfileOpen(false);
@@ -260,6 +309,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   // back with it — otherwise the next chat opens straight into a search box.
   function handleBackToList() {
     setActiveUser(null); setProfileOpen(false); setEditing(null);
+    setReplying(null); setForwarding(null);
     setSearchQuery(''); setSearchOpen(false);
   }
 
@@ -361,6 +411,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               messages={filteredMessages}
               activeUser={activeUser}
               onReact={toggleReaction}
+              onReply={startReply}
+              onForward={setForwarding}
               onEdit={startEdit}
               onDelete={handleDelete}
               onToast={showToast}
@@ -377,13 +429,15 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
             <TypingIndicator isTyping={isTyping} user={typingPeer ?? activeUser} />
 
             <InputArea
-              onSend={sendMessage}
+              onSend={sendFromComposer}
               onTyping={notifyTyping}
               connected={connected}
               blocked={blockedReason}
               editing={editing}
               onSaveEdit={saveEdit}
               onCancelEdit={cancelEdit}
+              replying={replying}
+              onCancelReply={cancelReply}
             />
 
             {toast && (
@@ -448,6 +502,15 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           onClose={() => setNewChatOpen(false)}
           onSelect={handleStartConversation}
           onGroupCreated={handleGroupCreated}
+        />
+      )}
+
+      {forwarding && (
+        <ForwardModal
+          message={forwarding}
+          chats={users}
+          onPick={submitForward}
+          onClose={() => setForwarding(null)}
         />
       )}
 

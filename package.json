@@ -1,13 +1,13 @@
 {
   "name": "chatapp-react",
   "private": true,
-  "version": "1.3.3",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test:e2ee": "node --test shared/e2ee/gate.test.mjs shared/e2ee/hermes-gate.test.mjs",
+    "test:e2ee": "node --test shared/e2ee/gate.test.mjs shared/e2ee/hermes-gate.test.mjs shared/e2ee/client.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

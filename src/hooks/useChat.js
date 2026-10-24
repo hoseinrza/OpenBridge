@@ -30,11 +30,15 @@ function groupReactions(rows, myId) {
 }
 
 function normalize(msg, myId) {
+  const quote = msg.replyTo;
   return {
     id:           msg.id,
     type:         (msg.type ?? 'TEXT').toLowerCase(),
     text:         msg.text ?? '',
     src:          msg.fileUrl ? resolveUrl(msg.fileUrl) : undefined,
+    // Kept beside the signed address because forwarding re-sends this row as a
+    // new message, and the server signs the stored path for the new chat.
+    fileUrl:      msg.fileUrl ?? null,
     name:         msg.fileName,
     size:         msg.fileSize,
     // What the sender's microphone said its own recording lasted. A bubble reads
@@ -52,6 +56,20 @@ function normalize(msg, myId) {
     read:         msg.read,
     encrypted:    false,
     editedAt:     msg.editedAt ? new Date(msg.editedAt).getTime() : null,
+    // The quote is a snapshot the server joined into this row, so opening a
+    // chat never needs a second request per reply.
+    reply:        quote
+      ? {
+        id:         quote.id,
+        senderName: quote.sender?.name ?? null,
+        preview:    quote.deleted
+          ? 'پیام حذف شد'
+          : (quote.text || quote.fileName || 'پیام'),
+        type:       (quote.type ?? 'TEXT').toLowerCase(),
+        deleted:    Boolean(quote.deleted),
+      }
+      : null,
+    forwardedFrom: msg.forwardedFrom ?? null,
     reactions:    groupReactions(msg.reactions, myId),
   };
 }
@@ -96,6 +114,9 @@ function normalizeEncrypted(message, peer) {
     : peer;
   return {
     id:             `e2ee-${message.seq}`,
+    // The sequence is the encrypted row's identity. Editing, deleting and
+    // quoting all address a message by it, because the server holds no id.
+    seq:            message.seq,
     type:           attachment ? attachmentKind(attachment.mime, attachment.voice) : 'text',
     text:           message.text,
     attachment,
@@ -110,7 +131,12 @@ function normalizeEncrypted(message, peer) {
     time:           timeIn(created),
     createdAt:      created,
     encrypted:      true,
-    editedAt:       null,
+    editedAt:       message.editedAt ? new Date(message.editedAt).getTime() : null,
+    // The quote and the forward label travel inside the ciphertext, so they are
+    // decoded from the same payload the text came from rather than joined by
+    // the server.
+    reply:          message.reply ?? null,
+    forwardedFrom:  message.forward?.fromName ?? null,
     reactions:      [],
   };
 }
@@ -154,6 +180,13 @@ function inActiveChat(target, me, msg) {
 // refused group, a missing envelope — is a problem to report, not a reason to
 // quietly send readable text.
 const peerWithoutKeys = (error) => error?.code === 'no-keys' || error?.status === 404;
+
+// An encrypted row has no server id, so its bubble id carries the sequence the
+// controls address. Anything else is a plaintext id.
+const encryptedSeq = (id) => {
+  const match = /^e2ee-(\d+)$/.exec(id ?? '');
+  return match ? Number(match[1]) : null;
+};
 
 export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   const [messages,     setMessages]     = useState([]);
@@ -199,25 +232,36 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
         .catch(() => {});
     };
 
-    encryptedSendRef.current = async (target, text) => {
+    encryptedSendRef.current = async (target, text, extra = {}, active = true) => {
       const client = await initE2ee({ id: currentUserRef.current.id });
-      const opened = secureRef.current?.conversationId
+      const held = active ? secureRef.current?.conversationId : null;
+      const opened = held
         ? null
         : await (isGroup(target) ? client.openGroup(target.id) : client.openDirect(target.id));
-      const conversationId = secureRef.current?.conversationId ?? opened.conversationId;
-      await client.send(conversationId, text);
+      // A group is encrypted for its whole life or not at all; an ordinary one
+      // has no group state here, so the caller falls back to the plaintext path
+      // instead of trying to encrypt into a conversation that never joined one.
+      if (!held && opened && opened.e2ee === false) return { ok: false, notEncrypted: true };
+      const conversationId = held ?? opened.conversationId;
+      await client.send(conversationId, {
+        text,
+        reply: extra.reply ?? null,
+        forward: extra.forward ?? null,
+      });
       const history = await client.history(conversationId);
-      setSecure({ mode: 'open', conversationId, error: null });
-      setMessages(prev => mergeMessages(prev, history.map(m => normalizeEncrypted(m, target))));
-      clearTimeout(typingTimerRef.current);
-      socketRef.current?.emit('typing:stop', targetPayload(target));
+      if (active) {
+        setSecure({ mode: 'open', conversationId, error: null });
+        setMessages(prev => mergeMessages(prev, history.map(m => normalizeEncrypted(m, target))));
+        clearTimeout(typingTimerRef.current);
+        socketRef.current?.emit('typing:stop', targetPayload(target));
+      }
       return { ok: true };
     };
 
     // The order is the safety of this path: the group exists before a byte is
     // uploaded, so a peer with no keys to invite never leaves an orphan blob on
     // the server, and the file is encrypted before anything is sent at all.
-    attachmentSendRef.current = async (target, file, durationMs, voice) => {
+    attachmentSendRef.current = async (target, file, durationMs, voice, extra = {}) => {
       const client = await initE2ee({ id: currentUserRef.current.id });
       const opened = secureRef.current?.conversationId
         ? null
@@ -238,6 +282,8 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
         voice: voice === true,
         key,
         iv,
+        reply: extra.reply ?? null,
+        forward: extra.forward ?? null,
       }));
       const history = await client.history(conversationId);
       setSecure({ mode: 'open', conversationId, error: null });
@@ -474,6 +520,31 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
         stop = client.onMessage((incoming) => {
           const target = targetRef.current;
           const status = secureRef.current;
+
+          // An edit or a delete never adds a row: it changes the row it names.
+          // The collapse is the same one a plaintext delete runs, so the two
+          // kinds of conversation leave the timeline the same way.
+          if (incoming.kind === 'control') {
+            if (target && status?.conversationId === incoming.conversationId) {
+              const messageId = `e2ee-${incoming.targetSeq}`;
+              if (incoming.op === 'edit') {
+                const at = new Date(incoming.at).getTime();
+                setMessages(prev => prev.map(m => (m.id === messageId
+                  ? { ...m, text: incoming.text, editedAt: at }
+                  : m)));
+              } else {
+                setMessages(prev => prev.map(m => (m.id === messageId ? { ...m, leaving: true } : m)));
+                setTimeout(() => {
+                  setMessages(prev => prev.filter(m => !(m.id === messageId && m.leaving)));
+                }, MESSAGE_EXIT_MS);
+              }
+            }
+            // A control in a chat nobody is looking at still changes that
+            // chat's preview and its place in the list.
+            onIncomingRef.current?.();
+            return;
+          }
+
           if (target && status?.conversationId === incoming.conversationId) {
             setMessages(prev => mergeMessages(prev, [normalizeEncrypted(incoming, target)]));
             // Reading it here is the only fact behind a read mark.
@@ -533,42 +604,54 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   const retryHistory = useCallback(() => setHistoryNonce(n => n + 1), []);
 
   // ── Send ─────────────────────────────────────────────
-  const sendMessage = useCallback(async (payload) => {
+  // `targetOverride` exists for forwarding: the same message is sent to a chat
+  // that is not the one on screen, so encryption is worked out for that
+  // destination instead of the active chat's state.
+  const sendMessage = useCallback(async (payload, targetOverride = null) => {
     const msg = typeof payload === 'string' ? { type: 'text', text: payload } : payload;
     if (msg.type === 'text' && !msg.text?.trim()) return { ok: false, error: '' };
 
-    const target = targetRef.current;
+    const target = targetOverride ?? targetRef.current;
     if (!target) return { ok: false, error: 'گفتگویی باز نیست' };
-    const status = secureRef.current;
+    const active = targetRef.current?.id === target.id;
+    const status = active ? secureRef.current : null;
+    const extra = { reply: msg.reply ?? null, forward: msg.forward ?? null };
 
-    if (status?.mode === 'unavailable') return { ok: false, error: status.reason };
-    if (status?.mode === 'checking') {
-      // Sending now would put readable text into a conversation the server may
-      // already have marked encrypted, which is a send the server must refuse.
-      return { ok: false, error: 'لحظه‌ای صبر کن، وضعیت رمزنگاری این گفتگو در حال بررسی است' };
+    if (active) {
+      if (status?.mode === 'unavailable') return { ok: false, error: status.reason };
+      if (status?.mode === 'checking') {
+        // Sending now would put readable text into a conversation the server may
+        // already have marked encrypted, which is a send the server must refuse.
+        return { ok: false, error: 'لحظه‌ای صبر کن، وضعیت رمزنگاری این گفتگو در حال بررسی است' };
+      }
     }
+
     // Text is encrypted whenever this device holds the conversation's keys. A
     // plaintext direct chat is negotiated into one by sending; a group is only
-    // ever encrypted by its creator, so a plaintext group stays plaintext.
-    if (msg.type === 'text' && (status?.mode === 'open'
+    // ever encrypted by its creator, so a plaintext group stays plaintext. A
+    // destination that is not on screen is probed, and its answer decides.
+    if (msg.type === 'text' && (!active || status?.mode === 'open'
       || (!isGroup(target) && status?.mode === 'plain'))) {
       try {
-        return await encryptedSendRef.current(target, msg.text.trim());
+        const result = await encryptedSendRef.current(target, msg.text.trim(), extra, active);
+        if (!result?.notEncrypted) return result;
       } catch (error) {
         if (!peerWithoutKeys(error) || isGroup(target)) {
           return { ok: false, error: error.message || 'رمزنگاری یا ارسال پیام ناموفق بود' };
         }
-        setSecure(prev => ({ ...(prev ?? {}), mode: 'plain', reason: error.message }));
+        if (active) setSecure(prev => ({ ...(prev ?? {}), mode: 'plain', reason: error.message }));
       }
     }
 
     // A file follows the same rule as text: once the conversation carries
     // envelopes, the bytes are encrypted on this device before they are sent,
     // and there is no plaintext attachment path left to fall back into.
-    if (msg._file && (status?.mode === 'open'
+    if (msg._file && active && (status?.mode === 'open'
       || (!isGroup(target) && status?.mode === 'plain'))) {
       try {
-        return await attachmentSendRef.current(target, msg._file, msg.durationMs, msg.type === 'voice');
+        return await attachmentSendRef.current(
+          target, msg._file, msg.durationMs, msg.type === 'voice', extra,
+        );
       } catch (error) {
         if (!peerWithoutKeys(error) || isGroup(target)) {
           return { ok: false, error: error.message || 'رمزنگاری یا ارسال فایل ناموفق بود' };
@@ -581,6 +664,14 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     if (!socket?.connected) {
       return { ok: false, error: 'اتصال به سرور برقرار نیست؛ چند لحظه بعد دوباره تلاش کن' };
     }
+
+    // A quote is a server row id; the id of an encrypted message is a local
+    // sequence and means nothing to the message table. When a send has fallen
+    // back to plaintext the quote is dropped rather than pointed at nothing.
+    const replyToId = msg.reply && encryptedSeq(msg.reply.id) === null
+      ? msg.reply.id
+      : undefined;
+    const forwardedFrom = msg.forward?.fromName ?? undefined;
 
     if (msg._file) {
       let uploaded;
@@ -599,6 +690,8 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
           fileName: uploaded.name,
           fileSize: uploaded.size,
           durationMs: msg.durationMs ?? null,
+          replyToId,
+          forwardedFrom,
         });
       } catch (err) {
         return { ok: false, error: err.message };
@@ -611,13 +704,17 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
         ...targetPayload(target),
         type: 'TEXT',
         text: msg.text.trim(),
+        replyToId,
+        forwardedFrom,
       });
     } catch (err) {
       return { ok: false, error: err.message };
     }
 
-    clearTimeout(typingTimerRef.current);
-    socket.emit('typing:stop', targetPayload(target));
+    if (active) {
+      clearTimeout(typingTimerRef.current);
+      socket.emit('typing:stop', targetPayload(target));
+    }
     return { ok: true };
   }, []);
 
@@ -650,12 +747,32 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   // the same path a peer's device sees — this device is never special-cased, so
   // the two can't drift.
   const editMessage = useCallback(async (msgId, text) => {
+    const value = typeof text === 'string' ? text.trim() : '';
+    if (!value) return { ok: false, error: 'متن ویرایش خالی است' };
+
+    // An encrypted row is rewritten by a control envelope, because the server
+    // holds no readable text to replace.
+    const seq = encryptedSeq(msgId);
+    if (seq !== null) {
+      const status = secureRef.current;
+      const client = getE2ee();
+      if (status?.mode !== 'open' || !status.conversationId || !client) {
+        return { ok: false, error: 'کلیدهای این گفتگو در دسترس نیست؛ پیام ویرایش نشد' };
+      }
+      try {
+        await client.editMessage(status.conversationId, seq, value);
+      } catch (err) {
+        return { ok: false, error: err.message || 'ویرایش پیام ناموفق بود' };
+      }
+      return { ok: true };
+    }
+
     const socket = socketRef.current;
     if (!socket?.connected) {
       return { ok: false, error: 'اتصال به سرور برقرار نیست؛ پیام ویرایش نشد' };
     }
     try {
-      await emitWithAck(socket, 'message:edit', { messageId: msgId, text });
+      await emitWithAck(socket, 'message:edit', { messageId: msgId, text: value });
     } catch (err) {
       return { ok: false, error: err.message || 'ویرایش پیام ناموفق بود' };
     }
@@ -663,6 +780,21 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   }, []);
 
   const deleteMessage = useCallback(async (msgId, scope) => {
+    const seq = encryptedSeq(msgId);
+    if (seq !== null) {
+      const status = secureRef.current;
+      const client = getE2ee();
+      if (status?.mode !== 'open' || !status.conversationId || !client) {
+        return { ok: false, error: 'کلیدهای این گفتگو در دسترس نیست؛ پیام حذف نشد' };
+      }
+      try {
+        await client.deleteMessage(status.conversationId, seq, scope);
+      } catch (err) {
+        return { ok: false, error: err.message || 'حذف پیام ناموفق بود' };
+      }
+      return { ok: true };
+    }
+
     const socket = socketRef.current;
     if (!socket?.connected) {
       return { ok: false, error: 'اتصال به سرور برقرار نیست؛ پیام حذف نشد' };
@@ -674,6 +806,71 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     }
     return { ok: true };
   }, []);
+
+  // ── Forward ──────────────────────────────────────────
+  // The destination decides how the copy travels: the same send path is used,
+  // so a message forwarded into an encrypted chat is encrypted there, and one
+  // forwarded into a plaintext chat stays plaintext. A file cannot cross that
+  // line: an encrypted attachment's bytes are only readable inside its own
+  // conversation, so forwarding one is refused instead of silently broken.
+  const forwardMessage = useCallback(async (message, target) => {
+    if (!message || !target) return { ok: false, error: 'گفتگوی مقصد مشخص نیست' };
+    if (message.leaving) return { ok: false, error: '' };
+    const me = currentUserRef.current;
+    const sourceName = message.side === 'mine'
+      ? (me?.name || me?.displayName || me?.username || null)
+      : (message.sender || null);
+
+    if (message.type === 'text') {
+      const result = await sendMessage({
+        type: 'text',
+        text: message.text,
+        forward: sourceName ? { fromName: sourceName } : null,
+      }, target);
+      // A plaintext send announces itself through `message:new`; an encrypted
+      // one is its own echo and is skipped, so the destination's preview is
+      // refreshed here instead.
+      if (result.ok) onIncomingRef.current?.();
+      return result;
+    }
+
+    if (message.attachment || !message.fileUrl) {
+      return { ok: false, error: 'پیوست‌های رمزنگاری‌شده را نمی‌شود فروارد کرد' };
+    }
+
+    const client = await initE2ee({ id: currentUserRef.current?.id }).catch(() => null);
+    let destinationEncrypted;
+    try {
+      destinationEncrypted = isGroup(target)
+        ? (await client?.openGroup(target.id))?.e2ee === true
+        : (await apiCall(`messages/e2ee/direct/${target.id}`))?.e2ee === true;
+    } catch {
+      return { ok: false, error: 'وضعیت رمزنگاری گفتگوی مقصد بررسی نشد؛ فایل فروارد نشد' };
+    }
+    if (destinationEncrypted) {
+      return { ok: false, error: 'فایل‌ها به گفتگوی رمزنگاری‌شده فروارد نمی‌شوند' };
+    }
+
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      return { ok: false, error: 'اتصال به سرور برقرار نیست؛ پیام فروارد نشد' };
+    }
+    try {
+      await emitWithAck(socket, 'message:send', {
+        ...targetPayload(target),
+        type: message.type === 'voice' ? 'VOICE' : message.type.toUpperCase(),
+        fileUrl: message.fileUrl,
+        fileName: message.name,
+        fileSize: message.size,
+        durationMs: message.durationMs ?? null,
+        forwardedFrom: sourceName ?? undefined,
+      });
+    } catch (err) {
+      return { ok: false, error: err.message || 'فروارد پیام ناموفق بود' };
+    }
+    onIncomingRef.current?.();
+    return { ok: true };
+  }, [sendMessage]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -702,6 +899,6 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     // Why a chat that could be encrypted is not, shown whenever it is not.
     encryptionNote: secure?.mode === 'plain' ? (secure.reason ?? null) : null,
     blockedReason: unavailable,
-    sendMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
+    sendMessage, forwardMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
   };
 }

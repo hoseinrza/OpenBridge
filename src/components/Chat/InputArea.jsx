@@ -14,6 +14,7 @@ const LEVEL_SAMPLE_MS = 55;
 export default function InputArea({
   onSend, onTyping, connected = true, blocked = null,
   editing = null, onSaveEdit, onCancelEdit,
+  replying = null, onCancelReply,
 }) {
   const [text, setText]           = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -122,7 +123,7 @@ export default function InputArea({
     // saved in place of it, and nothing else is ever sent from here.
     const result = isEditing
       ? await onSaveEdit?.(value)
-      : await onSend({ type: 'text', text: value });
+      : await onSend({ type: 'text', text: value, reply: replying ?? undefined });
     setSending(false);
 
     if (!result?.ok) {
@@ -144,6 +145,7 @@ export default function InputArea({
     } else if (e.key === 'Escape') {
       if (showEmoji) setShowEmoji(false);
       else if (isEditing) onCancelEdit?.();
+      else if (replying) onCancelReply?.();
     }
   }
 
@@ -182,6 +184,7 @@ export default function InputArea({
       size: file.size,
       text: '',
       _file: file,
+      reply: replying ?? undefined,
     });
     setUploading(false);
 
@@ -244,7 +247,10 @@ export default function InputArea({
     setUploading(true);
     // No object URL is made for a preview: the bubble that appears is the one the
     // server broadcasts back, with its own signed address on it.
-    const result = await onSend({ type: 'voice', name: file.name, size: file.size, durationMs, _file: file });
+    const result = await onSend({
+      type: 'voice', name: file.name, size: file.size, durationMs, _file: file,
+      reply: replying ?? undefined,
+    });
     setUploading(false);
     setRecording(null);
     setElapsedMs(0);
@@ -347,6 +353,28 @@ export default function InputArea({
             onClick={onCancelEdit}
             title="انصراف"
             aria-label="انصراف از ویرایش"
+          >
+            <i className="fas fa-xmark" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      {/* A reply is a state of the composer too: it says who is being answered
+          and keeps one line of the question in sight until the answer is sent
+          or the state is dropped. */}
+      {replying && !editing && (
+        <div className="edit-bar reply-bar">
+          <span className="edit-bar-title">
+            <i className="fas fa-reply" aria-hidden="true" />
+            پاسخ به {replying.senderName || 'کاربر'}
+          </span>
+          <span className="edit-bar-preview" title={replying.preview}>{replying.preview}</span>
+          <button
+            type="button"
+            className="edit-bar-cancel"
+            onClick={onCancelReply}
+            title="انصراف"
+            aria-label="انصراف از پاسخ"
           >
             <i className="fas fa-xmark" aria-hidden="true" />
           </button>

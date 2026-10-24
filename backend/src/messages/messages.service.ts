@@ -11,6 +11,18 @@ import { SharedKind, SHARED_PAGE } from './dto/shared-query.dto';
 const WITH_RELATIONS = {
   sender:    { select: { id: true, username: true, displayName: true, avatar: true } },
   reactions: true,
+  // The quote travels with the message, so a reader never has to make a second
+  // request to draw it and a tombstone target still renders as one.
+  replyTo: {
+    select: {
+      id: true,
+      type: true,
+      text: true,
+      fileName: true,
+      deletedAt: true,
+      sender: { select: { id: true, username: true, displayName: true } },
+    },
+  },
 };
 
 const PARTNER_SELECT = { id: true, username: true, displayName: true, avatar: true, bio: true, status: true };
@@ -121,12 +133,28 @@ export class MessagesService {
   // `deletedAt` never leaves the server, because the client only renders a
   // tombstone and must not sort or date it by a second clock.
   private toWireMessage(message: any) {
-    const { reads, deletedAt, ...rest } = message;
+    const { reads, deletedAt, replyTo, ...rest } = message;
     const deleted = Boolean(deletedAt);
+    const quoted = replyTo
+      ? {
+        id:        replyTo.id,
+        type:      replyTo.type,
+        // A tombstone's text and file name are gone; the quote says so instead
+        // of showing what the sender asked to take away.
+        text:      replyTo.deletedAt ? null : replyTo.text,
+        fileName:  replyTo.deletedAt ? null : replyTo.fileName,
+        deleted:   Boolean(replyTo.deletedAt),
+        sender:    replyTo.sender
+          ? { id: replyTo.sender.id, name: replyTo.sender.displayName || replyTo.sender.username }
+          : null,
+      }
+      : null;
     return {
       ...rest,
       deleted,
       editedAt: rest.editedAt ?? null,
+      replyTo: quoted,
+      forwardedFrom: rest.forwardedFrom ?? null,
       fileUrl: deleted ? null : signedFileUrl(rest.fileUrl),
       sender: rest.sender
         ? { ...rest.sender, avatar: signedFileUrl(rest.sender.avatar) }
@@ -247,6 +275,7 @@ export class MessagesService {
 
   async create(senderId: string, receiverId: string, data: {
     type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number; durationMs?: number;
+    replyToId?: string; forwardedFrom?: string;
   }) {
     const conversation = await this.getOrCreateDirectConversation(senderId, receiverId);
     return this.sendToConversation(conversation.id, senderId, data);
@@ -701,6 +730,7 @@ export class MessagesService {
 
   async sendToConversation(conversationId: string, senderId: string, data: {
     type?: string; text?: string; fileUrl?: string; fileName?: string; fileSize?: number; durationMs?: number;
+    replyToId?: string; forwardedFrom?: string;
   }) {
     await this.assertMember(conversationId, senderId);
     // An encrypted conversation has no plaintext path: accepting one here would
@@ -713,11 +743,31 @@ export class MessagesService {
       throw new BadRequestException('این گفتگو فقط بسته رمزنگاری‌شده می‌پذیرد');
     }
     const normalized = this.normalizeOutgoingMessage(data);
+
+    // A quote is a reference into this same conversation, never an id the
+    // sender can point at somebody else's chat. A tombstone is not replyable.
+    let replyToId: string | null = null;
+    if (data.replyToId !== undefined && data.replyToId !== null) {
+      if (!isMessageId(data.replyToId)) throw new BadRequestException('پیام نقل‌شده نامعتبر است');
+      const target = await this.prisma.message.findFirst({
+        where:  { id: data.replyToId, conversationId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!target) throw new NotFoundException('پیام نقل‌شده پیدا نشد');
+      replyToId = target.id;
+    }
+
+    const forwardedFrom = typeof data.forwardedFrom === 'string'
+      ? data.forwardedFrom.trim().slice(0, 80) || null
+      : null;
+
     const message = await this.prisma.message.create({
       data: {
         conversationId,
         senderId,
         ...normalized,
+        replyToId,
+        forwardedFrom,
       },
       include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
     });
@@ -895,7 +945,12 @@ export class MessagesService {
    * generation it has not seen yet, so assignment and delivery must not
    * interleave.
    */
-  async appendE2eeEnvelope(conversationId: string, senderId: string, content: string) {
+  async appendE2eeEnvelope(
+    conversationId: string,
+    senderId: string,
+    content: string,
+    kind: 'MESSAGE' | 'CONTROL' = 'MESSAGE',
+  ) {
     // Format checks first: they say nothing about the conversation, so they
     // cannot leak whether an id belongs to someone else.
     if (typeof content !== 'string' || !content.length) throw new BadRequestException('بسته خالی است');
@@ -925,7 +980,7 @@ export class MessagesService {
         select:  { seq: true },
       });
       const created = await tx.e2eeEnvelope.create({
-        data: { conversationId, senderId, seq: (last?.seq ?? 0) + 1, content },
+        data: { conversationId, senderId, seq: (last?.seq ?? 0) + 1, content, kind },
       });
       await tx.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
       return [created];
@@ -937,6 +992,7 @@ export class MessagesService {
       seq:            envelope.seq,
       senderId,
       content:        envelope.content,
+      kind:           envelope.kind,
       createdAt:      envelope.createdAt,
     };
   }

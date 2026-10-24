@@ -11,6 +11,7 @@
 // 96-bit nonce, the one combination every platform's authenticated encryption
 // offers and the only one this format will accept.
 import { fromBase64 } from './wire.js';
+import { sanitizeForward, sanitizeQuote } from './payloads.js';
 
 export const ATTACHMENT_MARKER = 'openbridge.attachment.v1';
 
@@ -20,10 +21,13 @@ const BLOB_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const MAX_NAME = 255;
 
 /** Serialises one attachment payload. Refuses a descriptor it could not read back. */
-export function packAttachment({ blob, name, mime, size, key, iv, durationMs, voice }) {
+export function packAttachment({ blob, name, mime, size, key, iv, durationMs, voice, reply, forward }) {
   if (typeof blob !== 'string' || !BLOB_ID.test(blob)) throw new Error('شناسه پیوست نامعتبر است');
   if (typeof key !== 'string' || fromBase64(key).length !== KEY_BYTES) throw new Error('کلید پیوست نامعتبر است');
   if (typeof iv !== 'string' || fromBase64(iv).length !== NONCE_BYTES) throw new Error('nonce پیوست نامعتبر است');
+
+  const quoted = sanitizeQuote(reply);
+  const forwarded = sanitizeForward(forward);
 
   return JSON.stringify({
     k: ATTACHMENT_MARKER,
@@ -38,6 +42,10 @@ export function packAttachment({ blob, name, mime, size, key, iv, durationMs, vo
     // before this existed, carries nothing, so the reader's answer is "not a
     // microphone" rather than a guess.
     ...(voice === true ? { voice: true } : {}),
+    // A file can answer a message too, and the quote rides in the same
+    // descriptor because the attachment is the whole payload.
+    ...(quoted ? { r: quoted } : {}),
+    ...(forwarded ? { f: forwarded } : {}),
     key,
     iv,
   });
@@ -81,6 +89,8 @@ export function parseAttachment(text) {
     // True only when the sender said so in as many bytes. A missing field, a
     // string, a number — all of them mean this attachment is not a recording.
     voice: payload.voice === true,
+    reply:   sanitizeQuote(payload.r),
+    forward: sanitizeForward(payload.f),
     key:  payload.key,
     iv:   payload.iv,
   };

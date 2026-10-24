@@ -106,6 +106,24 @@ function waitEvent(socket, event, ms = 1500) {
   });
 }
 
+// The target message's own broadcast may still be in flight, so a reply test
+// waits for the text it sent rather than the first envelope on the socket.
+function waitMessageText(socket, text, ms = 4000) {
+  return new Promise(resolve => {
+    const handler = data => {
+      if (data?.text !== text) return;
+      clearTimeout(timer);
+      socket.off('message:new', handler);
+      resolve(data);
+    };
+    const timer = setTimeout(() => {
+      socket.off('message:new', handler);
+      resolve(null);
+    }, ms);
+    socket.on('message:new', handler);
+  });
+}
+
 // A group message, sent through the socket the way a client sends it, and
 // returned as the id every later action will name.
 async function sendGroupText(who, text) {
@@ -214,6 +232,24 @@ test('the sender edits their text and every window of every member is told', asy
 
   const row = await prisma.message.findUnique({ where: { id }, select: { deletedAt: true } });
   assert.equal(row.deletedAt, null, 'an edit is not a deletion in the database');
+});
+
+test('a direct edit names the other participant so an open chat can place it', async () => {
+  const { alice, bob } = global.__ctx;
+  const sent = await emitAck(sockets.alice, 'message:send', {
+    toId: bob.user.id, type: 'text', text: 'direct original',
+  });
+  assert.equal(sent.ok, true, 'direct seed');
+
+  const announced = waitEvent(sockets.bob, 'message:edited');
+  const edit = await emitAck(sockets.alice, 'message:edit', { messageId: sent.id, text: 'direct corrected' });
+  assert.equal(edit.ok, true, 'edit accepted');
+
+  const wire = await announced;
+  assert.equal(wire?.text, 'direct corrected', 'peer told the new text');
+  // Without this field the peer's open direct chat cannot recognise the edit as
+  // belonging to it and drops the update.
+  assert.equal(wire?.receiverId, bob.user.id, 'the broadcast names the other side of the chat');
 });
 
 test('an edit is refused for anyone but the sender, and for anything but live text', async () => {
@@ -409,4 +445,64 @@ test('a row you hid for yourself is not yours to delete for everyone', async () 
 
   const tombstone = findMessage(await groupHistory(global.__ctx.alice.token), id);
   assert.equal(tombstone.deleted, false, 'the rest of the group still has the live message');
+});
+
+test('a reply carries its quote and a forward names its source', async () => {
+  const { alice, bob } = global.__ctx;
+  const targetId = await sendGroupText(sockets.alice, 'original for reply');
+
+  const announced = waitMessageText(sockets.bob, 'answering you');
+  const ack = await emitAck(sockets.alice, 'message:send', {
+    conversationId: group.id,
+    type: 'text',
+    text: 'answering you',
+    replyToId: targetId,
+  });
+  assert.equal(ack.ok, true, 'reply accepted');
+  const reply = await announced;
+  assert.equal(reply?.replyTo?.id, targetId, 'the peer receives the quoted id');
+  assert.equal(reply?.replyTo?.text, 'original for reply', 'and the quote text');
+  assert.equal(reply?.replyTo?.sender?.id, alice.user.id, 'and the quoted author');
+  assert.equal(reply?.replyTo?.deleted, false);
+
+  for (const token of [alice.token, bob.token]) {
+    const history = await groupHistory(token);
+    const stored = findMessage(history, ack.id);
+    assert.equal(stored.replyTo.id, targetId, 'history serves the quote too');
+    assert.equal(stored.replyTo.text, 'original for reply');
+  }
+
+  const forwardedSeen = waitMessageText(sockets.bob, 'forwarded words');
+  const forwarded = await emitAck(sockets.alice, 'message:send', {
+    conversationId: group.id,
+    type: 'text',
+    text: 'forwarded words',
+    forwardedFrom: '  Alice source  ',
+  });
+  assert.equal(forwarded.ok, true, 'forward accepted');
+  const seen = await forwardedSeen;
+  assert.equal(seen?.id, forwarded.id);
+  assert.equal(seen?.forwardedFrom, 'Alice source', 'the source label is trimmed');
+  assert.equal(seen?.text, 'forwarded words', 'the forwarded copy carries the text');
+});
+
+test('a reply is refused when its target is in another chat or is a tombstone', async () => {
+  const { alice, dave } = global.__ctx;
+
+  const otherChat = await emitAck(sockets.alice, 'message:send', {
+    toId: dave.user.id, type: 'text', text: 'a message in another conversation',
+  });
+  assert.equal(otherChat.ok, true, 'direct seed');
+  const cross = await emitAck(sockets.alice, 'message:send', {
+    conversationId: group.id, type: 'text', text: 'quoting the wrong chat', replyToId: otherChat.id,
+  });
+  assert.equal(cross.ok, false, 'a quote cannot reach into another conversation');
+  assert.match(cross.error, /نقل‌شده/, 'and says the quoted message was not found');
+
+  const doomed = await sendGroupText(sockets.alice, 'this will be deleted');
+  assert.equal((await emitAck(sockets.alice, 'message:delete', { messageId: doomed, scope: 'everyone' })).ok, true);
+  const toTombstone = await emitAck(sockets.alice, 'message:send', {
+    conversationId: group.id, type: 'text', text: 'quoting a tombstone', replyToId: doomed,
+  });
+  assert.equal(toTombstone.ok, false, 'a tombstone is not replyable');
 });

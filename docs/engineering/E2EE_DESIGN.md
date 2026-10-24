@@ -503,6 +503,47 @@ pass.
   decrypt-and-render path is measured, not seen, and the lazy-open behaviour in a
   real painted browser window is still unverified.
 
+### Phase 2c landed (2026-10-24): replies, forwards and encrypted message actions
+
+A plaintext message now carries `replyToId` (a row in the same conversation) and
+`forwardedFrom` (a trimmed snapshot label); the server joins the quote into every
+read, and refuses a quote aimed at another conversation or a tombstone.
+
+Inside an MLS conversation the same features travel as payload markers, because
+the server has no row to join or update:
+
+| Marker | Payload | Meaning |
+|--------|---------|---------|
+| `openbridge.message.v1` | `{t, r?, f?}` | text plus an optional quote snapshot and forward label |
+| `openbridge.control.v1` | `{op, t, x?, s?}` | edit (`x`) or delete (`s: everyone\|me`) aimed at envelope `t` |
+
+- **A message without extras stays bare text**, so an older client still reads
+  it. A reply or forward is one envelope: the quote is copied, never fetched.
+- **Controls are application messages with `kind: CONTROL`** in the envelope
+  table. The server still cannot read them; it only keeps them out of unread
+  badges. The client recognises one before caching and never draws it as a row.
+- **The author's rights are enforced on the client**, the only party that can
+  read the payload: an edit and "delete for everyone" apply only when the target
+  message was written by the control's sender. "Delete for me" is meaningful only
+  to the same account and becomes a per-conversation hidden-sequence list, so
+  another device of that account applies the same hide and a reload keeps it.
+- **The sender applies its own control on the ack**, because its echo comes back
+  in `own` and is skipped; the peers apply it from the ordered stream.
+- **A forward reuses the normal send path of the destination**, so a plaintext
+  message forwarded into an encrypted chat is encrypted there. An encrypted
+  attachment is refused: its bytes only open inside the conversation they were
+  uploaded to.
+- **The web gesture is drag-left on a bubble** (56px), with the menu's «پاسخ» as
+  the keyboard path. The reply bar above the composer owns the quote until the
+  answer is sent or cancelled.
+- `shared/e2ee/client.test.mjs` (7/7) runs two real MLS clients against an
+  in-memory sequencer: reply/forward round-trip, edit applied and unauthorized
+  edit ignored, delete-for-everyone, delete-for-me only on the same account, and
+  controls staying out of history and previews. The live browser run covered both
+  kinds of conversation; the plaintext edit path also needed `receiverId` on the
+  `message:edited` broadcast, which is now asserted in
+  `backend/test/message-actions.e2e.cjs`.
+
 ### Phase 3 landed (2026-10-21): encrypted groups
 
 A group created with the web client's encryption option is ciphertext from its

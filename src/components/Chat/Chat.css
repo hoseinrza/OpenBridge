@@ -1592,3 +1592,98 @@ button.msg-sender {
 
   .jump-latest { bottom: var(--sp-3); }
 }
+
+/* ── Quote, forward label and swipe-to-reply ─────────────────── */
+/* A quote is a snapshot carried by the message itself, so it reads the same
+   after the original is edited, deleted or absent from this device. It is a
+   button because tapping it walks the thread to the original when that row is
+   still here. */
+.msg-quote {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  margin: 1px 0 4px;
+  padding: 4px 8px;
+  border: 0;
+  border-inline-start: 3px solid currentColor;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.055);
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.msg-wrapper.mine .msg-quote { background: rgba(255, 255, 255, 0.13); }
+
+.msg-quote:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.msg-quote-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--accent-text);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msg-wrapper.mine .msg-quote-name { color: rgba(255, 255, 255, 0.94); }
+
+.msg-quote-text {
+  max-width: 100%;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  opacity: 0.82;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  unicode-bidi: plaintext;
+}
+
+.msg-forwarded {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  margin-bottom: 1px;
+  font-size: 11.5px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.msg-forwarded .fa-share { font-size: 9px; }
+
+/* The bubble follows a leftward drag and springs back. `pan-y` leaves vertical
+   scrolling to the browser, so only the gesture that means "reply" is ours. */
+.bubble {
+  touch-action: pan-y;
+}
+
+.msg-bubbles {
+  position: relative;
+}
+
+.swipe-reply {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-top: -13px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 90ms linear;
+}

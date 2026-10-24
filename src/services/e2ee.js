@@ -29,8 +29,8 @@ function notify() {
 function makeTransport(socket) {
   return {
     api: (path, options = {}) => apiCall(path, options),
-    append: (conversationId, content) =>
-      emitWithAck(socket, 'e2ee:append', { conversationId, content }, 20000),
+    append: (conversationId, content, kind = 'MESSAGE') =>
+      emitWithAck(socket, 'e2ee:append', { conversationId, content, kind }, 20000),
     fetchEnvelopes: (conversationId, afterSeq, take) =>
       apiCall(`messages/${conversationId}/envelopes?afterSeq=${afterSeq}&take=${take}`),
     markRead: (conversationId, upToSeq) => emitWithAck(socket, 'e2ee:read', { conversationId, upToSeq }),
