@@ -189,7 +189,6 @@ export default function MessageList({
                 at the top of every one of them — including the chats it cannot
                 protect yet, which are described as exactly that. */}
             <p className={`welcome-e2ee is-${notice.tone}`} role="note">
-              <i className={`fas ${notice.tone === 'off' ? 'fa-lock-open' : 'fa-lock'}`} aria-hidden="true" />
               <span>{notice.text}</span>
             </p>
           </div>
@@ -228,7 +227,6 @@ export default function MessageList({
             </div>
           ) : row.type === 'secure' ? (
             <div key={row.key} className="secure-sep">
-              <i className="fas fa-lock" aria-hidden="true" />
               <span>از این پیام به بعد، متن فقط روی دستگاه شما و طرف مقابل رمزگشایی می‌شود</span>
             </div>
           ) : (

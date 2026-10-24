@@ -108,34 +108,6 @@
   flex-shrink: 0;
 }
 
-/* ── Encryption state ─────────────────────────────────────────── */
-.e2ee-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 var(--sp-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  background: var(--surface-2);
-  color: var(--text-2);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.e2ee-chip.is-on {
-  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
-  background: var(--success-soft);
-  color: var(--success);
-}
-
-.e2ee-chip.is-off {
-  border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-
 /* ── Search mode ─────────────────────────────────────────────── */
 .chat-search {
   display: flex;
@@ -509,16 +481,6 @@ button.msg-sender {
 .msg-receipt.read { color: var(--success); }
 .msg-wrapper.mine .msg-receipt.read { color: rgba(255, 255, 255, 0.95); }
 
-.msg-lock {
-  display: inline-flex;
-  align-items: center;
-  font-size: 8.5px;
-  color: var(--success);
-  opacity: 0.65;
-}
-
-.msg-wrapper.mine .msg-lock { color: rgba(255, 255, 255, 0.9); opacity: 0.8; }
-
 
 /* ── Inline reactions ────────────────────────────────────────── */
 /* Chips are their own row, and they sit above the clock: they read as a comment
@@ -868,9 +830,20 @@ button.msg-sender {
 .voice-fallback:hover { text-decoration: underline; }
 
 /* ── Recording bar ───────────────────────────────────────────── */
-/* The composer's third mode. It holds the same height as the row it replaces, so
-   opening a microphone does not shove the thread up the screen. */
-.voice-recording { align-items: center; }
+/* The composer's third mode. It borrows the capsule and the circle of the
+   written message, so opening a microphone moves nothing on the screen. */
+.voice-recording .input-wrap { align-items: center; }
+
+.voice-rec-cancel {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: var(--r-pill);
+  color: var(--danger);
+  font-size: 15px;
+}
+
+.voice-rec-cancel:hover { background: var(--danger-soft); color: var(--danger); }
 
 .voice-rec-timer {
   display: flex;
@@ -878,6 +851,7 @@ button.msg-sender {
   gap: var(--sp-2);
   flex-shrink: 0;
   min-width: 58px;
+  margin-inline-start: var(--sp-2);
   color: var(--danger);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
@@ -1165,29 +1139,18 @@ button.msg-sender {
   gap: var(--sp-2);
 }
 
-.attach-btn {
-  width: 42px;
-  height: 42px;
-  flex-shrink: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  font-size: 16px;
-}
-
-.attach-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text-1); }
-.attach-btn:disabled { opacity: 0.5; }
-.attach-btn.active { color: var(--accent-text); background: var(--accent-soft); border-color: var(--accent-soft); }
-
+/* One capsule holds the whole writing surface. Its two side buttons are plain
+   glyphs — a border around each of them is what made the row read as three
+   separate boxes — and the only bordered thing is the pill itself. */
 .input-wrap {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: flex-end;
-  gap: var(--sp-1);
-  padding: 4px;
+  gap: 2px;
+  padding: 3px 4px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
+  border-radius: var(--r-pill);
   background: var(--surface);
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
@@ -1197,10 +1160,30 @@ button.msg-sender {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.attach-btn,
+.icon-btn.emoji {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-pill);
+  color: var(--text-3);
+  font-size: 16px;
+}
+
+.attach-btn:hover:not(:disabled),
+.icon-btn.emoji:hover { color: var(--text-1); }
+
+.attach-btn:disabled { opacity: 0.5; }
+
+.attach-btn.active,
+.icon-btn.emoji.active {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
 .input-wrap textarea {
   flex: 1;
   min-width: 0;
-  min-height: 34px;
+  min-height: 38px;
   max-height: 132px;
   padding: 7px var(--sp-2);
   border: 0;
@@ -1215,37 +1198,31 @@ button.msg-sender {
 
 .input-wrap textarea::placeholder { color: var(--text-3); }
 
-.icon-btn.emoji {
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  color: var(--text-3);
-  font-size: 16px;
-}
-
-.icon-btn.emoji:hover { color: var(--text-1); }
-.icon-btn.emoji.active { color: var(--accent-text); background: var(--accent-soft); }
-
+/* The capsule is 46px tall with its border; the circle is the same height, so
+   the row reads as one line and the send button never floats off the baseline. */
 .send-btn {
-  width: 42px;
-  height: 42px;
+  width: 46px;
+  height: 46px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: var(--r-md);
+  border-radius: 50%;
   background: var(--accent);
   color: var(--on-accent);
   font-size: 15px;
-  transition: background var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+  box-shadow: var(--shadow-2);
+  transition: background var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease);
 }
 
 .send-btn:hover:not(:disabled) { background: var(--accent-hover); }
-.send-btn:active:not(:disabled) { background: var(--accent-active); }
+.send-btn:active:not(:disabled) { background: var(--accent-active); transform: scale(0.94); }
 .send-btn:disabled {
   background: var(--surface-3);
   color: var(--text-3);
+  box-shadow: none;
   opacity: 0.8;
 }
 
@@ -1584,9 +1561,15 @@ button.msg-sender {
   .viewer-foot { padding-inline: var(--sp-4); }
 
   .attach-btn,
-  .send-btn { width: 40px; height: 40px; }
+  .icon-btn.emoji,
+  .voice-rec-cancel { width: 36px; height: 36px; }
 
-  .input-wrap textarea { min-height: 32px; }
+  .input-wrap { padding: 3px; }
+
+  .input-wrap textarea { min-height: 36px; }
+
+  /* The capsule is 44px tall here, so the circle matches it exactly. */
+  .send-btn { width: 44px; height: 44px; }
 
   .empty-chat { padding: var(--sp-6) var(--sp-5); }
 

@@ -93,6 +93,70 @@ delete-for-everyone, and the quote of the deleted original turns into
 «پیام حذف شد». Limits: mobile is untouched; encrypted attachments cannot be
 forwarded; no screenshot was taken (DOM assertions only).
 
+## [1.3.4] - 2026-10-24
+
+### Changed
+- **نوار نوشتن پیام یک کپسول شد.** کاغذپیش، فیلد متن و لبخندِ ایموجی حالا درون
+  یک کپسول 999px با تنها یک حاشیه نشسته‌اند و آن دو دکمه دیگر حاشیهٔ خودشان را
+  ندارند: 38px (روی موبایل 36px) بی‌قاب، با رنگِ خاکستری که در هاور پررنگ می‌شود.
+  قبلاً سه باکس مستقل کنار هم بود — کاغذپیش مربع، کادر متن، دکمهٔ مربعی.
+- دکمهٔ ارسال (و میکروفن، وقتی فیلد خالی است) از کپسول بیرون آمد و یک دایرهٔ
+  توپُر شد: 46px روی دسکتاپ و 44px روی موبایل، یعنی هم‌ارتفاع دقیق کپسول، پس
+  خطِ پایینِ ردیف یکی می‌ماند و با بزرگ شدن متن، دایره کفِ کپسول می‌نشیند.
+  تبدیلِ میکروفن↔هواپیما، حالت‌های hover/active و غیرفعال بودن دست‌نخورده‌اند.
+- **نوار ضبط پیام صوتی همان کپسول و همان دایره را وامی‌گیرد:** لغو در ابتدای
+  خطیِ درون کپسول، تایمر و میله‌های سطح صدا در میان، و دایرهٔ ارسال بیرون.
+  باز کردن میکروفن دیگر هیچ‌چیز را جابه‌جا نمی‌کند.
+- حلقهٔ فوکوس حالا فقط روی همان کپسول کشیده می‌شود، نه روی سه باکس.
+- **نشان‌های رمزنگاری سرتاسری از هر دیدی حذف شد:** چیپ «رمزنگاری سرتاسری» و
+  «بدون رمزنگاری» از سرِ گفتگو، قفل کنار نامِ هر گفتگو در فهرست، قفل کوچک ته هر
+  پیام، ردیفِ وضعیتِ رمزنگاری از پنل پروفایل، و قفل تزئینیِ ردیف فایلِ
+  رمزنگاری‌شده به‌همراه برچسبِ «· رمزنگاری سرتاسری» آن. جای قفلِ حالت
+  «در حال رمزگشایی» یک اسپینر نشسته است، چون آنجا خبر از پیشرفت است نه وضعیت.
+- دو جمله‌ای که برداشتنشان یک هشدارِ واقعی را هم می‌برد، می‌مانند و فقط نمادشان
+  می‌رود: خطِ بالای هر گفتگو (تنها جایی که هنوز صادقانه می‌گوید این گفتگو
+  محافظت نشده) و جداکنندهٔ میانی «از این پیام به بعد…».
+- موبایل: پسوندِ «· رمزنگاری سرتاسری» و نشانِ قفلِ فهرست گفتگوها حذف شد (ردیف
+  همچنان شمارِ خوانده‌نشده‌ای را که هرگز پاک نمی‌شود پنهان می‌کند)، ردیفِ وضعیتِ
+  رمزنگاری از صفحهٔ پروفایل رفت، خط معرفی گروه فقط «گروه شامل N عضو» می‌گوید و
+  خطِ گفتگوی قفل‌شده «فقط در نسخهٔ وب قابل خواندن». جمله‌های مسدودسازیِ کامپوزر
+  و قفسهٔ رسانه سرِ جای خودند، بی‌قفل.
+- چیزی که مانده: نشانِ رمزنگاری روی صفحهٔ تماس (وب و موبایل) و کلید «گفتگوی
+  امن» در ساخت گفتگوی تازه — این دو تصمیم کاربرند، نه وضعیت.
+
+### Notes
+- فقط ظاهر. هیچ‌چیز روی سرور، در داده‌ها، در MLS یا در نحوهٔ کارکردِ رمزنگاری
+  تغییر نکرد؛ تنها چیزی که عوض شد این است که رابط دیگر دربارهٔ آن حرفی نمی‌زند
+  مگر آن‌جا که هشدارِ «رمزنگاری نیست» لازم است.
+- برچسب‌های دسترس‌پذیریِ کامپوزر (پیوست، انتخاب ایموجی، ضبط/ارسال پیام صوتی)
+  عیناً همان‌هایی هستند که بودند، پس مسیرهای صفحه‌خوان و جریان‌های تستِ لمسی
+  همان دکمه‌ها را پیدا می‌کنند. برچسبِ گفتگوی رمزنگاری‌شده در فهرست موبایل هم
+  برای صفحه‌خوان ماند، چون هیچ نمادِ دیدنی جایش را نمی‌گیرد.
+
+### Verified
+`npm run lint`, `npm run build` and `npm run test:e2ee` (5/5) clean; mobile
+`npx jest` 69/69 across 9 suites. The chat-list test was rewritten first to demand the
+absent labels and was seen failing (timeout on `@ali`) before the screens changed. Live DOM on
+the running app (vite on :5173, backend on :3000), at a 469px viewport: the composer row is now
+exactly two children — `.input-wrap` (44px tall, `border-radius: 999px`, one 1px border, padding
+3px, two borderless 36px buttons inside) and `.send-btn` (44x44, `border-radius: 50%`, accent
+fill, 8px gap, bottoms aligned to the capsule). Focusing the field drew one ring
+(rgb(255,138,133) + 3px soft shadow) on the capsule; typing swapped the microphone for the plane
+and cleared back; a 400-character draft grew the capsule to 140px with the textarea capped at
+132px and the circle still bottom-aligned. The attach chooser opens above the paperclip with its
+inline-end edge 4px off the clip. Starting a recording (with a synthesised `getUserMedia` stream,
+because no microphone is ever granted here) produced the same 44px capsule and the same circle,
+and cancelling left no message behind — 4 message groups before and after. Zero
+`.e2ee-chip`, `.msg-lock`, `.user-lock`, `.panel-encryption` and zero `fa-lock`/`fa-lock-open`
+glyphs anywhere across six chats including an encrypted one and an unencrypted group, whose
+`.welcome-e2ee` sentences still render with no icon; the profile panel shows the five shelves
+with no encryption row.
+Limits: the >768px branch was never rendered — this browser surface cannot be resized — so its
+46px/38px numbers come from the stylesheet, not from a screenshot; no encrypted *file* row exists
+in this account's data, so that row's label change is proven in code and on a plain file row
+(`265 بایت`, `fa-download`) only; and the on-device Maestro job still runs only in CI, where it
+has been red since it was added.
+
 ## [1.3.3] - 2026-10-24
 
 ### Changed

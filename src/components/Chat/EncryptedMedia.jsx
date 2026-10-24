@@ -115,10 +115,9 @@ export default function EncryptedMedia({ attachment, kind, name, size, onOpen })
           <span className="bubble-file-info">
             <span className="bubble-file-name" title={name}>{name || 'فایل'}</span>
             <span className="bubble-file-size">
-              {state === 'error' ? FAILED_NOTE : `${formatSize(size)} · رمزنگاری سرتاسری`}
+              {state === 'error' ? FAILED_NOTE : formatSize(size)}
             </span>
           </span>
-          <i className="fas fa-lock bubble-file-dl" aria-hidden="true" />
         </button>
         {state === 'error' && <span className="sr-only" role="alert">{error}</span>}
       </div>
@@ -139,7 +138,7 @@ export default function EncryptedMedia({ attachment, kind, name, size, onOpen })
       ) : (
         <div className={`enc-media-state ${state === 'error' ? 'is-error' : ''}`}
              role={state === 'error' ? 'alert' : 'status'}>
-          <i className={`fas ${state === 'error' ? 'fa-triangle-exclamation' : 'fa-lock'}`} aria-hidden="true" />
+          <i className={`fas ${state === 'error' ? 'fa-triangle-exclamation' : 'fa-spinner fa-spin'}`} aria-hidden="true" />
           <span>{state === 'error' ? error : LOCKED_NOTE}</span>
           {state === 'error' && (
             <button type="button" className="enc-media-retry" onClick={load}>تلاش دوباره</button>

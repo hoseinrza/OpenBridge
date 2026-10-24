@@ -82,9 +82,6 @@ export default function ForwardModal({ message, chats, onPick, onClose }) {
                 {chat.kind === 'group'
                   ? 'گروه'
                   : (chat.username ? `@${chat.username}` : 'گفتگو')}
-                {chat.encrypted && (
-                  <i className="fas fa-lock" title="رمزنگاری سرتاسری" aria-label="رمزنگاری سرتاسری" />
-                )}
               </span>
             </span>
             {busyId === chat.id

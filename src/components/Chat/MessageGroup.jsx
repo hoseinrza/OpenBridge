@@ -383,13 +383,6 @@ export default function MessageGroup({
                 {message.time}
               </time>
 
-              {message.encrypted && (
-                <span className="msg-lock" title="این پیام فقط روی دستگاه شما و طرف مقابل رمزگشایی می‌شود">
-                  <i className="fas fa-lock" aria-hidden="true" />
-                  <span className="sr-only">رمزنگاری سرتاسری</span>
-                </span>
-              )}
-
               {isMine && (
                 <span
                   className={`msg-receipt ${message.read ? 'read' : ''}`}

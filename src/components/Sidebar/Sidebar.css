@@ -220,16 +220,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* A conversation this device holds MLS keys for. The lock says "readable only
-   by the two of you", so it stays quiet-coloured and never competes with the
-   unread badge. */
-.user-lock {
-  flex-shrink: 0;
-  font-size: 10px;
-  color: var(--success);
-  opacity: 0.75;
-}
-
 .user-meta {
   flex: 1;
   min-width: 0;

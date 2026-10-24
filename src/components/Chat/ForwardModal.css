@@ -125,11 +125,6 @@
   color: var(--text-3);
 }
 
-.forward-row-meta .fa-lock {
-  font-size: 9px;
-  color: var(--success);
-}
-
 .forward-row-go {
   font-size: 12px;
   color: var(--text-3);

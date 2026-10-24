@@ -383,7 +383,7 @@ export default function InputArea({
 
       {blocked && (
         <div className="composer-note is-blocked" role="status">
-          <i className="fas fa-lock" aria-hidden="true" />
+          <i className="fas fa-circle-info" aria-hidden="true" />
           <span>{blocked}</span>
         </div>
       )}
@@ -411,29 +411,33 @@ export default function InputArea({
 
       {recording ? (
         <div className="input-area voice-recording">
-          <button
-            type="button"
-            className="icon-btn voice-rec-cancel"
-            onClick={dropRecording}
-            title="لغو"
-            aria-label="لغو ضبط پیام صوتی"
-          >
-            <i className="fas fa-trash" aria-hidden="true" />
-          </button>
+          {/* The same capsule the written message uses, so starting a recording
+              moves nothing: only what sits inside the pill changes. */}
+          <div className="input-wrap">
+            <button
+              type="button"
+              className="icon-btn voice-rec-cancel"
+              onClick={dropRecording}
+              title="لغو"
+              aria-label="لغو ضبط پیام صوتی"
+            >
+              <i className="fas fa-trash" aria-hidden="true" />
+            </button>
 
-          <span className="voice-rec-timer" role="timer">
-            <i className="fas fa-circle" aria-hidden="true" />
-            {formatDuration(elapsedMs)}
-          </span>
+            <span className="voice-rec-timer" role="timer">
+              <i className="fas fa-circle" aria-hidden="true" />
+              {formatDuration(elapsedMs)}
+            </span>
 
-          {/* The bars are the microphone's own level, sampled as it happens: they
-              say the recording is alive, and nothing more. They are not a picture
-              of the finished file, and the bubble does not pretend otherwise. */}
-          <span className="voice-rec-meter" aria-hidden="true">
-            {bars.map((level, index) => (
-              <b key={index} style={{ transform: `scaleY(${0.14 + Math.min(1, level) * 0.86})` }} />
-            ))}
-          </span>
+            {/* The bars are the microphone's own level, sampled as it happens: they
+                say the recording is alive, and nothing more. They are not a picture
+                of the finished file, and the bubble does not pretend otherwise. */}
+            <span className="voice-rec-meter" aria-hidden="true">
+              {bars.map((level, index) => (
+                <b key={index} style={{ transform: `scaleY(${0.14 + Math.min(1, level) * 0.86})` }} />
+              ))}
+            </span>
+          </div>
 
           <button
             type="button"
@@ -452,23 +456,26 @@ export default function InputArea({
         className="input-area"
         onSubmit={e => { e.preventDefault(); handleSend(); }}
       >
-        <button
-          ref={attachRef}
-          type="button"
-          className={`icon-btn attach-btn${showAttach ? ' active' : ''}`}
-          title={blocked ?? (isEditing ? 'ویرایش فقط متن را عوض می‌کند؛ پیوست در این حالت نیست' : 'پیوست')}
-          aria-label="پیوست"
-          aria-haspopup="menu"
-          aria-expanded={showAttach}
-          // An edit rewrites one text row, so there is nothing for a file to
-          // attach to — the picker stays shut until the edit is over.
-          disabled={busy || Boolean(blocked) || isEditing}
-          onClick={() => setShowAttach(open => !open)}
-        >
-          <i className={`fas ${blocked ? 'fa-lock' : 'fa-paperclip'}`} aria-hidden="true" />
-        </button>
-
+        {/* One surface, not three boxes: the clip, the field and the smiley share
+            a single capsule and only the button that leaves the chat stands
+            outside it, as the one solid shape in the row. */}
         <div className="input-wrap">
+          <button
+            ref={attachRef}
+            type="button"
+            className={`icon-btn attach-btn${showAttach ? ' active' : ''}`}
+            title={blocked ?? (isEditing ? 'ویرایش فقط متن را عوض می‌کند؛ پیوست در این حالت نیست' : 'پیوست')}
+            aria-label="پیوست"
+            aria-haspopup="menu"
+            aria-expanded={showAttach}
+            // An edit rewrites one text row, so there is nothing for a file to
+            // attach to — the picker stays shut until the edit is over.
+            disabled={busy || Boolean(blocked) || isEditing}
+            onClick={() => setShowAttach(open => !open)}
+          >
+            <i className="fas fa-paperclip" aria-hidden="true" />
+          </button>
+
           <textarea
             ref={textareaRef}
             value={text}

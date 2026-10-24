@@ -19,12 +19,6 @@
   unicode-bidi: plaintext;
 }
 
-.chat-welcome .welcome-e2ee > i {
-  margin-top: 2px;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
 .welcome-e2ee.is-on {
   background: var(--success-soft);
   border-color: color-mix(in srgb, var(--success) 26%, transparent);

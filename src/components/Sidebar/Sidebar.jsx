@@ -160,14 +160,6 @@ export default function Sidebar({
                 <span className="user-item-body">
                   <span className="user-item-top">
                     <span className="user-name" title={user.name}>{user.name}</span>
-                    {user.encrypted && (
-                      <i
-                        className="fas fa-lock user-lock"
-                        role="img"
-                        title="رمزنگاری سرتاسری"
-                        aria-label="گفتگوی رمزنگاری‌شده"
-                      />
-                    )}
                     {user.updatedAt && (
                       <span className="user-time">{formatConversationTime(user.updatedAt)}</span>
                     )}

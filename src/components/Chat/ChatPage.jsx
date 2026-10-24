@@ -380,7 +380,6 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
             <ChatHeader
               user={activeUser}
               encrypted={encrypted}
-              encryptionNote={encryptionNote}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
               searchOpen={searchOpen}
@@ -471,7 +470,6 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           chat={activeUser}
           currentUser={currentUser}
           encrypted={encrypted}
-          encryptionNote={encryptionNote}
           messages={messages}
           onClose={() => setProfileOpen(false)}
           onUpdated={handleGroupUpdated}
