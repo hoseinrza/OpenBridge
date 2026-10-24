@@ -4,6 +4,24 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.5.1] - 2026-10-24
+
+### Fixed
+- **یک قاعده برای تشخیص ویس از فایل صوتی.** پیش‌تر هر صدای دارای طول، هم در حباب
+  و هم در قفسه‌های پروفایل ویس شمرده می‌شد؛ آهنگی که طول داشت هم موج می‌گرفت.
+  حالا `isRecording` در `services/voice.js` همان قاعدهٔ سرور را یک‌جا اعمال
+  می‌کند: پرچم `voice` یا صدای دارای طول. حباب گفتگو، پیوست رمزنگاری‌شده و هر
+  دو قفسهٔ پروفایل از همین یک قاعده می‌پرسند؛ فایل صوتی بدون پرچم و بدون طول
+  ریل می‌ماند.
+- **قفسهٔ ویس پروفایل هم موج می‌گیرد.** ردیف‌های ویس در پروفایل حالا همان
+  `VoiceWaveBubble` را نشان می‌دهند، نه ریل عمومی فایل‌های صوتی.
+- فاصلهٔ ستون‌های موج از 3px به 2px رسید تا 40 ستون در عرض 197px جا شوند.
+
+### Verified
+`npm run lint`, `npm run build` and `npm run test:e2ee` (17/17) are clean after
+the merge. The profile shelf and the waveform component share the same rule; no
+new live recording was captured.
+
 ## [1.5.0] - 2026-10-24
 
 ### Added
