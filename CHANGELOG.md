@@ -4,6 +4,47 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.2.1] - 2026-10-24
+
+### Changed
+- **آنچه برای ویس ثابت شد، نوشته شد.** Voice messages shipped inside 1.2.0 next to
+  calls, and that entry’s *Verified* list described the call walkthrough without ever
+  saying what the voice half could not be shown on this machine. It is written here
+  rather than by rewriting a released entry: this environment has no audio capture
+  device, so a real `MediaRecorder.start()` answers `NotSupportedError` with an empty
+  `mimeType`. The path record → upload → store → decode → play was therefore driven
+  through the same production code with a hand-built 8 kHz PCM WAV injected in place of
+  the browser encoder. Everything after the bytes exist is real: a signed upload URL, a
+  `Message` row carrying the `durationMs` the sender measured, `Content-Disposition:
+  inline` for `audio/*`, a bubble that decodes and plays from history, and an MLS chat
+  whose encrypted attachment descriptor still carries the length. What is not proven is
+  the codec itself — a browser that can reach a microphone picks its own container
+  (`audio/webm` → `.weba`, `audio/mp4` → `.m4a`), and that pair was checked against the
+  server’s MIME/extension table, not recorded from a real capsule.
+- **موبایل روی گوشی اجرا نشد.** The phone half is `expo-audio` against a mocked recorder
+  and player in Jest (۱۷ voice tests) and it bundles, but it has never touched a real
+  handset: the installed expo-dev-client predates the `expo-audio` plugin and the
+  microphone permission, so a new dev-client build is needed before a recording can be
+  made or heard on a device.
+- **یک خط از آن entry دیگر راست نیست.** «هیچ commit/push/deploy انجام نشد» when it was
+  written was true; 1.2.0 is now commit `0a70e3b` on `main`. Nothing was deployed, which
+  is still the standing instruction.
+
+### Notes on what this does not do
+- A voice note has no slide-to-lock, no ۲× speed, no trimming and no drawn waveform:
+  the rail is a progress bar. Whether a recording was played is a fact this device knows
+  and the server does not, so «unheard» is per-device. The server never transcodes — a
+  container the reader cannot decode falls back to a download link instead of silence.
+- On the phone, an MLS conversation stays locked for voice as it is for text: the device
+  holds no keys, so the composer offers neither a keyboard nor a microphone there.
+
+### Verified
+- Re-run on the committed 1.2.0 tree, so nothing was lost in the shared commit:
+  `cd mobile && npm test` → ۶۵/۶۵; `node --test test/security.e2e.cjs
+  test/message-actions.e2e.cjs test/e2ee-client.e2e.cjs` in `backend` → ۵۴/۵۴
+  (the two voice suites included); `npm run test:e2ee` → ۵/۵; `npm run lint` and
+  `npm run build` clean on the web client.
+
 ## [1.2.0] - 2026-10-22
 
 ### Added
