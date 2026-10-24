@@ -235,8 +235,9 @@ export default function InputArea({
 
     let file;
     let durationMs;
+    let peaks;
     try {
-      ({ file, durationMs } = await recorder.stop());
+      ({ file, durationMs, peaks } = await recorder.stop());
     } catch (err) {
       dropRecording();
       setError(err?.message || 'ضبط پیام صوتی ناموفق بود');
@@ -248,7 +249,7 @@ export default function InputArea({
     // No object URL is made for a preview: the bubble that appears is the one the
     // server broadcasts back, with its own signed address on it.
     const result = await onSend({
-      type: 'voice', name: file.name, size: file.size, durationMs, _file: file,
+      type: 'voice', name: file.name, size: file.size, durationMs, peaks, _file: file,
       reply: replying ?? undefined,
     });
     setUploading(false);

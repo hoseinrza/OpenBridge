@@ -19,13 +19,37 @@ const KEY_BYTES = 32;
 const NONCE_BYTES = 12;
 const BLOB_ID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const MAX_NAME = 255;
+// A recording's picture, not its sound: one number per slice of time, written as
+// a percentage of the loudest slice, so a phone reads the same bars a browser
+// drew. Long enough for the widest bubble, short enough that the descriptor
+// stays a sentence rather than a sample.
+const MAX_PEAKS = 64;
+
+/**
+ * Reads the waveform field, or null when there is no picture to draw.
+ *
+ * Junk is dropped rather than refused: the bars are the one part of a descriptor
+ * that a bubble can live without, so a sender that wrote something unusable still
+ * gets its recording delivered, and the reader falls back to a pattern.
+ */
+function readPeaks(value) {
+  if (!Array.isArray(value)) return null;
+  const peaks = value
+    .filter(entry => Number.isFinite(entry))
+    .slice(0, MAX_PEAKS)
+    .map(entry => Math.round(Math.min(100, Math.max(0, entry))));
+  // One bar is not a shape. Fewer than two means the sender had nothing to say
+  // about how the recording looked.
+  return peaks.length >= 2 ? peaks : null;
+}
 
 /** Serialises one attachment payload. Refuses a descriptor it could not read back. */
-export function packAttachment({ blob, name, mime, size, key, iv, durationMs, voice, reply, forward }) {
+export function packAttachment({ blob, name, mime, size, key, iv, durationMs, voice, peaks, reply, forward }) {
   if (typeof blob !== 'string' || !BLOB_ID.test(blob)) throw new Error('شناسه پیوست نامعتبر است');
   if (typeof key !== 'string' || fromBase64(key).length !== KEY_BYTES) throw new Error('کلید پیوست نامعتبر است');
   if (typeof iv !== 'string' || fromBase64(iv).length !== NONCE_BYTES) throw new Error('nonce پیوست نامعتبر است');
 
+  const shape = readPeaks(peaks);
   const quoted = sanitizeQuote(reply);
   const forwarded = sanitizeForward(forward);
 
@@ -42,6 +66,9 @@ export function packAttachment({ blob, name, mime, size, key, iv, durationMs, vo
     // before this existed, carries nothing, so the reader's answer is "not a
     // microphone" rather than a guess.
     ...(voice === true ? { voice: true } : {}),
+    // The microphone was measured while these bytes were being written, so a
+    // sender that never sampled anything simply leaves this out.
+    ...(shape ? { peaks: shape } : {}),
     // A file can answer a message too, and the quote rides in the same
     // descriptor because the attachment is the whole payload.
     ...(quoted ? { r: quoted } : {}),
@@ -89,6 +116,9 @@ export function parseAttachment(text) {
     // True only when the sender said so in as many bytes. A missing field, a
     // string, a number — all of them mean this attachment is not a recording.
     voice: payload.voice === true,
+    // The shape of the sound, or null for every descriptor written before bars
+    // were drawn and for any sender that had no microphone to measure.
+    peaks:   readPeaks(payload.peaks),
     reply:   sanitizeQuote(payload.r),
     forward: sanitizeForward(payload.f),
     key:  payload.key,
