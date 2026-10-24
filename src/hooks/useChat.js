@@ -41,6 +41,9 @@ function normalize(msg, myId) {
     // this number instead of asking the container, which is the one field a
     // browser-written voice file is not certain to carry.
     durationMs:   Number.isInteger(msg.durationMs) ? msg.durationMs : null,
+    // A stored row has nowhere to keep a waveform, so a plaintext recording draws
+    // a pattern instead. Only an encrypted sender can carry the real bars.
+    peaks:        null,
     side:         msg.senderId === myId ? 'mine' : 'other',
     senderId:     msg.senderId,
     receiverId:   msg.receiverId,
@@ -77,12 +80,19 @@ const MESSAGE_EXIT_MS = 240;
 // Which bubble an opened attachment draws. The rule is the MIME type the sender
 // wrote into its own descriptor, because an encrypted conversation gives the
 // server nothing to go on but those bytes — except for a recording, where even
-// the MIME lies: a voice note and a song are both audio. Only the flag the
-// sender's own microphone set can tell them apart.
-function attachmentKind(mime, voice) {
+// the MIME lies: a voice note and a song are both audio.
+//
+// Two things tell them apart, in order of how much they can be trusted. The flag
+// a sender's own microphone set is the honest answer. Failing that — every
+// descriptor written before a recording said so out loud — a recording is an
+// audio file somebody timed, because a song is not measured by the person who
+// sends it. That is the same second rule the server's «ویس» shelf and the profile
+// panel already apply, so one message cannot be a voice note in one list and a
+// document in another.
+function attachmentKind(mime, voice, durationMs) {
   if (voice) return 'voice';
   if (mime?.startsWith('image/')) return 'image';
-  if (mime?.startsWith('audio/')) return 'audio';
+  if (mime?.startsWith('audio/')) return durationMs == null ? 'audio' : 'voice';
   return 'file';
 }
 
@@ -96,12 +106,15 @@ function normalizeEncrypted(message, peer) {
     : peer;
   return {
     id:             `e2ee-${message.seq}`,
-    type:           attachment ? attachmentKind(attachment.mime, attachment.voice) : 'text',
+    type:           attachment
+      ? attachmentKind(attachment.mime, attachment.voice, attachment.durationMs)
+      : 'text',
     text:           message.text,
     attachment,
     name:           attachment?.name ?? null,
     size:           attachment?.size ?? null,
     durationMs:     attachment?.durationMs ?? null,
+    peaks:          attachment?.peaks ?? null,
     side:           message.mine ? 'mine' : 'other',
     senderId:       message.senderId,
     conversationId: message.conversationId,
@@ -217,7 +230,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     // The order is the safety of this path: the group exists before a byte is
     // uploaded, so a peer with no keys to invite never leaves an orphan blob on
     // the server, and the file is encrypted before anything is sent at all.
-    attachmentSendRef.current = async (target, file, durationMs, voice) => {
+    attachmentSendRef.current = async (target, file, durationMs, voice, peaks) => {
       const client = await initE2ee({ id: currentUserRef.current.id });
       const opened = secureRef.current?.conversationId
         ? null
@@ -236,6 +249,10 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
         // that says nothing about its origin reads as an uploaded file, which is
         // why the composer has to say «microphone» out loud.
         voice: voice === true,
+        // The bars the composer's bubble will draw. They ride inside the envelope
+        // for the same reason the length does: the server is never told what this
+        // recording looked like, so it cannot be a column on a row.
+        peaks: peaks ?? null,
         key,
         iv,
       }));
@@ -568,7 +585,9 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     if (msg._file && (status?.mode === 'open'
       || (!isGroup(target) && status?.mode === 'plain'))) {
       try {
-        return await attachmentSendRef.current(target, msg._file, msg.durationMs, msg.type === 'voice');
+        return await attachmentSendRef.current(
+          target, msg._file, msg.durationMs, msg.type === 'voice', msg.peaks,
+        );
       } catch (error) {
         if (!peerWithoutKeys(error) || isGroup(target)) {
           return { ok: false, error: error.message || 'رمزنگاری یا ارسال فایل ناموفق بود' };

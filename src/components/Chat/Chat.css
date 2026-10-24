@@ -706,13 +706,13 @@ button.msg-sender {
 .bubble-file-dl { font-size: 13px; opacity: 0.7; flex-shrink: 0; }
 
 /* ── Voice message ───────────────────────────────────────────── */
-/* The Telegram shape: a round play, a rail that is also the scrubber, and the
-   length at the inline end. The rail is one styled range input rather than a
-   painted div, so a keyboard reaches the middle of a recording and a screen
-   reader is told what moving it means without any of that being invented here.
-   Nothing in a bubble is drawn from the file's own amplitude — the bars that
-   scroll during recording are the microphone speaking, and once sent the only
-   truth left is how far the sound has got. */
+/* Two shapes for one kind of message. A sound file is played off a rail — the
+   Telegram form: a round play, a scrubber that is also the progress, and the
+   length at the inline end. A recording from a microphone is drawn as the shape
+   it made, further down in this file.
+   The rail is one styled range input rather than a painted div, so a keyboard
+   reaches the middle of a recording and a screen reader is told what moving it
+   means without any of that being invented here. */
 .voice-bubble {
   --voice-track: var(--surface-3);
   --voice-fill:  var(--accent);
@@ -828,6 +828,78 @@ button.msg-sender {
 
 .msg-wrapper.mine .voice-fallback { color: var(--on-bubble-out); }
 .voice-fallback:hover { text-decoration: underline; }
+
+/* ── The waveform bubble ─────────────────────────────────────── */
+/* A recording drawn as the shape it made: the round play, the bars beside it, and
+   the length underneath — the same three parts the reference puts on a voice
+   message. The bars are the sender's own microphone measurements, so they are
+   drawn before a byte of sound is fetched, and they are hidden from a screen
+   reader: they say what a recording looked like, never how long it was or how far
+   it has got. Those two numbers stay with the player.
+   The count and the weight are measured off the reference: forty bars, hairline
+   wide with as much air between them as not, and the loudest one filling the
+   track. Progress is the accent being eaten away rather than a second colour, so
+   a bubble nobody has listened to yet is exactly the picture it was sent as. */
+.voice-wave-bubble {
+  --wave-bar: var(--accent);
+  align-items: center;
+}
+
+.msg-wrapper.mine .voice-wave-bubble { --wave-bar: var(--on-bubble-out); }
+
+.voice-wave-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.voice-wave-track {
+  position: relative;
+  display: flex;
+  height: 44px;
+}
+
+.voice-wave-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+}
+
+.voice-wave-bars b {
+  flex: 1 1 0;
+  min-width: 2px;
+  /* Never flat to nothing, so a silent slice still reads as part of a shape. */
+  height: calc(10% + var(--peak, 20) * 0.9%);
+  border-radius: var(--r-pill);
+  background: var(--wave-bar);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+/* Only the recording being listened to shows where it has got to. */
+.voice-wave-bubble.is-active .voice-wave-bars b:not(.is-heard) { opacity: 0.35; }
+
+.voice-wave-scrub {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.voice-wave-scrub::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; opacity: 0; }
+.voice-wave-scrub::-moz-range-thumb { width: 14px; height: 14px; border: 0; opacity: 0; }
+.voice-wave-scrub:disabled { cursor: default; }
+.voice-wave-scrub:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: var(--r-sm); }
+
+.voice-wave-time { align-self: flex-start; }
 
 /* ── Recording bar ───────────────────────────────────────────── */
 /* The composer's third mode. It borrows the capsule and the circle of the

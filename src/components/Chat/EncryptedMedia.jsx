@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { openAttachment } from '../../services/attachments.js';
 import VoiceBubble from './VoiceBubble.jsx';
+import VoiceWaveBubble from './VoiceWaveBubble.jsx';
 import { formatSize } from '../../utils/format.js';
 import './EncryptedMedia.css';
 
@@ -85,11 +86,15 @@ export default function EncryptedMedia({ attachment, kind, name, size, onOpen })
   // holds on it, so the bytes stay alive while they are being listened to and are
   // given back when the bubble leaves or the listen ends — whichever comes first.
   if (kind === 'audio' || kind === 'voice') {
+    // The same two shapes as anywhere else: a microphone keeps its waveform, a
+    // file someone kept is played off a rail.
+    const Bubble = kind === 'voice' ? VoiceWaveBubble : VoiceBubble;
     return (
       <div className="enc-media" ref={boxRef}>
-        <VoiceBubble
+        <Bubble
           id={`enc-${attachment.blob}`}
           durationMs={attachment.durationMs}
+          peaks={attachment.peaks}
           resolve={async () => {
             const opened = await openAttachment(attachment);
             return { url: opened.url, release: opened.release };

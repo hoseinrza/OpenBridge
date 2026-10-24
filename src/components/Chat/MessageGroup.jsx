@@ -3,6 +3,7 @@ import Avatar from '../ui/Avatar.jsx';
 import EncryptedMedia from './EncryptedMedia.jsx';
 import MessageActionsMenu from './MessageActionsMenu.jsx';
 import VoiceBubble from './VoiceBubble.jsx';
+import VoiceWaveBubble from './VoiceWaveBubble.jsx';
 import { playableFromSrc } from '../../services/voice.js';
 import { formatSize } from '../../utils/format.js';
 
@@ -37,10 +38,14 @@ function BubbleBody({ message, searchQuery, onOpenImage }) {
   }
 
   if (message.type === 'audio' || message.type === 'voice') {
+    // Two kinds of sound, two shapes: what came off a microphone is drawn as the
+    // shape it made, and a file someone kept is played off a rail.
+    const Bubble = message.type === 'voice' ? VoiceWaveBubble : VoiceBubble;
     return (
-      <VoiceBubble
+      <Bubble
         id={message.id}
         durationMs={message.durationMs}
+        peaks={message.peaks}
         resolve={() => playableFromSrc(message.src)}
         download={message.src}
       />

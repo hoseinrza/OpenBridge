@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test:e2ee": "node --test shared/e2ee/gate.test.mjs shared/e2ee/hermes-gate.test.mjs",
+    "test:e2ee": "node --test shared/e2ee/attachments.test.mjs shared/e2ee/gate.test.mjs shared/e2ee/hermes-gate.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
