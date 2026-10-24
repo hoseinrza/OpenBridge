@@ -665,18 +665,3 @@
   .call-pulse { animation: none; }
   .call-spinner { animation-duration: 1.6s; }
 }
-
-/* The header gained two call icons; on a narrow phone the encryption chip
-   keeps its lock icon but drops its label so the name and actions fit. */
-@media (max-width: 560px) {
-  .chat-header-actions .e2ee-chip {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    justify-content: center;
-    gap: 0;
-    font-size: 0;
-  }
-
-  .chat-header-actions .e2ee-chip i { font-size: 12px; }
-}

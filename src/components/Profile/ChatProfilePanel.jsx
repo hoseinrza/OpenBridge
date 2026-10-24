@@ -110,7 +110,7 @@ function joinedAt(dateStr) {
 }
 
 export default function ChatProfilePanel({
-  chat, currentUser, encrypted, encryptionNote, messages = [], onClose, onUpdated, onOpenUser,
+  chat, currentUser, encrypted, messages = [], onClose, onUpdated, onOpenUser,
   onCall, callsEnabled = true, callBusy = false, onSearch,
 }) {
   const isGroup = chat.kind === 'group';
@@ -457,15 +457,6 @@ export default function ChatProfilePanel({
               </div>
             )}
 
-            <div className={`panel-encryption ${encrypted ? 'is-on' : 'is-off'}`} title={encrypted
-              ? (isGroup
-                ? 'متن، تصویر و فایل این گروه فقط روی دستگاه اعضای آن رمزگشایی می‌شود؛ سرور هیچ‌وقت آن‌ها را نمی‌بیند'
-                : 'متن، تصویر و فایل این گفتگو فقط روی دستگاه شما و دستگاه طرف مقابل رمزگشایی می‌شود؛ سرور هیچ‌وقت آن‌ها را نمی‌بیند')
-              : (encryptionNote ?? 'پیام‌های این گفتگو روی سرور قابل خواندن ذخیره می‌شوند')}>
-              <i className={encrypted ? 'fas fa-lock' : 'fas fa-lock-open'} aria-hidden="true" />
-              <span>{encrypted ? 'رمزنگاری سرتاسری' : 'بدون رمزنگاری'}</span>
-            </div>
-
             <section className="panel-shared" aria-label="محتوای گفتگو">
               <div className="panel-tabs" role="tablist" aria-label="دسته‌بندی محتوای گفتگو">
                 {tabs.map((entry) => (
@@ -511,7 +502,6 @@ export default function ChatProfilePanel({
                   <>
                     {encrypted && (
                       <p className="panel-shared-note" role="note">
-                        <i className="fas fa-lock" aria-hidden="true" />
                         <span>{isGroup
                           ? 'این فهرست پیام‌هایی است که روی همین دستگاه رمزگشایی شده؛ سرور هیچ‌کدام را نمی‌بیند.'
                           : 'این فهرست فقط پیام‌هایی را نشان می‌دهد که روی همین دستگاه رمزگشایی شده.'}</span>

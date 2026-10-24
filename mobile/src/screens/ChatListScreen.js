@@ -114,9 +114,9 @@ export default function ChatListScreen({ navigation }) {
   function renderRow({ item }) {
     const isGroup = item.kind === 'group';
     const locked = item.encrypted === true;
-    // An encrypted chat is demoted to a signpost on this build: it cannot be
-    // decrypted here and its read mark only moves from a web client, so a count
-    // would never clear. The lock says what the row actually is.
+    // An encrypted chat is demoted on this build: it cannot be decrypted here
+    // and its read mark only moves from a web client, so a count would never
+    // clear. The row itself stays plain — no sign of what it holds.
     const unread = locked ? 0 : (item.unread ?? 0);
     return (
       <Pressable
@@ -142,15 +142,11 @@ export default function ChatListScreen({ navigation }) {
 
           <View style={styles.rowBottom}>
             <Text style={styles.meta} numberOfLines={1}>
-              {locked
-                ? (isGroup ? `${item.memberCount ?? 0} عضو · رمزنگاری سرتاسری` : 'رمزنگاری سرتاسری')
-                : (isGroup ? `${item.memberCount ?? 0} عضو` : `@${item.username ?? ''}`)}
+              {isGroup
+                ? `${item.memberCount ?? 0} عضو`
+                : `@${item.username ?? ''}`}
             </Text>
-            {locked ? (
-              <View style={styles.lockBadge} accessibilityLabel="فقط در نسخهٔ وب قابل خواندن است">
-                <FontAwesome6 name="lock" size={9} color={colors.text2} />
-              </View>
-            ) : unread > 0 && (
+            {unread > 0 && (
               <View style={styles.badge} accessibilityLabel={`${unread} پیام خوانده‌نشده`}>
                 <Text style={styles.badgeText}>{unread.toLocaleString('fa-IR')}</Text>
               </View>
@@ -354,12 +350,6 @@ function makeStyles(colors) {
       alignItems: 'center', justifyContent: 'center',
     },
     badgeText: { color: colors.onAccent, fontFamily: fonts.semibold, fontSize: type.xs },
-    lockBadge: {
-      width: 20, height: 20, borderRadius: radius.pill,
-      backgroundColor: colors.surface2, borderWidth: 1, borderColor: colors.border,
-      alignItems: 'center', justifyContent: 'center',
-    },
-
     state: {
       flex: 1,
       alignItems: 'center',

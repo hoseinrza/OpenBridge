@@ -78,16 +78,18 @@ test('renders direct and group rows with the unread badge', async () => {
   expect(view.getByText('2 عضو')).toBeTruthy();
 });
 
-test('marks an encrypted chat and hides an unread count it can never clear', async () => {
+test('hides an unread count a phone can never clear, and marks the row with nothing', async () => {
   fetchConversations.mockResolvedValue([
     { ...direct, unread: 7, e2ee: true },
   ]);
   fetchGroups.mockResolvedValue([{ ...group, e2ee: true }]);
   const view = render(<ChatListScreen navigation={navigation} />);
-  expect(await view.findByText('رمزنگاری سرتاسری')).toBeTruthy();
-  expect(view.getByText('2 عضو · رمزنگاری سرتاسری')).toBeTruthy();
+  expect(await view.findByText('@ali')).toBeTruthy();
+  expect(view.getByText('2 عضو')).toBeTruthy();
+  expect(view.queryByText('رمزنگاری سرتاسری')).toBeNull();
+  expect(view.queryByText('2 عضو · رمزنگاری سرتاسری')).toBeNull();
   expect(view.queryByLabelText('7 پیام خوانده‌نشده')).toBeNull();
-  expect(view.getAllByLabelText('فقط در نسخهٔ وب قابل خواندن است')).toHaveLength(2);
+  expect(view.queryByLabelText('فقط در نسخهٔ وب قابل خواندن است')).toBeNull();
 });
 
 test('filters rows by name and username', async () => {

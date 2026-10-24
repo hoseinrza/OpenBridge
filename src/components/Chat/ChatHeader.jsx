@@ -4,7 +4,7 @@ import Avatar from '../ui/Avatar.jsx';
 const STATUS_TEXT = { online: 'آنلاین', idle: 'غیرفعال', dnd: 'مشغول', offline: 'آفلاین' };
 
 export default function ChatHeader({
-  user, encrypted = false, encryptionNote = null, searchQuery, onSearchChange, searchOpen, onSearchOpenChange,
+  user, encrypted = false, searchQuery, onSearchChange, searchOpen, onSearchOpenChange,
   onOpenProfile, onBack, onStartCall, callsEnabled = true, callBusy = false,
 }) {
   const inputRef = useRef(null);
@@ -109,23 +109,6 @@ export default function ChatHeader({
           </div>
 
           <div className="chat-header-actions">
-            {encrypted && (
-              <span
-                className="e2ee-chip is-on"
-                title={isGroup
-                  ? 'متن، تصویر و فایل این گروه فقط روی دستگاه اعضای آن رمزگشایی می‌شود؛ سرور هیچ‌وقت آن‌ها را نمی‌بیند'
-                  : 'متن، تصویر و فایل این گفتگو فقط روی دستگاه شما و دستگاه طرف مقابل رمزگشایی می‌شود؛ سرور هیچ‌وقت آن‌ها را نمی‌بیند'}
-              >
-                <i className="fas fa-lock" aria-hidden="true" />
-                رمزنگاری سرتاسری
-              </span>
-            )}
-            {!encrypted && !isGroup && encryptionNote && (
-              <span className="e2ee-chip is-off" title={encryptionNote}>
-                <i className="fas fa-lock-open" aria-hidden="true" />
-                بدون رمزنگاری
-              </span>
-            )}
             {onStartCall && (
               <>
                 <button

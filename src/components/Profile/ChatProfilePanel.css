@@ -130,28 +130,6 @@
 
 .panel-card-value.is-accent { color: var(--accent-text); }
 
-.panel-encryption {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin-top: var(--sp-4);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-md);
-  font-size: var(--text-sm);
-  text-align: start;
-  cursor: help;
-}
-
-.panel-encryption.is-on {
-  background: var(--success-soft);
-  color: var(--success);
-}
-
-.panel-encryption.is-off {
-  background: var(--surface-3);
-  color: var(--text-3);
-}
-
 .panel-form {
   margin-top: var(--sp-4);
   text-align: start;

@@ -401,9 +401,7 @@ export default function ChatScreen({ route, navigation }) {
       <Avatar name={peer?.name} group size={64} />
       <Text style={styles.introName}>{peer?.name}</Text>
       <Text style={styles.introMeta}>
-        {locked
-          ? `گروه رمزنگاری‌شده · ${(peer?.memberCount ?? 0).toLocaleString('fa-IR')} عضو`
-          : `گروه شامل ${(peer?.memberCount ?? 0).toLocaleString('fa-IR')} عضو`}
+        {`گروه شامل ${(peer?.memberCount ?? 0).toLocaleString('fa-IR')} عضو`}
       </Text>
       {peer?.participants?.length > 0 && (
         <Text style={styles.introMembers} numberOfLines={3}>
@@ -417,7 +415,7 @@ export default function ChatScreen({ route, navigation }) {
       <Text style={styles.introName}>{peer?.name}</Text>
       <Text style={styles.introMeta}>
         {locked
-          ? 'رمزنگاری سرتاسری · فقط در نسخهٔ وب قابل خواندن'
+          ? 'فقط در نسخهٔ وب قابل خواندن'
           : `${peer?.status === 'online' ? 'آنلاین' : 'آفلاین'}${peer?.username ? ` · @${peer.username}` : ''}`}
       </Text>
     </View>
@@ -437,7 +435,6 @@ export default function ChatScreen({ route, navigation }) {
 
       {locked && (
         <View style={styles.lockedBar} accessibilityRole="alert">
-          <FontAwesome6 name="lock" size={11} color={colors.text2} />
           <Text style={styles.lockedText}>
             این گفتگو سرتاسری رمزنگاری شده؛ خواندن و فرستادن پیام در آن فقط از نسخهٔ وب ممکن است.
           </Text>

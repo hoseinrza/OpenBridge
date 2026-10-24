@@ -302,13 +302,6 @@ export default function ChatProfileScreen({ route }) {
           )}
         </View>
 
-        <View style={styles.row}>
-          <FontAwesome6 name={locked ? 'lock' : 'shield-halved'} size={13} color={locked ? colors.accentText : colors.text3} />
-          <Text style={styles.rowText}>
-            {locked ? 'رمزنگاری سرتاسری' : 'بدون رمزنگاری'}
-          </Text>
-        </View>
-
         {editing ? (
           <View style={styles.form}>
             <Text style={styles.label}>نام گروه</Text>
@@ -426,7 +419,6 @@ export default function ChatProfileScreen({ route }) {
               </View>
             ) : locked ? (
               <View style={styles.lockedNote}>
-                <FontAwesome6 name="lock" size={13} color={colors.accentText} />
                 <Text style={styles.lockedText}>
                   این گفتگو سرتاسری رمزنگاری شده؛ فهرست رسانه‌ها و فایل‌ها فقط در نسخهٔ وب نشان داده می‌شود.
                 </Text>
