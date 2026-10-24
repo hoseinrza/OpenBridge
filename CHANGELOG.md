@@ -4,6 +4,23 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.4.2] - 2026-10-24
+
+### Changed
+- **فاصلهٔ همهٔ پیام‌ها یکسان شد: 8px، در وب و موبایل.** گروه‌بندی زمانی پنج‌دقیقه‌ای
+  که دو پیام پشتِ هم از یک فرستنده را با یک درز 2px به هم می‌چسباند، از هر دو
+  کلاینت برداشته شد. حالا هر حباب مستقل است: فاصلهٔ 8px، دنبالهٔ خودش، و در
+  گروه‌ها نام و آواتار فرستنده روی هر پیام. پیام فرواردشده هم مثل بقیه.
+- در موبایل فاصلهٔ ردیف‌ها از 4px به 8px رسید (`marginVertical: 4` روی هر ردیف).
+
+### Verified
+`npm run lint` and `npm run build` are clean. In the live web app, two messages
+sent back to back render as two `first last` rows with an 8px `margin-bottom`;
+the measured gap between their bubbles is 8px (was 2px). Mobile Jest could not be
+run in this worktree because its `node_modules/.bin` is incomplete; the mobile
+change is the same row-building logic plus `marginVertical: 4` (two margins =
+8px), and it has not been checked on a device.
+
 ## [1.4.1] - 2026-10-24
 
 ### Fixed

@@ -5,19 +5,15 @@ import Avatar from '../ui/Avatar.jsx';
 import { dayKey, formatDayLabel } from '../../utils/time.js';
 import './MessageList.css';
 
-const GROUP_GAP = 5 * 60 * 1000;
-
 function buildRows(messages) {
   const rows = [];
-  let prevMsg = null;
   let prevDay = null;
   let prevEncrypted = null;
 
-  messages.forEach((msg, index) => {
+  messages.forEach((msg) => {
     const day = dayKey(msg.createdAt);
     if (day !== prevDay) {
       rows.push({ type: 'day', key: day, label: formatDayLabel(msg.createdAt) });
-      prevMsg = null;
       prevDay = day;
     }
     // One conversation crosses this line at most once, and only because the
@@ -27,23 +23,11 @@ function buildRows(messages) {
     }
     prevEncrypted = msg.encrypted;
 
-    const next = messages[index + 1];
-    // A forwarded message opens with a header naming its source, so it reads as
-    // its own unit: grouping it under the previous bubble in the same send
-    // session makes that header look like part of the message above it, and
-    // glues the two bubbles together with no room between them.
-    const standalone = Boolean(msg.forwardedFrom);
-    const nextStandalone = Boolean(next?.forwardedFrom);
-    const samePrev = !standalone && prevMsg
-      && prevMsg.senderId === msg.senderId
-      && msg.createdAt - prevMsg.createdAt < GROUP_GAP;
-    const sameNext = !standalone && !nextStandalone && next
-      && next.senderId === msg.senderId
-      && next.createdAt - msg.createdAt < GROUP_GAP
-      && dayKey(next.createdAt) === day;
-
-    rows.push({ type: 'msg', msg, first: !samePrev, last: !sameNext });
-    prevMsg = msg;
+    // Every message is its own row: a message sent a second after another keeps
+    // the same spacing as one sent an hour later. Time grouping used to pull
+    // same-sender bubbles into a 2px seam, which read as a spacing mistake once
+    // the bubbles themselves are rounded.
+    rows.push({ type: 'msg', msg, first: true, last: true });
   });
 
   return rows;

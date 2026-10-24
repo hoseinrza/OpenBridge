@@ -17,7 +17,6 @@ import { fa } from '../utils/persian';
 import Avatar from '../components/Avatar';
 import VoiceBubble from '../components/VoiceBubble';
 
-const GROUP_GAP = 5 * 60 * 1000;
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢'];
 // The recorder writes AAC inside an MP4 container on both platforms, which the
 // server accepts under the audio/mp4 name; the ceiling is the one a phone can
@@ -43,21 +42,17 @@ function isPlayable(msg) {
 
 function buildRows(messages) {
   const rows = [];
-  let prevMsg = null;
   let prevDay = null;
 
-  messages.forEach((msg, index) => {
+  messages.forEach((msg) => {
     const day = dayKey(msg.createdAt);
     if (day !== prevDay) {
       rows.push({ type: 'day', key: `day-${day}`, label: formatDayLabel(msg.createdAt) });
-      prevMsg = null;
       prevDay = day;
     }
-    const next = messages[index + 1];
-    const samePrev = prevMsg && prevMsg.senderId === msg.senderId && msg.createdAt - prevMsg.createdAt < GROUP_GAP;
-    const sameNext = next && next.senderId === msg.senderId && next.createdAt - msg.createdAt < GROUP_GAP;
-    rows.push({ type: 'msg', key: msg.id, msg, first: !samePrev, last: !sameNext });
-    prevMsg = msg;
+    // Every message is its own row, so two messages sent back to back keep the
+    // same spacing as any other pair instead of collapsing into a 2px seam.
+    rows.push({ type: 'msg', key: msg.id, msg, first: true, last: true });
   });
 
   return rows;
@@ -658,7 +653,10 @@ function makeStyles(colors) {
     },
     dayText: { color: colors.text3, fontFamily: fonts.medium, fontSize: type.xs },
 
-    msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, marginVertical: 2 },
+    // Every message is its own row now, so the gap between two of them is the
+    // sum of the two margins: 8px, the same spacing a message gets from one sent
+    // an hour later.
+    msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.xs, marginVertical: 4 },
     msgRowMine: { justifyContent: RTL ? 'flex-start' : 'flex-end' },
     // Reversed in LTR so the avatar lands on the outer (left) edge; in RTL the
     // normal row already draws the avatar on the left.
