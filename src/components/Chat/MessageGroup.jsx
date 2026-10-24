@@ -4,7 +4,7 @@ import EncryptedMedia from './EncryptedMedia.jsx';
 import MessageActionsMenu from './MessageActionsMenu.jsx';
 import VoiceBubble from './VoiceBubble.jsx';
 import VoiceWaveBubble from './VoiceWaveBubble.jsx';
-import { playableFromSrc } from '../../services/voice.js';
+import { isRecording, playableFromSrc } from '../../services/voice.js';
 import { formatSize } from '../../utils/format.js';
 
 function Highlight({ text, query }) {
@@ -40,7 +40,7 @@ function BubbleBody({ message, searchQuery, onOpenImage }) {
   if (message.type === 'audio' || message.type === 'voice') {
     // Two kinds of sound, two shapes: what came off a microphone is drawn as the
     // shape it made, and a file someone kept is played off a rail.
-    const Bubble = message.type === 'voice' ? VoiceWaveBubble : VoiceBubble;
+    const Bubble = isRecording(message) ? VoiceWaveBubble : VoiceBubble;
     return (
       <Bubble
         id={message.id}

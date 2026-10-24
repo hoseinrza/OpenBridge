@@ -3,7 +3,8 @@ import { updateGroup, uploadFile, resolveUrl, uploadPath, getSharedItems } from 
 import Avatar from '../ui/Avatar.jsx';
 import EncryptedMedia from '../Chat/EncryptedMedia.jsx';
 import VoiceBubble from '../Chat/VoiceBubble.jsx';
-import { playableFromSrc } from '../../services/voice.js';
+import VoiceWaveBubble from '../Chat/VoiceWaveBubble.jsx';
+import { isRecording, playableFromSrc } from '../../services/voice.js';
 import ProfileActions from './ProfileActions.jsx';
 import { formatSize } from '../../utils/format.js';
 import './ChatProfilePanel.css';
@@ -53,14 +54,8 @@ function sharedDate(value) {
 // from what this device has already decrypted. Newest first, like the server's
 // own pages, and a photo is carried as the descriptor its bubble opens.
 //
-// A recording and a song are the same kind of bytes and two different things to
-// keep, so neither shelf is decided by the label the composer wrote but by the
-// length the sender measured. This is the server's own rule, repeated here for
-// the rows it cannot read.
-function isRecording(m) {
-  return m.type === 'voice' || (m.type === 'audio' && m.durationMs != null);
-}
-
+// Which shelf a sound sits on is the same question the bubble asks, so both ask
+// it of one rule: see isRecording in services/voice.js.
 function localLists(messages) {
   const media = [];
   const voice = [];
@@ -685,12 +680,13 @@ function FileRow({ item }) {
   );
 }
 
-// Both shelves of sound play from the bubble the transcript already uses, since
-// they are the same thing to listen to. What differs is the name: a song carries
-// one its owner chose, and a recording carries one whatever wrote it picked —
-// so only the song is worth printing.
+// Both shelves of sound play from the bubble the transcript already uses, and in
+// the same two shapes: a recording keeps its waveform here too, a song keeps the
+// rail. What differs is the name: a song carries one its owner chose, and a
+// recording carries one whatever wrote it picked — so only the song is printed.
 function AudioRow({ item, kind }) {
   const meta = `${item.sender ?? '—'} · ${sharedDate(item.createdAt)}`;
+  const Bubble = kind === 'voice' ? VoiceWaveBubble : VoiceBubble;
   const player = item.attachment
     ? (
       <EncryptedMedia
@@ -701,7 +697,7 @@ function AudioRow({ item, kind }) {
       />
     )
     : (
-      <VoiceBubble
+      <Bubble
         id={item.key ?? item.id}
         durationMs={item.durationMs}
         resolve={() => playableFromSrc(item.src)}

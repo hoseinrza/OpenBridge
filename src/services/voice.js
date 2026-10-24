@@ -56,6 +56,23 @@ export function voiceRecordingSupported() {
 }
 
 /**
+ * Whether a message is a recording rather than a sound file someone kept.
+ *
+ * A recording and a song are the same kind of bytes and two different things to
+ * hold on to, so neither the bubble nor the shelves in a profile are decided by
+ * the label a composer wrote. The first answer is the flag a sender's own
+ * microphone set. Failing that — every row and descriptor written before a
+ * recording said so out loud, and every phone that still calls one AUDIO — a
+ * recording is an audio file somebody timed, because a song is not measured by
+ * the person who sends it. This is the server's own rule for its «ویس» shelf,
+ * applied where the client has to decide for itself.
+ */
+export function isRecording(message) {
+  return message?.type === 'voice'
+    || (message?.type === 'audio' && message?.durationMs != null);
+}
+
+/**
  * Squeezes however many measurements a recording made into the bars a bubble has.
  *
  * Each bar is the loudest moment inside its slice, and every one is measured
