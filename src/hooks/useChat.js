@@ -80,19 +80,13 @@ const MESSAGE_EXIT_MS = 240;
 // Which bubble an opened attachment draws. The rule is the MIME type the sender
 // wrote into its own descriptor, because an encrypted conversation gives the
 // server nothing to go on but those bytes — except for a recording, where even
-// the MIME lies: a voice note and a song are both audio.
-//
-// Two things tell them apart, in order of how much they can be trusted. The flag
-// a sender's own microphone set is the honest answer. Failing that — every
-// descriptor written before a recording said so out loud — a recording is an
-// audio file somebody timed, because a song is not measured by the person who
-// sends it. That is the same second rule the server's «ویس» shelf and the profile
-// panel already apply, so one message cannot be a voice note in one list and a
-// document in another.
-function attachmentKind(mime, voice, durationMs) {
+// the MIME lies: a voice note and a song are both audio. Only the flag the
+// sender's own microphone set can tell them apart here; a descriptor that predates
+// the flag is told apart by its length, which is what isRecording reads.
+function attachmentKind(mime, voice) {
   if (voice) return 'voice';
   if (mime?.startsWith('image/')) return 'image';
-  if (mime?.startsWith('audio/')) return durationMs == null ? 'audio' : 'voice';
+  if (mime?.startsWith('audio/')) return 'audio';
   return 'file';
 }
 
@@ -106,9 +100,7 @@ function normalizeEncrypted(message, peer) {
     : peer;
   return {
     id:             `e2ee-${message.seq}`,
-    type:           attachment
-      ? attachmentKind(attachment.mime, attachment.voice, attachment.durationMs)
-      : 'text',
+    type:           attachment ? attachmentKind(attachment.mime, attachment.voice) : 'text',
     text:           message.text,
     attachment,
     name:           attachment?.name ?? null,

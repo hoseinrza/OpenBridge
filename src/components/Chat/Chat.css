@@ -836,10 +836,12 @@ button.msg-sender {
    drawn before a byte of sound is fetched, and they are hidden from a screen
    reader: they say what a recording looked like, never how long it was or how far
    it has got. Those two numbers stay with the player.
-   The count and the weight are measured off the reference: forty bars, hairline
-   wide with as much air between them as not, and the loudest one filling the
-   track. Progress is the accent being eaten away rather than a second colour, so
-   a bubble nobody has listened to yet is exactly the picture it was sent as. */
+   The weight is measured off the reference, where a bar is as wide as the air
+   around it: forty of them fill the 197px this bubble leaves, at ~3px each, and
+   the loudest one reaches the top of a track 44px tall — the same 44:34 the
+   reference's 85px bars make against its 65px circle. Progress is the accent
+   being left behind rather than a second colour, so a bubble nobody has listened
+   to yet is exactly the picture it was sent as. */
 .voice-wave-bubble {
   --wave-bar: var(--accent);
   align-items: center;
@@ -864,7 +866,7 @@ button.msg-sender {
 .voice-wave-bars {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   width: 100%;
   min-width: 0;
 }
