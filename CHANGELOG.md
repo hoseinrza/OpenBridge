@@ -4,6 +4,30 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.5.3] - 2026-10-24
+
+### Changed
+- **ساعت پیام رفت آن‌طرفِ دکمهٔ پخش.** تا پیش از این، حباب ویسِ دریافتی ساعت را
+  دقیقاً زیر دایرهٔ پخش می‌گذاشت: قاعدهٔ «ساعت لبه‌ای را می‌گیرد که نام فرستنده
+  نمی‌گیرد» حباب ویس را هم می‌گرفت، در حالی که آنجا خودِ دایرهٔ پخش آن لبه را
+  اشغال می‌کند. حالا در هر حباب صوتی — ویس یا آهنگ، از من یا از دیگری — ساعت به
+  لبهٔ مخالفِ دکمهٔ پخش می‌رود.
+- **یک خطِ متا به‌جای دو خط.** در مرجع، مدتِ ویس و ساعتِ پیام یک خطِ پایینِ مشترک
+  دارند؛ اینجا مدت یک خط بود و ساعت یک خطِ دیگر، پس حباب یک خط بلندتر از شکلی
+  که کشیده می‌شد بود. هر دو برچسب حالا روی یک ارتفاع خط (۱۴px) بالانس شده‌اند و
+  ساعت روی همان خطِ مدت می‌نشیند، پس ارتفاع حباب ویس از ۹۲px به ۷۵px می‌آید.
+- **دایرهٔ پخش روی موج وسط می‌نشیند.** پیش‌تر نسبت به «ستون‌ها + خطِ مدت» وسط
+  می‌گرفت و ۸px پایین‌تر از مرکزِ موج می‌ایستاد؛ حالا روی همان ۴۴px ستون‌ها
+  تراز است.
+- اگر پیام صوتی واکنش داشته باشد، ساعت همان خطِ پایینِ خودش را نگه می‌دارد تا
+  روی چیپ‌های واکنش نیفتد. ریلِ فایل صوتی (آهنگ) فقط لبهٔ ساعت عوض شد: آنجا
+  مدت هم‌خطِ خودِ ریل است و خطِ اضافه‌ای وجود ندارد که بالانس شود.
+### Verified
+`npm run build` and `npm run test:e2ee` (17/17) are clean in the checkout this
+change was made in. `npm run lint` reports three errors there, in `ChatPage.jsx`
+and `SessionsModal.jsx` — two files this release does not contain, left in flight
+by another change in that same checkout.
+
 ## [1.5.2] - 2026-10-24
 
 ### Changed
@@ -33,10 +57,21 @@ carry one product version, so a release entry applies to every client.
   `VoiceWaveBubble` را نشان می‌دهند، نه ریل عمومی فایل‌های صوتی.
 - فاصلهٔ ستون‌های موج از 3px به 2px رسید تا 40 ستون در عرض 197px جا شوند.
 
-### Verified
-`npm run lint`, `npm run build` and `npm run test:e2ee` (17/17) are clean after
-the merge. The profile shelf and the waveform component share the same rule; no
-new live recording was captured.
+
+`npm run build` and `npm run test:e2ee` (17/17) are clean in the checkout this
+change was made in. `npm run lint` reports three errors there, in `ChatPage.jsx`
+and `SessionsModal.jsx` — two files this release does not contain, left in flight
+by another change in that same checkout.
+Geometry was read from the live app's DOM, not from a screenshot, because the
+in-app browser surface is hidden on this machine: an own voice bubble is 75px
+tall (was 92px), its play circle spans 417-451px inside the 44px track at
+412-456px, the duration sits at 314-346px and the clock at 193-225px on the same
+line. The same bubble with its row switched to incoming puts the circle at
+199-233px and the clock at 38-70px; before the change the clock landed at
+200-232px, directly under the circle. A reaction chip inserted into the bubble
+returns the clock to its own line below the chips (`position: static`), and a
+detached rail probe keeps `position: static` with the clock at the inline end
+and the play circle unshifted (`margin-block-start: 0`). Mobile was not touched.
 
 ## [1.5.0] - 2026-10-24
 
