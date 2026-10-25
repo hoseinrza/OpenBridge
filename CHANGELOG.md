@@ -4,6 +4,24 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.10.3] - 2026-10-25
+
+### Added
+- سه آزمون برای قواعد ورود با کد یک‌بارمصرف: هر کد فقط یک بار کار می‌کند،
+  درخواست تازه کدِ قبلی را باطل می‌کند، شماره به هر شکلی که نوشته شود (رقم
+  فارسی، قالب بین‌المللی، فاصله) به شکل یکسان ذخیره می‌شود.
+- آزمونی که برنامه را با `NODE_ENV=production` بالا می‌آورد و مطمئن می‌شود
+  درخواست کد با `503` رد می‌شود، هیچ `testCode` در پاسخ نیست و هیچ ردیفی در
+  جدول کدها ساخته نمی‌شود.
+
+### Docs
+- در `README.md` نقطهٔ اتصال پیامک ثبت شد: شعبهٔ `if (!OTP_TEST_MODE)` در
+  `AuthService.requestOtp`، اینکه `OTP_TEST_MODE` فقط از `NODE_ENV` می‌آید،
+  و کارهایی که هنگام افزودن سرویس‌دهنده باید هم‌زمان انجام شوند.
+
+### Verified
+- `node --test test/security.e2e.cjs`: ۴۱/۴۱ سبز در ۱۲٫۷ ثانیه.
+
 ## [1.10.2] - 2026-10-25
 
 ### Security

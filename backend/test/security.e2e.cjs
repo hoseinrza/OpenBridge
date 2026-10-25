@@ -2,7 +2,7 @@ require('reflect-metadata');
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { readFile, unlink } = require('node:fs/promises');
 const net = require('node:net');
 const { tmpdir } = require('node:os');
@@ -125,6 +125,16 @@ function freshIp() {
 
 function toPersianDigits(value) {
   return String(value).replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
+}
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(error => (error ? reject(error) : resolve(port)));
+    });
+  });
 }
 
 // KeyPackages are opaque bytes as far as the server is concerned, so the suite
@@ -1275,6 +1285,118 @@ test('expired and over-attempted OTP codes are rejected', async () => {
   });
   assert.equal(verified.status, 200, 'the next code is accepted again');
   assert.equal(verified.data.requiresSignup, true, 'a new number still has to sign up');
+});
+
+test('an OTP code works once and a new request retires the older one', async () => {
+  const phone = freshPhone();
+  otpPhones.push(phone);
+  const headers = freshIp();
+
+  const first = await api('/auth/otp/request', { method: 'POST', headers, body: { phone } });
+  assert.equal(first.status, 200);
+  const accepted = await api('/auth/otp/verify', {
+    method: 'POST',
+    headers,
+    body: { phone, code: first.data.testCode },
+  });
+  assert.equal(accepted.status, 200, 'the first code verifies the number');
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    headers,
+    body: { phone, code: first.data.testCode },
+  })).status, 401, 'the same code is refused a second time');
+
+  // A fresh request invalidates the code still outstanding, so an older code
+  // cannot be used after the person asks for another one.
+  const older = await api('/auth/otp/request', { method: 'POST', headers, body: { phone } });
+  const newer = await api('/auth/otp/request', { method: 'POST', headers, body: { phone } });
+  assert.equal(older.status, 200);
+  assert.equal(newer.status, 200);
+  assert.notEqual(older.data.testCode, newer.data.testCode, 'each request issues its own code');
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    headers,
+    body: { phone, code: older.data.testCode },
+  })).status, 401, 'the retired code no longer works');
+  assert.equal((await api('/auth/otp/verify', {
+    method: 'POST',
+    headers,
+    body: { phone, code: newer.data.testCode },
+  })).status, 200, 'only the newest code works');
+});
+
+test('an OTP request accepts the ways a person writes their number', async () => {
+  const canonical = freshPhone();
+  otpPhones.push(canonical);
+  const headers = freshIp();
+
+  const persian = await api('/auth/otp/request', {
+    method: 'POST',
+    headers,
+    body: { phone: toPersianDigits(canonical) },
+  });
+  assert.equal(persian.status, 200, 'Persian digits are accepted');
+  assert.equal(persian.data.phone, canonical, 'stored in the canonical form');
+
+  const spaced = await api('/auth/otp/request', {
+    method: 'POST',
+    headers,
+    body: { phone: `+98 ${canonical.slice(1, 4)} ${canonical.slice(4)}` },
+  });
+  assert.equal(spaced.status, 200, 'the international form is accepted');
+  assert.equal(spaced.data.phone, canonical, 'same canonical form');
+});
+
+test('a production build refuses OTP requests and never returns a test code', async () => {
+  assert.ok(process.env.DATABASE_URL, 'the suite must hand DATABASE_URL to the child process');
+  const port = await freePort();
+  const child = spawn(process.execPath, [join(__dirname, '..', 'dist', 'main.js')], {
+    // Outside the backend directory, so the child cannot load backend/.env and
+    // has to rely on the environment it was given — as a deployment does.
+    cwd: tmpdir(),
+    env: { ...process.env, NODE_ENV: 'production', PORT: String(port) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  let refusedPhone;
+  child.stdout.on('data', chunk => { output += chunk; });
+  child.stderr.on('data', chunk => { output += chunk; });
+
+  try {
+    let healthy = false;
+    for (let attempt = 0; attempt < 150 && !healthy; attempt += 1) {
+      if (child.exitCode !== null) throw new Error(`production process exited early: ${output}`);
+      try {
+        healthy = (await fetch(`http://127.0.0.1:${port}/api/health`)).ok;
+      } catch {
+        // Still booting.
+      }
+      if (!healthy) await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(healthy, true, `production process never became healthy: ${output}`);
+
+    refusedPhone = freshPhone();
+    const response = await fetch(`http://127.0.0.1:${port}/api/auth/otp/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: refusedPhone }),
+    });
+    assert.equal(response.status, 503, 'production has no way to deliver a code');
+    const body = await response.json();
+    assert.equal(Object.prototype.hasOwnProperty.call(body, 'testCode'), false, 'no test code in the body');
+    assert.equal(JSON.stringify(body).includes('testCode'), false, 'no test code field anywhere');
+  } finally {
+    child.kill();
+    await new Promise(resolve => {
+      if (child.exitCode !== null) return resolve();
+      child.once('exit', resolve);
+      setTimeout(resolve, 5000);
+    });
+  }
+
+  // A refused request must not leave a code row behind for a number nobody
+  // could ever verify.
+  assert.equal(await prisma.otpCode.count({ where: { phone: refusedPhone } }), 0);
 });
 
 test('legacy accounts whose username is their phone still sign in by OTP', async () => {

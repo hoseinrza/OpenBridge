@@ -54,6 +54,15 @@
   `NODE_ENV=production` it answers `503` («ارسال پیامک هنوز فعال نشده است») and
   creates no code. Sign-up therefore works only in development until a gateway
   is integrated.
+  The integration point is `AuthService.requestOtp`
+  (`backend/src/auth/auth.service.ts`): the `if (!OTP_TEST_MODE)` branch that
+  currently answers `503` is where the provider call belongs. `OTP_TEST_MODE` is
+  derived only from `NODE_ENV` (`backend/src/config/env.ts`), so no deployment
+  variable can switch the test code back on. When adding a provider: send after
+  the code row is stored, delete or expire that row if delivery fails, and remove
+  `testCode` from the response in the same change. `backend/test/security.e2e.cjs`
+  boots the API with `NODE_ENV=production` and fails if the response ever carries
+  a test code again.
 - 🔓 **Content is not end-to-end encrypted.** Sealing happens on the server, with
   a key the server holds, so an operator with `CONTENT_KEY` and the database can
   read every message and file. The trade is deliberate: it buys encryption at rest
