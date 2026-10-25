@@ -260,6 +260,15 @@ day; the installed versions in the lockfile back them up.
 - The roadmap's Phase 1 Task 2 acceptance is still not met while `2e` is red;
   the instrumentation needs one CI run on a branch that CI watches.
 
+### 5.4 Test and account cleanup (low, for Phase 1.9)
+
+The local database after the audit runs held 24 conversations with no
+participants and no messages. They came from the e2e suites, which delete their
+temporary users (cascading the participant rows) but not the conversations those
+users created. The rows are unreachable and were removed by hand, but a repeated
+run grows the table. The suites should delete their conversations explicitly, or
+a maintenance query should drop participant-less conversations.
+
 ### 5.4 Security findings carried forward (assessed, not new)
 
 - Server can read all message content and call media by design; claims must stay
@@ -347,6 +356,7 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Dependency upgrade (`bcrypt@6`, `multer@2.5.0`, `body-parser`/`qs` overrides) | `npm run build` PASS; `npm run test:e2e` 103/103; `npm audit --omit=dev --audit-level=high` exit 0; `npm ls` shows the pinned versions. §5.1 |
 | 2026-10-25 | Maestro step instrumentation | `.github/workflows/ci.yml` (`Run Maestro on the emulator`, artifact paths). No CI run yet. §5.2 |
 | 2026-10-25 | Stale CI claims corrected | `README.md`, `docs/SECURITY.md`. §5.3 |
+| 2026-10-25 | Lockfile root versions synced to 1.10.2; orphan test conversations removed | `package-lock.json`, `backend/package-lock.json`, `mobile/package-lock.json` (2 lines each); 24 participant-less conversations deleted locally. §5.4 |
 
 Next update: after a CI run exercises the Maestro instrumentation (CI watches
 PRs to `main` and pushes to `main`; a push to `beta/phase-1` does not trigger
