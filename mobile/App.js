@@ -19,6 +19,7 @@ import ChatProfileScreen from './src/screens/ChatProfileScreen';
 import ChatHeaderTitle from './src/components/ChatHeaderTitle';
 import NewGroupScreen from './src/screens/NewGroupScreen';
 import ContactsScreen from './src/screens/ContactsScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -72,6 +73,7 @@ function RootNavigator() {
           />
           <Stack.Screen name="NewGroup" component={NewGroupScreen} options={{ title: 'گروه جدید' }} />
           <Stack.Screen name="Contacts" component={ContactsScreen} options={{ title: 'مخاطبین' }} />
+          <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'تنظیمات' }} />
         </>
       )}
     </Stack.Navigator>

@@ -30,6 +30,15 @@ export default function ChatListScreen({ navigation }) {
       headerRight: () => (
         <View style={styles.headerActions}>
           <Pressable
+            onPress={() => navigation.navigate('Settings')}
+            hitSlop={10}
+            style={styles.headerBtn}
+            accessibilityRole="button"
+            accessibilityLabel="تنظیمات"
+          >
+            <FontAwesome6 name="gear" size={17} color={colors.text1} />
+          </Pressable>
+          <Pressable
             onPress={() => navigation.navigate('Contacts')}
             hitSlop={10}
             style={styles.headerBtn}
