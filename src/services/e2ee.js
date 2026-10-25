@@ -20,11 +20,6 @@ import { connectSocket, emitWithAck } from './socket.js';
 
 let state = null;
 let starting = null;
-const listeners = new Set();
-
-function notify() {
-  for (const listener of listeners) listener(e2eeConnected());
-}
 
 function makeTransport(socket) {
   return {
@@ -61,13 +56,10 @@ export function initE2ee(me) {
       label: 'web',
     });
     socket.on('connect', () => {
-      notify();
       // Envelopes are not replayed after a disconnect, and a missed one stops a
       // conversation's stream, so every chat is walked, not only the visible one.
       void catchUpAll();
     });
-    socket.on('disconnect', notify);
-    socket.on('connect_error', notify);
     if (previous) {
       previous.client.close();
       previous.socket.disconnect();
@@ -82,22 +74,6 @@ export function initE2ee(me) {
 /** The live client, or null while nobody is signed in. */
 export function getE2ee() {
   return state?.client ?? null;
-}
-
-/** Creates a group whose first envelope is the Welcome that opens it. */
-export async function createEncryptedGroup(me, name, memberIds) {
-  const client = await initE2ee(me);
-  return client.createEncryptedGroupChat(name, memberIds);
-}
-
-export function e2eeConnected() {
-  return Boolean(state?.socket?.connected);
-}
-
-/** Watch the envelope connection, so a send can be refused before it is lost. */
-export function onE2eeConnection(handler) {
-  listeners.add(handler);
-  return () => listeners.delete(handler);
 }
 
 /**

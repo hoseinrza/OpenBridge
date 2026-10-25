@@ -184,11 +184,14 @@ export default function ChatProfilePanel({
     }
   }, [chat.id]);
 
-  // A tab is fetched the first time it is opened, never every tab at once.
+  // A tab is fetched the first time it is opened, never every tab at once. An
+  // encrypted chat is fetched too: the server now holds the messages written
+  // since the server-key switch, even though its older history lives only in
+  // this device's MLS envelopes.
   useEffect(() => {
-    if (encrypted || pages[tab] || tab === MEMBERS_TAB.kind) return;
+    if (pages[tab] || tab === MEMBERS_TAB.kind) return;
     loadPage(tab);
-  }, [tab, encrypted, pages, loadPage]);
+  }, [tab, pages, loadPage]);
 
   // The dialog is only reachable by keyboard once it holds focus.
   useEffect(() => {
@@ -276,9 +279,13 @@ export default function ChatProfilePanel({
   const members = chat.participants ?? [];
   const shared = SHARED_TABS.find(entry => entry.kind === tab);
   const page = pages[tab] ?? pageState();
-  const sharedItems = encrypted ? (local?.[tab] ?? []) : page.items;
-  // A local list is never in flight: it is whatever this device already holds.
-  const sharedStatus = encrypted ? 'ready' : page.status;
+  // A legacy encrypted chat shows both shelves: rows the server can now list
+  // and the local-only attachments this device opened from MLS envelopes.
+  const sharedItems = encrypted ? [...(local?.[tab] ?? []), ...page.items] : page.items;
+  // Past local items are ready immediately; otherwise the server page decides.
+  const sharedStatus = encrypted
+    ? ((local?.[tab]?.length ?? 0) > 0 || page.status === 'ready' ? 'ready' : page.status)
+    : page.status;
 
   // The card holds what the conversation says about itself. A phone number is
   // not one of those rows yet: showing a number to a stranger is a rule the
@@ -497,9 +504,7 @@ export default function ChatProfilePanel({
                   <>
                     {encrypted && (
                       <p className="panel-shared-note" role="note">
-                        <span>{isGroup
-                          ? 'این فهرست پیام‌هایی است که روی همین دستگاه رمزگشایی شده؛ سرور هیچ‌کدام را نمی‌بیند.'
-                          : 'این فهرست فقط پیام‌هایی را نشان می‌دهد که روی همین دستگاه رمزگشایی شده.'}</span>
+                        <span>در کنار فایل‌های سرور، پیوست‌های پیام‌های قدیمی همین دستگاه هم نشان داده می‌شوند.</span>
                       </p>
                     )}
 

@@ -10,6 +10,7 @@ const { randomUUID } = require('node:crypto');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-least-32-characters-long';
+process.env.CONTENT_KEY = process.env.CONTENT_KEY || 'Y2ktb25seS1jb250ZW50LWtleS0zMi1ieXRlcy0wMDA=';
 process.env.LIVEKIT_URL = 'ws://127.0.0.1:7880';
 process.env.LIVEKIT_API_KEY = 'test-api-key';
 process.env.LIVEKIT_API_SECRET = 'test-api-secret-at-least-32-characters';

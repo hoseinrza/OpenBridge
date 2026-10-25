@@ -1,6 +1,7 @@
 # Server-key content encryption for multi-device access
 
-Status: accepted 2026-10-24. Phase 1 (sessions) implemented; phases 2–4 pending.
+Status: accepted 2026-10-24. Phases 1 (sessions) and 2 (content) implemented in
+`feat/session-devices`; phases 3–4 pending.
 
 This supersedes the “no escrow, no server-side recovery” rule in
 `docs/engineering/E2EE_DESIGN.md` §4. That document still describes the MLS
@@ -59,6 +60,31 @@ Implemented in `feat/session-devices`.
   the cooldown, except for signing itself out.
 - A new login emits `session:new` to the account’s other devices; the web app
   also polls the list so an offline device sees the alert when it returns.
+
+## Content encryption (phase 2)
+
+Implemented in `feat/session-devices`.
+
+- `backend/src/common/content-crypto.ts` holds the format and the key
+  derivation; `ContentCrypto` is the Nest provider that reads `CONTENT_KEY` at
+  boot. A missing key stops the process instead of writing plaintext.
+- Text is stored as `obx1.<iv>.<tag>.<ciphertext>` (base64url); files as magic
+  `OBX1` + IV + tag + ciphertext. Anything without the marker is legacy
+  plaintext or a legacy encrypted blob and passes through untouched. This is why
+  there is no `contentVersion` column: the marker is in the payload.
+- Message text is sealed on send and on edit; every read path (history, quotes,
+  previews, link search) decrypts. Encrypted conversations accept ordinary sends
+  again: a chat can hold MLS envelopes from before and sealed rows from now,
+  and its unread count is the sum of both.
+- Conversation previews now come from the server for every chat. The client
+  still reads its own decrypted history and keeps whichever preview is newer,
+  because an MLS-only chat has nothing newer on the server.
+- Uploads are scanned as plaintext, then sealed under their stored filename
+  before the id is returned. Downloads decrypt before serving and support a
+  single byte range, so a recording can still seek. The old
+  `/uploads/encrypted/*` paths are untouched for history.
+- The web client no longer uses MLS for new sends; `shared/e2ee` remains only to
+  read old history.
 
 ## Phases
 

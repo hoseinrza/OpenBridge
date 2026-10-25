@@ -36,7 +36,7 @@ async function copyText(text) {
 // A zero-size anchor at the pointer and the bubble's own rect are the same thing
 // to this component: a place the menu hangs itself on.
 export default function MessageActionsMenu({
-  anchor, message, chatEncrypted, held, onReact, onReply, onForward, onEdit, onDelete, onToast, onClose,
+  anchor, message, held, onReact, onReply, onForward, onEdit, onDelete, onToast, onClose,
 }) {
   const [step, setStep] = useState('actions'); // actions | delete
   const [placed, setPlaced] = useState(null);
@@ -49,7 +49,7 @@ export default function MessageActionsMenu({
   // are still the sender's: the message's own sequence is what a control
   // addresses, and the client refuses one aimed at somebody else's message.
   const canEdit = isMine && message.type === 'text'
-    && (message.encrypted ? Number.isInteger(message.seq) : !chatEncrypted);
+    && (message.encrypted ? Number.isInteger(message.seq) : true);
   const canDeleteForEveryone = isMine && (!message.encrypted || Number.isInteger(message.seq));
   const canReact = !message.encrypted;
   // An encrypted attachment only decrypts inside its own conversation, so a

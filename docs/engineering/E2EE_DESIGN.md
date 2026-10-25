@@ -1,5 +1,13 @@
 # OpenBridge End-to-End Encryption — Design Proposal
 
+> **Superseded for new content (2026-10-25).** The server-key design in
+> `docs/superpowers/specs/2026-10-24-server-key-multidevice-design.md` replaces
+> the “the server cannot read” model for everything written from now on:
+> message text and uploaded bytes are encrypted at rest under a server-held
+> `CONTENT_KEY`, and any signed-in device of the account can read them. This
+> document stays as the design record for the MLS history already deployed;
+> phase 3 covers its backfill and phase 4 covers calls.
+
 Status: **Phase 3 landed on web — direct chats and groups explicitly created as
 encrypted are E2EE there; mobile holds no keys and locks those chats instead of
 sending plaintext into them**

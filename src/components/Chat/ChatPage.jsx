@@ -27,6 +27,9 @@ function previewFromServer(lastMessage, myId) {
     text:       lastMessage.text ?? '',
     fileName:   lastMessage.fileName ?? null,
     senderName: lastMessage.sender?.id === myId ? 'شما' : (lastMessage.sender?.name ?? null),
+    // Used to pick between this preview and one built from the legacy MLS
+    // history: a mixed chat can have both, and the newer message wins.
+    at:         lastMessage.createdAt ? new Date(lastMessage.createdAt).getTime() : 0,
   };
 }
 
@@ -51,6 +54,7 @@ function previewFromEncrypted(message, chat, myId) {
     senderName: message.mine || message.senderId === myId
       ? 'شما'
       : (chat.participants?.find(p => p.id === message.senderId)?.name ?? null),
+    at:         message.at ? new Date(message.at).getTime() : 0,
   };
 }
 
@@ -71,9 +75,10 @@ async function directConversationId(peerId, cache) {
   }
 }
 
-// An encrypted transcript never reaches the server in readable form, so the
-// preview comes from this device's own decrypted history. Direct chats get
-// their conversation id from the same read-only probe the chat itself uses.
+// A chat that once used MLS keeps its older messages only in this device's own
+// decrypted history, so its newest line can be newer than anything the server
+// has. Direct chats get their conversation id from the same read-only probe the
+// chat itself uses.
 async function addEncryptedPreviews(chats, myId, idCache) {
   if (!chats.some(chat => chat.encrypted)) return chats;
   const client = await initE2ee({ id: myId }).catch(() => null);
@@ -85,7 +90,12 @@ async function addEncryptedPreviews(chats, myId, idCache) {
       : await directConversationId(chat.id, idCache);
     if (!conversationId) return chat;
     const last = await client.lastMessage(conversationId).catch(() => null);
-    return last ? { ...chat, preview: previewFromEncrypted(last, chat, myId) } : chat;
+    if (!last) return chat;
+    // The server now previews newer messages from the same chat. Keep whichever
+    // message is more recent instead of letting the local history always win.
+    const local = previewFromEncrypted(last, chat, myId);
+    if (chat.preview?.at && local?.at && chat.preview.at > local.at) return chat;
+    return { ...chat, preview: local };
   }));
 }
 
@@ -212,8 +222,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
 
   // A group's name, photo and bio are server metadata, so an edit made on any
   // member's device arrives as the whole row and is applied to both the list and
-  // the chat on screen — no reload, and the encrypted preview of a group whose
-  // wire carries no plaintext stays the one this device already has.
+  // the chat on screen — no reload, and a preview the row did not carry stays
+  // the one this device already has.
   const handleGroupUpdated = useCallback((wire) => {
     const group = normalizeGroup(wire);
     if (!group?.id) return;
@@ -229,7 +239,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const {
     messages, isTyping, typingPeer, connected,
     historyState, historyError, retryHistory,
-    encrypted, secureMode, encryptionNote, blockedReason,
+    encrypted, secureMode,
     sendMessage, forwardMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
   } = useChat(activeUser, currentUser, handleIncoming, handleGroupUpdated);
 
@@ -496,7 +506,6 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               searchQuery={searchQuery}
               encrypted={encrypted}
               secureMode={secureMode}
-              encryptionNote={encryptionNote}
               historyState={historyState}
               historyError={historyError}
               onRetryHistory={retryHistory}
@@ -509,7 +518,6 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               onSend={sendFromComposer}
               onTyping={notifyTyping}
               connected={connected}
-              blocked={blockedReason}
               editing={editing}
               onSaveEdit={saveEdit}
               onCancelEdit={cancelEdit}
@@ -584,7 +592,6 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
 
       {newChatOpen && (
         <NewChatModal
-          currentUser={currentUser}
           onClose={() => setNewChatOpen(false)}
           onSelect={handleStartConversation}
           onGroupCreated={handleGroupCreated}

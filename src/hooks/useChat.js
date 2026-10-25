@@ -2,16 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   apiCall, fetchGroupMessages, fetchMessages, resolveUrl, uploadFile,
 } from '../services/api.js';
-import { uploadEncrypted } from '../services/attachments.js';
-import { packAttachment } from '../../shared/e2ee/attachments.js';
-import { e2eeConnected, getE2ee, initE2ee, onE2eeConnection } from '../services/e2ee.js';
+import { getE2ee, initE2ee } from '../services/e2ee.js';
 import { connectSocket, emitWithAck } from '../services/socket.js';
 
-// How a direct conversation is carried on this device:
+// What this device can do with a conversation's legacy MLS history:
 //   checking     the flag has not been read from the server yet
-//   open         MLS group is held here; text is encrypted before it leaves
-//   plain        ordinary plaintext, and a reason when encryption was refused
-//   unavailable  the conversation is encrypted but this device holds no keys
+//   open         this device holds the group's keys and reads the old envelopes
+//   plain        no MLS group at all; every message is a server row
+//   unavailable  the chat has old envelopes this device holds no keys for
+// New messages no longer travel on this path; it only decides whether the
+// history written before server-key content is readable here.
 const timeIn = (value) => new Date(value).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
 
 // Reactions arrive as the rows behind them, one per person per message, because
@@ -180,12 +180,6 @@ function inActiveChat(target, me, msg) {
     || (msg.senderId === target.id && msg.receiverId === me.id);
 }
 
-// The one answer that means "there is nobody to invite": a peer whose devices
-// have never registered key material. Everything else — a broken package, a
-// refused group, a missing envelope — is a problem to report, not a reason to
-// quietly send readable text.
-const peerWithoutKeys = (error) => error?.code === 'no-keys' || error?.status === 404;
-
 // An encrypted row has no server id, so its bubble id carries the sequence the
 // controls address. Anything else is a plaintext id.
 const encryptedSeq = (id) => {
@@ -197,7 +191,6 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   const [messages,     setMessages]     = useState([]);
   const [typingPeer,   setTypingPeer]   = useState(null);
   const [connected,    setConnected]    = useState(false);
-  const [secureUp,     setSecureUp]     = useState(() => e2eeConnected());
   const [secure,       setSecure]       = useState(null);
   const [historyState, setHistoryState] = useState('idle'); // idle | loading | ready | error
   const [historyError, setHistoryError] = useState('');
@@ -214,8 +207,6 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   const secureRef      = useRef(null);
   const openingRef     = useRef(false);
   const refreshHistoryRef = useRef(() => {});
-  const encryptedSendRef  = useRef(() => Promise.resolve({ ok: true }));
-  const attachmentSendRef = useRef(() => Promise.reject(new Error('رمزنگاری فایل آماده نیست')));
 
   // Keep refs in sync after render; writing refs during render is unsafe.
   useEffect(() => {
@@ -226,8 +217,9 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     secureRef.current      = secure;
 
     // Pull anything that was persisted while the socket was down and merge it
-    // with live state. Only for conversations carried in plaintext: an encrypted
-    // stream catches up through the MLS client, never through the message table.
+    // with live state. Every message written now is a server row, including in
+    // a chat that still carries older MLS envelopes, so this path is the one
+    // that keeps a mixed transcript current.
     refreshHistoryRef.current = () => {
       const target = targetRef.current;
       const me     = currentUserRef.current;
@@ -235,71 +227,6 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
       fetchTargetMessages(target)
         .then(msgs => setMessages(prev => mergeMessages(prev, fromServer(msgs, me.id))))
         .catch(() => {});
-    };
-
-    encryptedSendRef.current = async (target, text, extra = {}, active = true) => {
-      const client = await initE2ee({ id: currentUserRef.current.id });
-      const held = active ? secureRef.current?.conversationId : null;
-      const opened = held
-        ? null
-        : await (isGroup(target) ? client.openGroup(target.id) : client.openDirect(target.id));
-      // A group is encrypted for its whole life or not at all; an ordinary one
-      // has no group state here, so the caller falls back to the plaintext path
-      // instead of trying to encrypt into a conversation that never joined one.
-      if (!held && opened && opened.e2ee === false) return { ok: false, notEncrypted: true };
-      const conversationId = held ?? opened.conversationId;
-      await client.send(conversationId, {
-        text,
-        reply: extra.reply ?? null,
-        forward: extra.forward ?? null,
-      });
-      const history = await client.history(conversationId);
-      if (active) {
-        setSecure({ mode: 'open', conversationId, error: null });
-        setMessages(prev => mergeMessages(prev, history.map(m => normalizeEncrypted(m, target))));
-        clearTimeout(typingTimerRef.current);
-        socketRef.current?.emit('typing:stop', targetPayload(target));
-      }
-      return { ok: true };
-    };
-
-    // The order is the safety of this path: the group exists before a byte is
-    // uploaded, so a peer with no keys to invite never leaves an orphan blob on
-    // the server, and the file is encrypted before anything is sent at all.
-    attachmentSendRef.current = async (target, file, durationMs, voice, peaks, extra = {}) => {
-      const client = await initE2ee({ id: currentUserRef.current.id });
-      const opened = secureRef.current?.conversationId
-        ? null
-        : await (isGroup(target) ? client.openGroup(target.id) : client.openDirect(target.id));
-      const conversationId = secureRef.current?.conversationId ?? opened.conversationId;
-      const { id, key, iv } = await uploadEncrypted(file, conversationId);
-      await client.send(conversationId, packAttachment({
-        blob: id,
-        name: file.name,
-        mime: file.type || 'application/octet-stream',
-        size: file.size,
-        // Travels inside the envelope rather than as a row: an encrypted
-        // conversation has no message table entry for the server to measure.
-        durationMs: durationMs ?? null,
-        // The same reason the length is here rather than on a row. A descriptor
-        // that says nothing about its origin reads as an uploaded file, which is
-        // why the composer has to say «microphone» out loud.
-        voice: voice === true,
-        // The bars the composer's bubble will draw. They ride inside the envelope
-        // for the same reason the length does: the server is never told what this
-        // recording looked like, so it cannot be a column on a row.
-        peaks: peaks ?? null,
-        key,
-        iv,
-        reply: extra.reply ?? null,
-        forward: extra.forward ?? null,
-      }));
-      const history = await client.history(conversationId);
-      setSecure({ mode: 'open', conversationId, error: null });
-      setMessages(prev => mergeMessages(prev, history.map(m => normalizeEncrypted(m, target))));
-      clearTimeout(typingTimerRef.current);
-      socketRef.current?.emit('typing:stop', targetPayload(target));
-      return { ok: true };
     };
   });
 
@@ -446,13 +373,6 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     };
   }, [currentUserId]);
 
-  // ── Encrypted transport status (its own connection, see services/e2ee.js) ──
-  useEffect(() => {
-    if (!currentUserId) return undefined;
-    setSecureUp(e2eeConnected());
-    return onE2eeConnection(setSecureUp);
-  }, [currentUserId]);
-
   // ── Decide how this conversation is carried, and join it if it is open ──
   useEffect(() => {
     const target = targetRef.current;
@@ -578,15 +498,15 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   useEffect(() => {
     const target = targetRef.current;
     if (!target) return;
+    // Server rows are read on every device, key or no key; the MLS mark is a
+    // second stream that only a device holding the old group can advance.
     if (secure?.mode === 'open') {
       getE2ee()?.markRead(secure.conversationId).catch(() => {});
-      return;
     }
-    if (secure?.mode === 'unavailable') return;
     if (socketRef.current) socketRef.current.emit('messages:read', readPayload(target));
   }, [targetId, secure]);
 
-  // ── Load the plaintext part of the history ────────────
+  // ── Load the server part of the history ───────────────
   useEffect(() => {
     const target = targetRef.current;
     if (!target || !currentUserId) return undefined;
@@ -614,8 +534,11 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
 
   // ── Send ─────────────────────────────────────────────
   // `targetOverride` exists for forwarding: the same message is sent to a chat
-  // that is not the one on screen, so encryption is worked out for that
-  // destination instead of the active chat's state.
+  // that is not the one on screen.
+  //
+  // Every message now takes the server path, including into a conversation the
+  // old MLS scheme marked encrypted. Reading its older envelopes is a separate,
+  // best-effort job, and a device that cannot open them can still talk.
   const sendMessage = useCallback(async (payload, targetOverride = null) => {
     const msg = typeof payload === 'string' ? { type: 'text', text: payload } : payload;
     if (msg.type === 'text' && !msg.text?.trim()) return { ok: false, error: '' };
@@ -623,60 +546,15 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     const target = targetOverride ?? targetRef.current;
     if (!target) return { ok: false, error: 'گفتگویی باز نیست' };
     const active = targetRef.current?.id === target.id;
-    const status = active ? secureRef.current : null;
-    const extra = { reply: msg.reply ?? null, forward: msg.forward ?? null };
-
-    if (active) {
-      if (status?.mode === 'unavailable') return { ok: false, error: status.reason };
-      if (status?.mode === 'checking') {
-        // Sending now would put readable text into a conversation the server may
-        // already have marked encrypted, which is a send the server must refuse.
-        return { ok: false, error: 'لحظه‌ای صبر کن، وضعیت رمزنگاری این گفتگو در حال بررسی است' };
-      }
-    }
-
-    // Text is encrypted whenever this device holds the conversation's keys. A
-    // plaintext direct chat is negotiated into one by sending; a group is only
-    // ever encrypted by its creator, so a plaintext group stays plaintext. A
-    // destination that is not on screen is probed, and its answer decides.
-    if (msg.type === 'text' && (!active || status?.mode === 'open'
-      || (!isGroup(target) && status?.mode === 'plain'))) {
-      try {
-        const result = await encryptedSendRef.current(target, msg.text.trim(), extra, active);
-        if (!result?.notEncrypted) return result;
-      } catch (error) {
-        if (!peerWithoutKeys(error) || isGroup(target)) {
-          return { ok: false, error: error.message || 'رمزنگاری یا ارسال پیام ناموفق بود' };
-        }
-        if (active) setSecure(prev => ({ ...(prev ?? {}), mode: 'plain', reason: error.message }));
-      }
-    }
-
-    // A file follows the same rule as text: once the conversation carries
-    // envelopes, the bytes are encrypted on this device before they are sent,
-    // and there is no plaintext attachment path left to fall back into.
-    if (msg._file && active && (status?.mode === 'open'
-      || (!isGroup(target) && status?.mode === 'plain'))) {
-      try {
-        return await attachmentSendRef.current(
-          target, msg._file, msg.durationMs, msg.type === 'voice', msg.peaks, extra,
-        );
-      } catch (error) {
-        if (!peerWithoutKeys(error) || isGroup(target)) {
-          return { ok: false, error: error.message || 'رمزنگاری یا ارسال فایل ناموفق بود' };
-        }
-        setSecure(prev => ({ ...(prev ?? {}), mode: 'plain', reason: error.message }));
-      }
-    }
 
     const socket = socketRef.current;
     if (!socket?.connected) {
       return { ok: false, error: 'اتصال به سرور برقرار نیست؛ چند لحظه بعد دوباره تلاش کن' };
     }
 
-    // A quote is a server row id; the id of an encrypted message is a local
-    // sequence and means nothing to the message table. When a send has fallen
-    // back to plaintext the quote is dropped rather than pointed at nothing.
+    // A quote points at a server row. A legacy MLS message has only a local
+    // sequence as an id, so there is nothing for the server to join and the
+    // quote is dropped instead of pointing at a row that does not exist.
     const replyToId = msg.reply && encryptedSeq(msg.reply.id) === null
       ? msg.reply.id
       : undefined;
@@ -817,11 +695,10 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   }, []);
 
   // ── Forward ──────────────────────────────────────────
-  // The destination decides how the copy travels: the same send path is used,
-  // so a message forwarded into an encrypted chat is encrypted there, and one
-  // forwarded into a plaintext chat stays plaintext. A file cannot cross that
-  // line: an encrypted attachment's bytes are only readable inside its own
-  // conversation, so forwarding one is refused instead of silently broken.
+  // Every destination takes the same server path now, so a forwarded message
+  // lands the same way whether or not the chat was created under the old MLS
+  // scheme. Only a legacy attachment is refused: its bytes are readable inside
+  // its own conversation alone.
   const forwardMessage = useCallback(async (message, target) => {
     if (!message || !target) return { ok: false, error: 'گفتگوی مقصد مشخص نیست' };
     if (message.leaving) return { ok: false, error: '' };
@@ -836,28 +713,12 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
         text: message.text,
         forward: sourceName ? { fromName: sourceName } : null,
       }, target);
-      // A plaintext send announces itself through `message:new`; an encrypted
-      // one is its own echo and is skipped, so the destination's preview is
-      // refreshed here instead.
       if (result.ok) onIncomingRef.current?.();
       return result;
     }
 
     if (message.attachment || !message.fileUrl) {
       return { ok: false, error: 'پیوست‌های رمزنگاری‌شده را نمی‌شود فروارد کرد' };
-    }
-
-    const client = await initE2ee({ id: currentUserRef.current?.id }).catch(() => null);
-    let destinationEncrypted;
-    try {
-      destinationEncrypted = isGroup(target)
-        ? (await client?.openGroup(target.id))?.e2ee === true
-        : (await apiCall(`messages/e2ee/direct/${target.id}`))?.e2ee === true;
-    } catch {
-      return { ok: false, error: 'وضعیت رمزنگاری گفتگوی مقصد بررسی نشد؛ فایل فروارد نشد' };
-    }
-    if (destinationEncrypted) {
-      return { ok: false, error: 'فایل‌ها به گفتگوی رمزنگاری‌شده فروارد نمی‌شوند' };
     }
 
     const socket = socketRef.current;
@@ -890,24 +751,19 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   }, []);
 
   const open = secure?.mode === 'open';
-  const unavailable = secure?.mode === 'unavailable' ? secure.reason : null;
-  // Which connection a send needs depends on how this conversation is carried,
-  // so the composer waits for the right one instead of the chat socket alone.
-  const transportUp = open ? secureUp : connected;
 
   return {
     messages, isTyping: !!typingPeer, typingPeer,
-    connected: transportUp,
-    historyState: secure?.mode === 'checking' ? 'loading' : (unavailable ? 'error' : historyState),
-    historyError: unavailable ?? historyError,
+    // Sending always uses the chat socket now, so the composer follows that
+    // connection alone.
+    connected,
+    historyState,
+    historyError,
     retryHistory,
-    encrypted: open,
-    // The notice at the top of a chat says different things for a chat that is
-    // encrypted, one that will be on the first send, and one that cannot be.
+    // Whether this conversation was created under the old MLS scheme. Its older
+    // rows are opened here when this device can; its new messages are not.
+    encrypted: targetUser?.encrypted === true || open,
     secureMode: secure?.mode ?? null,
-    // Why a chat that could be encrypted is not, shown whenever it is not.
-    encryptionNote: secure?.mode === 'plain' ? (secure.reason ?? null) : null,
-    blockedReason: unavailable,
     sendMessage, forwardMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
   };
 }

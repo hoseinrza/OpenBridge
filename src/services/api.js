@@ -290,34 +290,8 @@ export async function uploadFile(file) {
 }
 
 // ── Client-encrypted attachments ──────────────────────
-// Bytes the sender has already encrypted: the server stores them without
-// looking, so no MIME type, file name or readable content is ever sent with
-// them. Only the conversation the blob belongs to travels in the field, because
-// that is what authorizes both the write and every later download.
-export async function uploadEncryptedFile(cipherBytes, conversationId) {
-  const form = new FormData();
-  form.append('conversationId', conversationId);
-  form.append('file', new Blob([cipherBytes], { type: 'application/octet-stream' }));
-
-  const send = () => fetch(`${BASE}/uploads/encrypted`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token()}` },
-    body: form,
-  });
-
-  let res = await send();
-  if (res.status === 401) {
-    try {
-      await refreshSession();
-      res = await send();
-    } catch {
-      handleUnauthorized('/uploads/encrypted');
-    }
-  }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message ?? 'آپلود فایل رمزنگاری‌شده ناموفق بود');
-  return data; // { id, url }
-}
+// Read side only: files uploaded before server-key content are opened by their
+// own device because the key travelled inside the MLS message.
 
 // Ciphertext for a blob named inside a decrypted message. The signed URL is
 // asked for with this session — membership is checked before a byte moves — and

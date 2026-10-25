@@ -12,7 +12,7 @@ const LEVEL_BARS = 24;
 const LEVEL_SAMPLE_MS = 55;
 
 export default function InputArea({
-  onSend, onTyping, connected = true, blocked = null,
+  onSend, onTyping, connected = true,
   editing = null, onSaveEdit, onCancelEdit,
   replying = null, onCancelReply,
 }) {
@@ -164,10 +164,6 @@ export default function InputArea({
     const file = e.target.files?.[0];
     if (!file || busy) return;
     e.target.value = '';
-    if (blocked) {
-      setError(blocked);
-      return;
-    }
     if (!connected) {
       setError('اتصال به سرور برقرار نیست؛ فایل ارسال نشد');
       return;
@@ -206,7 +202,6 @@ export default function InputArea({
 
   async function startRecording() {
     if (busy || recording || isEditing) return;
-    if (blocked) { setError(blocked); return; }
     if (!connected) { setError('اتصال به سرور برقرار نیست؛ پیام صوتی ارسال نشد'); return; }
 
     const recorder = createVoiceRecorder();
@@ -290,8 +285,8 @@ export default function InputArea({
   // throws the recording away: a voice note is never meant to land in a
   // conversation nobody started it in.
   useEffect(() => {
-    if (recording === 'live' && (blocked || isEditing || !connected)) dropRecording();
-  }, [recording, blocked, isEditing, connected]);
+    if (recording === 'live' && (isEditing || !connected)) dropRecording();
+  }, [recording, isEditing, connected]);
 
   // Escape throws the recording away wherever the focus has got to: opening the
   // bar moves focus onto its send button, but a click elsewhere must not leave an
@@ -382,13 +377,6 @@ export default function InputArea({
         </div>
       )}
 
-      {blocked && (
-        <div className="composer-note is-blocked" role="status">
-          <i className="fas fa-circle-info" aria-hidden="true" />
-          <span>{blocked}</span>
-        </div>
-      )}
-
       {(busy || error) && (
         <div className={`composer-note ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>
           {busy ? (
@@ -465,13 +453,13 @@ export default function InputArea({
             ref={attachRef}
             type="button"
             className={`icon-btn attach-btn${showAttach ? ' active' : ''}`}
-            title={blocked ?? (isEditing ? 'ویرایش فقط متن را عوض می‌کند؛ پیوست در این حالت نیست' : 'پیوست')}
+            title={isEditing ? 'ویرایش فقط متن را عوض می‌کند؛ پیوست در این حالت نیست' : 'پیوست'}
             aria-label="پیوست"
             aria-haspopup="menu"
             aria-expanded={showAttach}
             // An edit rewrites one text row, so there is nothing for a file to
             // attach to — the picker stays shut until the edit is over.
-            disabled={busy || Boolean(blocked) || isEditing}
+            disabled={busy || isEditing}
             onClick={() => setShowAttach(open => !open)}
           >
             <i className="fas fa-paperclip" aria-hidden="true" />
@@ -481,10 +469,9 @@ export default function InputArea({
             ref={textareaRef}
             value={text}
             rows={1}
-            disabled={Boolean(blocked)}
             onChange={e => { setText(e.target.value); setError(''); onTyping?.(); }}
             onKeyDown={handleKey}
-            placeholder={blocked ?? (connected ? 'پیامت را بنویس…' : 'در انتظار اتصال به سرور…')}
+            placeholder={connected ? 'پیامت را بنویس…' : 'در انتظار اتصال به سرور…'}
             aria-label="متن پیام"
             autoComplete="off"
           />
@@ -510,8 +497,8 @@ export default function InputArea({
             type="button"
             className="send-btn mic-btn"
             onClick={startRecording}
-            disabled={busy || !connected || Boolean(blocked)}
-            title={blocked ?? 'ضبط پیام صوتی'}
+            disabled={busy || !connected}
+            title="ضبط پیام صوتی"
             aria-label="ضبط پیام صوتی"
           >
             <i className="fas fa-microphone" aria-hidden="true" />
@@ -520,9 +507,9 @@ export default function InputArea({
           <button
             type="submit"
             className="send-btn"
-            title={blocked ?? (isEditing ? 'ذخیره ویرایش' : 'ارسال پیام')}
+            title={isEditing ? 'ذخیره ویرایش' : 'ارسال پیام'}
             aria-label={isEditing ? 'ذخیره ویرایش' : 'ارسال پیام'}
-            disabled={!text.trim() || busy || !connected || Boolean(blocked)}
+            disabled={!text.trim() || busy || !connected}
           >
             {sending
               ? <i className="fas fa-spinner fa-spin" aria-hidden="true" />

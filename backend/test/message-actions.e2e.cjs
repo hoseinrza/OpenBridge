@@ -1,10 +1,10 @@
 // Acting on a whole message: edit, delete for everyone, delete for me.
 //
 // These are the three paths where the server stays the authority over a
-// plaintext transcript — it validates the caller against the row it already
-// has, rewrites or empties that row, and tells every participant's room what
-// changed. Encrypted chats have no such row, so the last case here proves the
-// server refuses to become one.
+// transcript — it validates the caller against the row it already has, rewrites
+// or empties that row, and tells every participant's room what changed. A chat
+// that once used MLS still has those rows, and the last case here proves an edit
+// there lands sealed rather than leaving one plaintext exception behind.
 require('reflect-metadata');
 
 const { test, before, after } = require('node:test');
@@ -12,6 +12,7 @@ const assert = require('node:assert/strict');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-least-32-characters-long';
+process.env.CONTENT_KEY = process.env.CONTENT_KEY || 'Y2ktb25seS1jb250ZW50LWtleS0zMi1ieXRlcy0wMDA=';
 process.env.AUTH_OTP_REQUEST_LIMIT = process.env.AUTH_OTP_REQUEST_LIMIT || '50';
 process.env.AUTH_OTP_VERIFY_LIMIT = process.env.AUTH_OTP_VERIFY_LIMIT || '50';
 process.env.AUTH_SIGNUP_LIMIT = process.env.AUTH_SIGNUP_LIMIT || '50';
@@ -402,7 +403,7 @@ test('a hidden message does not raise a badge and does not spend a page slot', a
   assert.ok(!secondPage.data.some(m => m.id === hidden), 'and never appears on a later page');
 });
 
-test('an encrypted direct chat keeps having no plaintext row to edit', async () => {
+test('a legacy encrypted chat still edits its rows, and the rewrite is sealed', async () => {
   const { alice, bob } = global.__ctx;
 
   const sent = await emitAck(sockets.alice, 'message:send', { toId: bob.user.id, type: 'text', text: 'before encryption' });
@@ -412,9 +413,18 @@ test('an encrypted direct chat keeps having no plaintext row to edit', async () 
   assert.equal(enabled.status, 201, 'the chat opts into encryption');
   const conversationId = enabled.data.conversationId;
 
-  const edit = await emitAck(sockets.alice, 'message:edit', { messageId: sent.id, text: 'rewritten in the clear' });
-  assert.equal(edit.ok, false, 'a legacy row in an encrypted chat is not editable');
-  assert.match(edit.error, /رمزنگاری/, 'and the refusal says why');
+  const rowBefore = await prisma.message.findUnique({ where: { id: sent.id }, select: { text: true } });
+  assert.equal(rowBefore.text, 'before encryption', 'the legacy row was stored in the clear');
+
+  // The row is still the sender's to rewrite. What changed with server-key
+  // content is where the new text lands: the same sealed format as a fresh
+  // message in this chat, so the chat does not keep one plaintext exception.
+  const edit = await emitAck(sockets.alice, 'message:edit', { messageId: sent.id, text: 'rewritten after the switch' });
+  assert.equal(edit.ok, true, 'the sender may rewrite their row');
+  assert.equal(edit.message.text, 'rewritten after the switch', 'the wire carries readable text');
+
+  const rowAfter = await prisma.message.findUnique({ where: { id: sent.id }, select: { text: true } });
+  assert.match(rowAfter.text, /^obx1\./, 'the rewrite is sealed at rest');
 
   // Deleting it is a different matter: the row is already readable, so removing
   // it for everyone is a service the server can actually perform.
