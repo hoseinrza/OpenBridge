@@ -160,6 +160,47 @@
 
 .conn-banner i { color: var(--warning); }
 
+/* A new-device alert stays until this device acknowledges it, so it gets a
+   little more room than the "reconnecting" strip. */
+.session-alert { align-items: flex-start; padding-block: 9px; }
+
+.session-alert > i { margin-top: 2px; }
+
+.session-alert-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.session-alert-copy strong {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.session-alert-copy span {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.session-alert-action {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.session-alert-action:hover { background: var(--surface-2); }
+
 .search-results-bar {
   background: var(--surface-2);
   color: var(--text-2);
@@ -369,7 +410,11 @@ button.msg-sender {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 6px 10px 7px;
+  /* Named because the voice bubble's clock line is pinned to the same edges the
+     bubble is padded by, and a second copy of those numbers would drift. */
+  --pad-x: 10px;
+  --pad-b: 7px;
+  padding: 6px var(--pad-x) var(--pad-b);
   border-radius: var(--r-md);
   font-size: var(--text-base);
   line-height: 1.55;
@@ -717,6 +762,8 @@ button.msg-sender {
   --voice-track: var(--surface-3);
   --voice-fill:  var(--accent);
   --voice-thumb: var(--accent);
+  --play-size: 34px;
+  --wave-height: 44px;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -736,8 +783,8 @@ button.msg-sender {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: var(--play-size);
+  height: var(--play-size);
   flex-shrink: 0;
   border: 0;
   border-radius: 50%;
@@ -809,7 +856,7 @@ button.msg-sender {
 
 .voice-time {
   font-size: 11px;
-  line-height: 1.3;
+  line-height: var(--meta-line, 1.3);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
   opacity: 0.85;
@@ -844,7 +891,13 @@ button.msg-sender {
    to yet is exactly the picture it was sent as. */
 .voice-wave-bubble {
   --wave-bar: var(--accent);
-  align-items: center;
+  /* The circle centres on the bars rather than on the bars plus the line under
+     them, so it sits opposite the middle of the shape the microphone made. */
+  align-items: flex-start;
+}
+
+.voice-wave-bubble .voice-play {
+  margin-block-start: calc((var(--wave-height) - var(--play-size)) / 2);
 }
 
 .msg-wrapper.mine .voice-wave-bubble { --wave-bar: var(--on-bubble-out); }
@@ -860,7 +913,7 @@ button.msg-sender {
 .voice-wave-track {
   position: relative;
   display: flex;
-  height: 44px;
+  height: var(--wave-height);
 }
 
 .voice-wave-bars {
@@ -902,6 +955,28 @@ button.msg-sender {
 .voice-wave-scrub:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: var(--r-sm); }
 
 .voice-wave-time { align-self: flex-start; }
+
+/* ── One meta line at the foot of a sound bubble ─────────────── */
+/* The reference ends a voice bubble with a single row: the length beside the
+   play, the clock and the ticks at the far edge. So the clock crosses to the
+   edge the circle does not own — on an incoming bubble it used to sit directly
+   under the play — and both labels are pinned to one line box, which is what
+   lets the clock rise onto the length's line instead of adding a row of its own
+   and leaving the bubble one line taller than the shape it is drawn from.
+   Reaction chips already live on that bottom edge, so when a sound message has
+   them the clock keeps its own line rather than landing on top of them. */
+.bubble-voice { --meta-line: 14px; }
+
+.bubble-voice:has(.voice-bubble) > .msg-footer {
+  align-self: flex-end;
+  line-height: var(--meta-line);
+}
+
+.bubble-voice:has(.voice-wave-bubble):not(:has(.msg-reactions)) > .msg-footer {
+  position: absolute;
+  inset-block-end: var(--pad-b);
+  inset-inline-end: var(--pad-x);
+}
 
 /* ── Recording bar ───────────────────────────────────────────── */
 /* The composer's third mode. It borrows the capsule and the circle of the
@@ -1602,6 +1677,10 @@ button.msg-sender {
 
   .conn-banner,
   .search-results-bar { padding-inline: var(--sp-4); font-size: var(--text-xs); }
+
+  /* At phone width the IP and time get their own line under the actions. */
+  .session-alert { flex-wrap: wrap; row-gap: 4px; }
+  .session-alert-copy { flex-basis: 100%; order: 4; }
 
   .messages {
     padding: var(--sp-4) var(--sp-3) var(--sp-1);

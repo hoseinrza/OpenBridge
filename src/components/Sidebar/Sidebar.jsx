@@ -233,6 +233,7 @@ export default function Sidebar({
             : user.encrypted
               ? 'رمزنگاری‌شده'
               : (isGroup ? 'هنوز پیامی نیست' : (STATUS_TEXT[user.status] ?? ''));
+          const faUnread = user.unread.toLocaleString('fa-IR');
 
           return (
             <div
@@ -270,21 +271,21 @@ export default function Sidebar({
                 onClick={() => handleSelect(user)}
               >
                 <span className="user-item-body">
-                  <span className="user-item-top">
-                    <span className="user-name" title={user.name}>{user.name}</span>
+                  <span className="user-name" title={user.name}>{user.name}</span>
+                  <span className="user-meta" title={meta}>{meta}</span>
+                </span>
+                {(user.updatedAt || user.unread > 0) && (
+                  <span className="user-item-tail">
                     {user.updatedAt && (
                       <span className="user-time">{formatConversationTime(user.updatedAt)}</span>
                     )}
-                  </span>
-                  <span className="user-item-bottom">
-                    <span className="user-meta" title={meta}>{meta}</span>
                     {user.unread > 0 && (
-                      <span className="badge" aria-label={`${user.unread} پیام خوانده‌نشده`}>
-                        {user.unread > 99 ? '۹۹+' : user.unread}
+                      <span className="badge" aria-label={`${faUnread} پیام خوانده‌نشده`}>
+                        {user.unread > 99 ? '۹۹+' : faUnread}
                       </span>
                     )}
                   </span>
-                </span>
+                )}
               </button>
             </div>
           );

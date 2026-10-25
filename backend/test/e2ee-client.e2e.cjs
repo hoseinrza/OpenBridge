@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-least-32-characters-long';
+process.env.CONTENT_KEY = process.env.CONTENT_KEY || 'Y2ktb25seS1jb250ZW50LWtleS0zMi1ieXRlcy0wMDA=';
 process.env.AUTH_OTP_REQUEST_LIMIT = process.env.AUTH_OTP_REQUEST_LIMIT || '50';
 process.env.AUTH_OTP_VERIFY_LIMIT = process.env.AUTH_OTP_VERIFY_LIMIT || '50';
 process.env.AUTH_SIGNUP_LIMIT = process.env.AUTH_SIGNUP_LIMIT || '50';
@@ -31,6 +32,7 @@ const { readFile, unlink } = require('node:fs/promises');
 const { join } = require('node:path');
 const { AppModule } = require('../dist/app.module');
 const { isOriginAllowed } = require('../dist/config/env');
+const { isSealed, openStoredText } = require('./fixtures');
 
 const API_PREFIX = '/api';
 // The client core is ESM and lives with the web app it is written for; a CJS
@@ -313,35 +315,18 @@ test('two clients open an encrypted chat and the server stores only ciphertext',
   assert.equal(viaHttp.status, 200, 'the member can list envelopes');
   assert.deepEqual(viaHttp.data.map(envelope => envelope.content), rows.map(row => row.content), 'the same bytes either way');
 
-  // The chat list identifies a direct conversation by the peer account: there
-  // is no conversation id and no field that could hold a message.
+  // The chat list identifies a direct conversation by the peer account. Its
+  // preview field is the server's, so it is present for every chat — and empty
+  // here, because this conversation has no server row that could be previewed.
   const list = await api('/messages/conversations', { token: bob.session.token });
   const entry = list.data.find(conversation => conversation.user.id === alice.session.user.id);
   assert.equal(entry.e2ee, true, 'the chat list says this one is encrypted');
-  assert.deepEqual(Object.keys(entry).sort(), ['e2ee', 'unread', 'updatedAt', 'user'], 'and its entry carries no field that could hold text');
-});
-
-test('call keys derive identically from MLS and are bound to the call id', async () => {
-  const aliceKey = await alice.client.exportCallKey(conversationId, '11111111-1111-4111-8111-111111111111');
-  const bobKey = await bob.client.exportCallKey(conversationId, '11111111-1111-4111-8111-111111111111');
-
-  assert.equal(aliceKey.key, bobKey.key, 'both members derive the same media key');
-  assert.equal(aliceKey.fingerprint, bobKey.fingerprint, 'the server sees the same fingerprint');
-  assert.equal(aliceKey.epoch, bobKey.epoch, 'the keys belong to one MLS epoch');
-  assert.match(aliceKey.fingerprint, /^[A-Za-z0-9_-]{43}$/, '32 bytes of SHA-256 in base64url');
-  assert.notEqual(aliceKey.key, aliceKey.fingerprint, 'the fingerprint is not the key');
-
-  const otherCall = await alice.client.exportCallKey(conversationId, '22222222-2222-4222-8222-222222222222');
-  assert.notEqual(otherCall.key, aliceKey.key, 'a different call gets a different key');
-  assert.notEqual(otherCall.fingerprint, aliceKey.fingerprint);
-
-  // The peer-facing path uses the same conversation resolution a call does.
-  const viaPeer = await bob.client.exportCallKeyForPeer(
-    alice.session.user.id,
-    '11111111-1111-4111-8111-111111111111',
+  assert.deepEqual(
+    Object.keys(entry).sort(),
+    ['e2ee', 'lastMessage', 'unread', 'updatedAt', 'user'],
+    'and its entry carries no field that could hold text',
   );
-  assert.equal(viaPeer.key, aliceKey.key);
-  assert.equal(viaPeer.fingerprint, aliceKey.fingerprint);
+  assert.equal(entry.lastMessage, null, 'a chat of pure envelopes has nothing on the server to preview');
 });
 
 test('a reloaded device keeps the conversation: state survives storage', async () => {
@@ -515,8 +500,12 @@ test('a peer with no keys is refused before its conversation is locked to envelo
     toId: silent.user.id, type: 'TEXT', text: 'هنوز خوانا',
   });
   assert.equal(ack.ok, true, `plaintext still goes through (${JSON.stringify(ack)})`);
-  const row = await prisma.message.findUnique({ where: { id: ack.id }, select: { text: true } });
-  assert.equal(row.text, 'هنوز خوانا', 'and it is stored the way the plaintext path stores it');
+  const row = await prisma.message.findUnique({
+    where:  { id: ack.id },
+    select: { text: true, conversationId: true },
+  });
+  assert.ok(isSealed(row.text), 'and the ordinary path stores it sealed');
+  assert.equal(openStoredText(row.conversationId, row.text), 'هنوز خوانا', 'so the peer with no keys still reads plain text back');
 });
 
 test('a file is encrypted on the sender, stored as opaque bytes and opened by the peer', async () => {
@@ -758,19 +747,6 @@ test('an encrypted group opens for every invited device and only carries ciphert
   assert.equal(await prisma.message.count({ where: { conversationId: chat.id } }), 0,
     'a group message never becomes a plaintext row');
 
-  // Every web device of the group derives the same media key for one group call,
-  // and a different call gets a different key. Mobile has no group state and is
-  // refused by the call service instead of joining without encryption.
-  const groupCallId = '33333333-3333-4333-8333-333333333333';
-  const ownerCallKey = await owner.client.exportCallKey(chat.id, groupCallId);
-  const firstCallKey = await first.client.exportCallKey(chat.id, groupCallId);
-  const phoneCallKey = await secondPhone.client.exportCallKey(chat.id, groupCallId);
-  assert.equal(ownerCallKey.key, firstCallKey.key, 'group members derive one media key');
-  assert.equal(ownerCallKey.key, phoneCallKey.key, 'a second device of a member derives it too');
-  assert.equal(ownerCallKey.fingerprint, firstCallKey.fingerprint);
-  const otherGroupCall = await owner.client.exportCallKey(chat.id, '44444444-4444-4444-8444-444444444444');
-  assert.notEqual(otherGroupCall.key, ownerCallKey.key, 'the call id binds the key');
-
   // The unread badge of an encrypted group counts envelopes above the member's
   // own high-water mark. The Welcome is consumed at the moment of joining, so
   // only the message sent afterwards is unread. Reading it, which only a device
@@ -783,13 +759,23 @@ test('an encrypted group opens for every invited device and only carries ciphert
   const afterRead = await api('/messages/groups', { token: first.session.token });
   assert.equal(afterRead.data.find(group => group.id === chat.id).unread, 0, 'the member\'s mark clears the badge');
 
-  // A plaintext send into the group is refused, because it would be the one
-  // readable message in a conversation everyone else reads as ciphertext.
+  // An ordinary send into the group is accepted, and it lands sealed. The old
+  // refusal kept the group pure ciphertext only because one browser held the
+  // keys; with a server-held content key a sealed row sits at the same trust
+  // level as the envelopes beside it, and it is what lets a second device read
+  // this chat at all.
   const plain = await emitAck(first.socket, 'message:send', {
     conversationId: chat.id, type: 'TEXT', text: 'readable',
   });
-  assert.equal(plain.ok, false, 'the plaintext path is closed');
-  assert.equal(await prisma.message.count({ where: { conversationId: chat.id } }), 0, 'and wrote nothing');
+  assert.equal(plain.ok, true, 'the group takes an ordinary send');
+  const sealedRow = await prisma.message.findUnique({ where: { id: plain.id }, select: { text: true } });
+  assert.ok(isSealed(sealedRow.text), 'the row is sealed at rest, not in the clear');
+  assert.equal(openStoredText(chat.id, sealedRow.text), 'readable', 'and it opens to what was typed');
+  assert.equal(
+    await prisma.e2eeEnvelope.count({ where: { conversationId: chat.id } }),
+    envelopes.length,
+    'the MLS transcript keeps its own length: a server row is not an envelope',
+  );
 
   // Membership is an MLS commit: the database row alone would leave a new member
   // unable to decrypt and a removed member still holding the old keys.

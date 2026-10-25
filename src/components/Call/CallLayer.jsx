@@ -4,10 +4,10 @@ import Avatar from '../ui/Avatar.jsx';
 import './Call.css';
 
 const ENC = {
-  none:     { icon: 'fa-lock-open', text: 'بدون رمزنگاری سرتاسری', className: 'is-off', title: 'این تماس فقط با رمزنگاری لایهٔ انتقال محافظت می‌شود؛ سرور رسانه می‌تواند آن را ببیند' },
-  pending:  { icon: 'fa-lock', text: 'در انتظار تأیید رمزنگاری', className: 'is-pending', title: 'کلید روی دستگاه‌ها ساخته شده است؛ تا تأیید هر دو طرف، نشان تأییدشده نمایش داده نمی‌شود' },
-  verified: { icon: 'fa-lock', text: 'رمزنگاری سرتاسری', className: 'is-on', title: 'رسانه روی دستگاه‌ها رمز و رمزگشایی می‌شود؛ سرور رسانه کلید ندارد' },
-  failed:   { icon: 'fa-triangle-exclamation', text: 'رمزنگاری تأیید نشد', className: 'is-failed', title: 'تماس به دلیل عدم تأیید رمزنگاری بسته شد' },
+  none:     { icon: 'fa-lock-open', text: 'بدون رمزنگاری رسانه', className: 'is-off', title: 'رسانه با لایهٔ امن انتقال محافظت می‌شود، اما سرور رسانه محتوایش را می‌بیند' },
+  pending:  { icon: 'fa-lock', text: 'در حال فعال‌شدن رمزنگاری رسانه', className: 'is-pending', title: 'کلید این تماس از سرور گرفته شده و روی دستگاه اعمال می‌شود' },
+  verified: { icon: 'fa-lock', text: 'رمزنگاری رسانه', className: 'is-on', title: 'رسانه پیش از ارسال رمز می‌شود؛ کلید این تماس روی سرور OpenBridge نگهداری می‌شود' },
+  failed:   { icon: 'fa-triangle-exclamation', text: 'رمزنگاری رسانه فعال نشد', className: 'is-failed', title: 'تماس به دلیل عدم فعال‌شدن رمزنگاری رسانه بسته شد' },
 };
 
 function CallLock({ state }) {
@@ -154,10 +154,9 @@ function RingScreen({ title, avatar, isGroup, subtitle, children }) {
 function Incoming({ call, title, avatar, isGroup, callType, callerName }) {
   const acceptRef = useRef(null);
   useEffect(() => {
-    if (call.keyReady) acceptRef.current?.focus();
-  }, [call.keyReady]);
+    acceptRef.current?.focus();
+  }, []);
 
-  const waitingForKey = call.callInfo?.e2ee && !call.keyReady;
   const accepting = call.busy;
   const acceptIcon = callType === 'video' ? 'fa-video' : 'fa-phone';
 
@@ -170,7 +169,7 @@ function Incoming({ call, title, avatar, isGroup, callType, callerName }) {
         <>
           {callerName && isGroup && <span className="call-from">{callerName}</span>}
           <p className="call-status">
-            {waitingForKey ? 'در حال آماده‌سازی رمزنگاری…' : `تماس ${callType === 'video' ? 'ویدیویی' : 'صوتی'} ورودی`}
+            {`تماس ${callType === 'video' ? 'ویدیویی' : 'صوتی'} ورودی`}
           </p>
           <CallLockFor call={call} />
         </>
@@ -191,11 +190,11 @@ function Incoming({ call, title, avatar, isGroup, callType, callerName }) {
           type="button"
           className="call-round call-round-accept"
           onClick={() => call.acceptCall()}
-          disabled={accepting || waitingForKey}
+          disabled={accepting}
           aria-label="پاسخ به تماس"
           title="پاسخ به تماس"
         >
-          {accepting || waitingForKey
+          {accepting
             ? <span className="call-spinner" aria-hidden="true" />
             : <i className={`fas ${acceptIcon}`} aria-hidden="true" />}
         </button>

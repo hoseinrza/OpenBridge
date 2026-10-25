@@ -143,7 +143,7 @@ test('a chat that turns encrypted mid-open refuses a recording', async () => {
     const refused = await result.current.sendVoice({ uri: 'file:///mock/voice.m4a', durationMs: 900 });
     expect(refused).toEqual({
       ok: false,
-      error: 'این گفتگو سرتاسری رمزنگاری شده؛ نوشتن در آن فقط از نسخهٔ وب ممکن است',
+      error: 'این گفتگو پیام‌های قدیمیِ رمزنگاری‌شده دارد؛ نوشتن در آن از این نسخه فعلاً ممکن نیست',
     });
   });
 

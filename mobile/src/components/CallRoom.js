@@ -42,7 +42,7 @@ function LockNote({ e2ee }) {
         color={e2ee ? '#9fe7b5' : 'rgba(255,255,255,0.55)'}
       />
       <Text style={[styles.lockText, e2ee && styles.lockTextOn]}>
-        {e2ee ? 'رمزنگاری' : 'بدون رمزنگاری'}
+        {e2ee ? 'رمزنگاری‌شده' : 'بدون رمزنگاری'}
       </Text>
     </View>
   );

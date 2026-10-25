@@ -1,0 +1,208 @@
+.modal-panel.sessions-modal {
+  max-width: 470px;
+}
+
+.sessions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) 0 var(--sp-5);
+  flex-shrink: 0;
+}
+
+.sessions-head h2 {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.sessions-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4) var(--sp-5);
+}
+
+.sessions-intro {
+  margin: 0 0 var(--sp-3);
+  padding-inline: var(--sp-1);
+  font-size: var(--text-xs);
+  line-height: 1.9;
+  color: var(--text-3);
+}
+
+.sessions-hint,
+.sessions-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  font-size: var(--text-xs);
+  line-height: 1.9;
+}
+
+.sessions-hint {
+  background: var(--warning-soft, var(--surface-2));
+  color: var(--text-2);
+}
+
+.sessions-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.sessions-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-5);
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.session-row.is-current {
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.session-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 15px;
+}
+
+.session-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.session-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.session-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.session-chip {
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.session-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.session-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.session-state.is-online {
+  color: var(--success, var(--text-2));
+}
+
+.session-state.is-online .session-dot {
+  background: var(--success, var(--accent));
+}
+
+.session-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+.session-ip {
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: plaintext;
+}
+
+.session-revoke {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--danger);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.session-revoke:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
+.session-revoke:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.session-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
+.session-confirm .btn {
+  padding: 4px 10px;
+  font-size: 11px;
+}

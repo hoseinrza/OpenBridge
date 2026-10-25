@@ -3,14 +3,15 @@ require('reflect-metadata');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
-const { unlink } = require('node:fs/promises');
+const { readFile, unlink } = require('node:fs/promises');
 const net = require('node:net');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
-const { EICAR } = require('./fixtures');
+const { EICAR, isSealed, openStoredText } = require('./fixtures');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-least-32-characters-long';
+process.env.CONTENT_KEY = process.env.CONTENT_KEY || 'Y2ktb25seS1jb250ZW50LWtleS0zMi1ieXRlcy0wMDA=';
 // The suite opens several sessions and finishes several sign-ups; keep the
 // throttles wide enough not to interfere, except the per-phone bucket, which
 // the throttling test exercises on purpose.
@@ -370,6 +371,19 @@ test('missing JWT_SECRET fails fast at startup', () => {
   });
   assert.notEqual(result.status, 0, 'process must exit non-zero');
   assert.match(`${result.stdout}${result.stderr}`, /JWT_SECRET/);
+});
+
+test('missing CONTENT_KEY fails fast at startup', () => {
+  const env = { ...process.env, NODE_ENV: 'production' };
+  delete env.CONTENT_KEY;
+  const result = spawnSync(process.execPath, [join(__dirname, '..', 'dist', 'main.js')], {
+    cwd: tmpdir(),
+    env,
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  assert.notEqual(result.status, 0, 'process must exit non-zero');
+  assert.match(`${result.stdout}${result.stderr}`, /CONTENT_KEY/);
 });
 
 test('rejects unauthenticated and forged HTTP requests', async () => {
@@ -857,6 +871,12 @@ test('uploads are type-checked and only readable through signed URLs', async () 
   assert.match(valid.data.url, /^\/uploads\/[a-f0-9-]+\.png$/);
 
   const filename = valid.data.url.split('/').pop();
+  // The bytes the browser keeps looking at are not the bytes on disk: the
+  // scanner saw the plaintext, then the file was sealed under its stored name.
+  const stored = await readFile(join(process.cwd(), 'uploads', filename));
+  assert.equal(stored.subarray(0, 4).toString('ascii'), 'OBX1', 'the upload is sealed at rest');
+  assert.equal(stored.includes(PNG_1X1), false, 'the original bytes are not on disk');
+
   const unsigned = await fetch(`${origin}${API_PREFIX}${valid.data.url}`);
   assert.equal(unsigned.status, 403, 'unsigned download');
 
@@ -875,6 +895,13 @@ test('uploads are type-checked and only readable through signed URLs', async () 
   assert.equal(signed.status, 200, 'signed download');
   assert.equal(signed.headers.get('content-type'), 'image/png');
   assert.equal(signed.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(signed.headers.get('accept-ranges'), 'bytes', 'a player may seek');
+  assert.deepEqual(Buffer.from(await signed.arrayBuffer()), PNG_1X1, 'the download decrypts to the original bytes');
+
+  const range = await fetch(`${origin}${API_PREFIX}${signedUrl}`, { headers: { Range: 'bytes=2-9' } });
+  assert.equal(range.status, 206, 'a range is served as a range');
+  assert.equal(range.headers.get('content-range'), `bytes 2-9/${PNG_1X1.length}`);
+  assert.deepEqual(Buffer.from(await range.arrayBuffer()), PNG_1X1.subarray(2, 10), 'and cut from the plaintext');
 
   const tampered = await fetch(`${origin}${API_PREFIX}${signedUrl.replace(/sig=[a-f0-9]{4}/, 'sig=dead')}`);
   assert.equal(tampered.status, 403, 'tampered signature');
@@ -980,11 +1007,16 @@ test('refresh tokens rotate and session revocation is immediate', async () => {
 
   const listed = await api('/auth/sessions', { token: alice.token });
   assert.equal(listed.status, 200);
-  assert.equal(listed.data.filter(session => session.current).length, 1, 'exactly one current session');
-  assert.ok(listed.data.length >= 3, 'all active sessions listed');
+  // Phase 1 made this an object: the list plus the server's own answer to
+  // "may this device sign the others out", so the sheet and the API cannot
+  // disagree about the age rule.
+  assert.equal(listed.data.sessions.filter(session => session.current).length, 1, 'exactly one current session');
+  assert.ok(listed.data.sessions.length >= 3, 'all active sessions listed');
+  assert.equal(listed.data.sessions.every(session => !!session.lastUsedAt), true, 'each entry says when it was last used');
+  assert.equal(typeof listed.data.canRevokeOthers, 'boolean', 'and the revoke rule comes from the server');
 
   const crossUser = await api('/auth/sessions', { token: bob.token });
-  const bobCurrent = crossUser.data.find(session => session.current);
+  const bobCurrent = crossUser.data.sessions.find(session => session.current);
   const crossRevoke = await api(`/auth/sessions/${bobCurrent.id}`, {
     method: 'DELETE',
     token: alice.token,
@@ -1004,12 +1036,21 @@ test('refresh tokens rotate and session revocation is immediate', async () => {
   revokedSocket.socket.disconnect();
 
   const sessionsC = await api('/auth/sessions', { token: loginC.token });
-  const currentC = sessionsC.data.find(session => session.current);
+  const currentC = sessionsC.data.sessions.find(session => session.current);
   assert.ok(currentC, 'current session id');
-  assert.equal((await api(`/auth/sessions/${currentC.id}`, {
+  // The server answers the age rule so the sheet and the endpoint cannot
+  // disagree, and the rule gates only revoking *another* device. Signing a
+  // device out of itself stays allowed even seconds after it was born.
+  assert.equal(sessionsC.data.canRevokeOthers, false, 'a session made seconds ago may not sign others out');
+  const sibling = await api(`/auth/sessions/${currentC.id}`, {
     method: 'DELETE',
     token: alice.token,
-  })).status, 200);
+  });
+  assert.equal(sibling.status, 403, 'the age rule refuses revoking a sibling device');
+  assert.equal((await api(`/auth/sessions/${currentC.id}`, {
+    method: 'DELETE',
+    token: loginC.token,
+  })).status, 200, 'a device may always sign itself out');
   assert.equal((await api('/users/me', { token: loginC.token })).status, 401, 'revoked access token');
   assert.equal((await api('/auth/refresh', {
     method: 'POST',
@@ -1713,22 +1754,36 @@ test('a direct chat opts into encryption and the chat list says so', async () =>
   assert.equal(entry?.e2ee, true, 'the chat list carries the flag so the UI can label the conversation');
 });
 
-test('an encrypted conversation refuses plaintext and other conversations stay open', async () => {
+test('a chat that once used MLS takes ordinary sends beside its envelopes', async () => {
   const { alice, bob } = global.__ctx;
   const conversationId = await encryptedDirect(alice, bob);
   const before = await prisma.message.count({ where: { conversationId } });
+  const envelopesBefore = await prisma.e2eeEnvelope.count({ where: { conversationId } });
 
+  // The rule this replaces was a refusal: an ordinary send into a flagged
+  // chat bounced, so a chat could hold nothing but envelopes. With the
+  // content key held by the server, a sealed row is readable by every device,
+  // which is the whole point of the switch — so the send lands, sealed,
+  // beside the old stream instead of replacing it.
   const byConversation = await emitAck(sockets.alice, 'message:send', { conversationId, type: 'text', text: 'in the clear' });
-  assert.equal(byConversation.ok, false, 'plaintext cannot be written into an encrypted chat');
-  assert.match(byConversation.error, /رمزنگاری/, 'and the client is told why');
+  assert.equal(byConversation.ok, true, 'an ordinary send into a chat that once used MLS is accepted');
 
-  const byPeer = await emitAck(sockets.alice, 'message:send', { toId: bob.user.id, type: 'text', text: 'in the clear' });
-  assert.equal(byPeer.ok, false, 'the peer-id path is the same conversation');
+  const byPeer = await emitAck(sockets.alice, 'message:send', { toId: bob.user.id, type: 'text', text: 'by peer id' });
+  assert.equal(byPeer.ok, true, 'and so is the same chat addressed by peer id');
 
-  assert.equal(await prisma.message.count({ where: { conversationId } }), before, 'no plaintext row was written');
+  assert.equal(await prisma.message.count({ where: { conversationId } }), before + 2, 'both rows were written');
+  assert.equal(
+    await prisma.e2eeEnvelope.count({ where: { conversationId } }),
+    envelopesBefore,
+    'and neither of them joined the old envelope stream',
+  );
+
+  const history = await api(`/messages/${alice.user.id}`, { token: bob.token });
+  assert.equal(history.data.find(m => m.id === byConversation.id)?.text, 'in the clear', 'the peer reads it as an ordinary message');
+  assert.equal(history.data.find(m => m.id === byPeer.id)?.text, 'by peer id', 'and so does the second one');
 
   const groupStill = await emitAck(sockets.alice, 'message:send', { conversationId: group.id, type: 'text', text: 'groups are untouched' });
-  assert.equal(groupStill.ok, true, 'the refusal is scoped to the encrypted conversation');
+  assert.equal(groupStill.ok, true, 'a plain group is untouched by any of this');
 });
 
 test('envelopes are numbered with no gaps and delivered in strict order', async () => {
@@ -1887,16 +1942,23 @@ test('bad blobs are rejected, streams stay separate, and a flagged group carries
     const groupPlaintext = await emitAck(sockets.alice, 'message:send', {
       conversationId: group.id, type: 'text', text: 'flagged group',
     });
-    assert.equal(groupPlaintext.ok, false, 'a flagged group accepts no plaintext');
+    assert.equal(groupPlaintext.ok, true, 'a flagged group takes an ordinary send too');
+    const groupRow = await prisma.message.findUnique({
+      where:  { id: groupPlaintext.id },
+      select: { text: true },
+    });
+    assert.ok(isSealed(groupRow.text), 'and the row is sealed rather than readable on disk');
     assert.equal(
-      await prisma.message.count({ where: { conversationId: group.id, text: 'flagged group' } }),
-      0,
-      'and wrote no readable row',
+      openStoredText(group.id, groupRow.text),
+      'flagged group',
+      'opening it with the conversation key gives the text back',
     );
   } finally {
     await prisma.e2eeEnvelope.deleteMany({ where: { conversationId: group.id } });
     await prisma.conversation.update({ where: { id: group.id }, data: { e2ee: false } });
   }
+  // The flag is off again, and nothing about the transport changed on the
+  // way there: the flag labels the chat, it does not gate the send.
   const reopened = await emitAck(sockets.alice, 'message:send', { conversationId: group.id, type: 'text', text: 'back to plaintext' });
-  assert.equal(reopened.ok, true, 'the group works again once the flag is off');
+  assert.equal(reopened.ok, true, 'the group still works once the flag is off');
 });

@@ -94,9 +94,9 @@ export default function ChatListScreen({ navigation }) {
     if (!socket) return undefined;
     const refresh = () => load(true);
     socket.on('message:new', refresh);
-    // Encrypted chats never produce a plaintext row, so their list entry moves
-    // only when an envelope is announced. The phone does not read it; it just
-    // re-reads the list, which now carries the server's e2ee flag.
+    // A chat holding the old MLS history moves when its web peer announces an
+    // envelope. This build never opens those envelopes; it just re-reads the
+    // list, which now carries the server's e2ee flag.
     socket.on('e2ee:envelope', refresh);
     // The other side deleted a chat: the list no longer has that row, and this
     // screen must not keep a name whose history is gone.
@@ -153,9 +153,11 @@ export default function ChatListScreen({ navigation }) {
   function renderRow({ item }) {
     const isGroup = item.kind === 'group';
     const locked = item.encrypted === true;
-    // An encrypted chat is demoted on this build: it cannot be decrypted here
-    // and its read mark only moves from a web client, so a count would never
-    // clear. The row itself stays plain — no sign of what it holds.
+    // The flag marks a chat whose history was written with the old MLS keys:
+    // only a web client holding them can open those envelopes, so this build
+    // shows no message content for it and a plaintext read mark could never
+    // clear that unread count. The row itself stays plain — no sign of what it
+    // holds.
     const unread = locked ? 0 : (item.unread ?? 0);
     return (
       <Pressable
@@ -164,7 +166,7 @@ export default function ChatListScreen({ navigation }) {
         onLongPress={() => confirmDeleteChat(item)}
         delayLongPress={480}
         accessibilityRole="button"
-        accessibilityLabel={`${item.name}${locked ? '، رمزنگاری‌شده؛ فقط در وب قابل خواندن است' : ''}${unread ? `، ${unread} پیام خوانده‌نشده` : ''}`}
+        accessibilityLabel={`${item.name}${locked ? '، پیام‌های قدیمیِ رمزنگاری‌شده دارد' : ''}${unread ? `، ${unread} پیام خوانده‌نشده` : ''}`}
         accessibilityHint={isGroup ? undefined : 'نگه‌داشتن برای حذف گفتگو'}
       >
         <Avatar

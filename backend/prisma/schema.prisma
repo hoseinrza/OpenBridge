@@ -92,6 +92,11 @@ model E2eeEnvelope {
   // control is a control.
   kind           E2eeEnvelopeKind @default(MESSAGE)
   createdAt      DateTime         @default(now())
+  // Set once a device that holds this conversation's keys has decrypted the
+  // envelope and written the plaintext back as a Message row. Until then the
+  // envelope stays pending: the content is only here, in a form no server can
+  // read, and it is reported rather than dropped.
+  migratedAt     DateTime?
 
   @@unique([conversationId, seq])
   @@index([conversationId, kind])
@@ -188,6 +193,9 @@ model Session {
   ip          String?
   createdAt   DateTime  @default(now())
   lastUsedAt  DateTime  @default(now())
+  // Which new sessions this session has already been shown, so the alert is
+  // per device: one device acknowledging it must not hide it on another.
+  securitySeenAt DateTime?
   expiresAt   DateTime
   revokedAt   DateTime?
 
@@ -256,6 +264,15 @@ model Message {
   editedAt      DateTime?
   deletedAt     DateTime?
   createdAt     DateTime    @default(now())
+  // A row imported from the legacy MLS stream by a device that could decrypt
+  // it. The envelope id makes the import idempotent, and the sequence lets a
+  // reader deduplicate this row against the local copy it still holds.
+  legacyEnvelopeId String?   @unique
+  legacySeq        Int?
+  // The sender's attachment descriptor, kept verbatim: a blob id plus the key
+  // and nonce that open it. The bytes were encrypted on a device, so the server
+  // stores this as an opaque record and readers still decrypt the file.
+  legacyAttachment Json?
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -270,6 +287,7 @@ model Message {
   hides     MessageHide[]
 
   @@index([conversationId, createdAt])
+  @@index([conversationId, legacySeq])
   @@index([senderId])
   @@index([replyToId])
   @@map("messages")

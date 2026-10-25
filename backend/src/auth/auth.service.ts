@@ -1,6 +1,6 @@
 import {
   Injectable, UnauthorizedException, ConflictException,
-  NotFoundException, ServiceUnavailableException,
+  NotFoundException, ForbiddenException, ServiceUnavailableException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -12,10 +12,11 @@ import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { SignupDto } from './dto/signup.dto';
 import { displayNameOf } from '../common/names';
+import { SessionSockets } from '../common/session-sockets';
 import { signedFileUrl } from '../uploads/file-urls';
 import {
   IS_PRODUCTION, JWT_SECRET, OTP_MAX_ATTEMPTS, OTP_TEST_MODE, OTP_TTL_SECONDS,
-  REFRESH_TOKEN_TTL_DAYS, SIGNUP_TOKEN_TTL_SECONDS,
+  REFRESH_TOKEN_TTL_DAYS, SESSION_REVOKE_COOLDOWN_DAYS, SIGNUP_TOKEN_TTL_SECONDS,
 } from '../config/env';
 
 const SAFE = {
@@ -53,9 +54,19 @@ function hashesMatch(storedHex: string, candidateHex: string) {
   return stored.length === candidate.length && timingSafeEqual(stored, candidate);
 }
 
+// User-facing counts are Persian digits; building them from code points keeps
+// the number in sync with the configured cooldown.
+function faDigits(value: number | string) {
+  return String(value).replace(/[0-9]/g, digit => String.fromCharCode(0x06f0 + Number(digit)));
+}
+
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService, private jwt: JwtService) {}
+  constructor(
+    private prisma: PrismaService,
+    private jwt: JwtService,
+    private sessionSockets: SessionSockets,
+  ) {}
 
   async refresh(rawRefreshToken: string, meta: SessionMeta = {}) {
     const currentHash = hashRefreshToken(rawRefreshToken);
@@ -247,6 +258,7 @@ export class AuthService {
       where: { id: sessionId, userId, revokedAt: null },
       data:  { revokedAt: new Date() },
     });
+    this.sessionSockets.disconnect(sessionId);
     return { ok: true };
   }
 
@@ -256,15 +268,91 @@ export class AuthService {
       orderBy: { createdAt: 'desc' },
       select:  { id: true, userAgent: true, ip: true, createdAt: true, lastUsedAt: true, expiresAt: true },
     });
-    return sessions.map(session => ({ ...session, current: session.id === currentSessionId }));
+    const current = sessions.find(session => session.id === currentSessionId);
+    // The age rule is answered here rather than recomputed in the UI from
+    // Date.now(), so the button and the endpoint cannot disagree.
+    const canRevokeOthers = current
+      ? Date.now() - current.createdAt.getTime() >= SESSION_REVOKE_COOLDOWN_DAYS * DAY_MS
+      : false;
+    return {
+      sessions: sessions.map(session => ({
+        ...session,
+        current: session.id === currentSessionId,
+        online:  this.sessionSockets.isOnline(session.id),
+      })),
+      canRevokeOthers,
+      revokeCooldownDays: SESSION_REVOKE_COOLDOWN_DAYS,
+    };
   }
 
-  async revokeSession(userId: string, sessionId: string) {
+  /**
+   * Sessions created after this session's mark, excluding itself. Reading the
+   * rows straight from `sessions` keeps the alert honest without a second event
+   * table, and the mark lives on the session so one device acknowledging the
+   * alert never hides it from another.
+   */
+  async securityEvents(userId: string, currentSessionId: string) {
+    const current = await this.prisma.session.findFirst({
+      where: { id: currentSessionId, userId, revokedAt: null },
+      select: { createdAt: true, securitySeenAt: true },
+    });
+    if (!current) throw new UnauthorizedException();
+
+    const since = current.securitySeenAt ?? current.createdAt;
+    const sessions = await this.prisma.session.findMany({
+      where: {
+        userId,
+        id:         { not: currentSessionId },
+        revokedAt:  null,
+        expiresAt:  { gt: new Date() },
+        createdAt:  { gt: since },
+      },
+      orderBy: { createdAt: 'desc' },
+      select:  { id: true, ip: true, userAgent: true, createdAt: true, lastUsedAt: true },
+    });
+    return sessions.map(session => ({
+      ...session,
+      online: this.sessionSockets.isOnline(session.id),
+    }));
+  }
+
+  async acknowledgeSecurityEvents(userId: string, currentSessionId: string) {
+    await this.prisma.session.updateMany({
+      where: { id: currentSessionId, userId, revokedAt: null },
+      data:  { securitySeenAt: new Date() },
+    });
+    return { ok: true };
+  }
+
+  async revokeSession(userId: string, requesterSessionId: string, targetSessionId: string) {
+    // Ownership is settled before the age rule: a session that is not yours
+    // answers like one that never existed, whatever the caller's device age.
+    const target = await this.prisma.session.findFirst({
+      where: { id: targetSessionId, userId },
+      select: { id: true },
+    });
+    if (!target) throw new NotFoundException('نشست پیدا نشد');
+
+    if (targetSessionId !== requesterSessionId) {
+      const requester = await this.prisma.session.findFirst({
+        where: { id: requesterSessionId, userId, revokedAt: null, expiresAt: { gt: new Date() } },
+        select: { createdAt: true },
+      });
+      if (!requester) throw new UnauthorizedException();
+      const ageMs = Date.now() - requester.createdAt.getTime();
+      if (ageMs < SESSION_REVOKE_COOLDOWN_DAYS * DAY_MS) {
+        throw new ForbiddenException(
+          `این دستگاه تازه وارد شده است؛ تا ${faDigits(SESSION_REVOKE_COOLDOWN_DAYS)} روز نمی‌تواند دستگاه‌های دیگر را خارج کند`,
+        );
+      }
+    }
+
     const result = await this.prisma.session.updateMany({
-      where: { id: sessionId, userId, revokedAt: null },
+      where: { id: targetSessionId, userId, revokedAt: null },
       data:  { revokedAt: new Date() },
     });
     if (result.count === 0) throw new NotFoundException('نشست پیدا نشد');
+    this.sessionSockets.disconnect(targetSessionId);
     return { ok: true };
   }
 
@@ -276,9 +364,20 @@ export class AuthService {
         refreshHash: hashRefreshToken(refreshToken),
         ip:          meta.ip?.slice(0, 64),
         userAgent:   meta.userAgent?.slice(0, 255),
+        // A session is not news to itself: without this the first thing a new
+        // login would show is an alert about every session that predates it.
+        securitySeenAt: new Date(),
         expiresAt:   new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * DAY_MS),
       },
-      select: { id: true, expiresAt: true },
+      select: { id: true, createdAt: true, expiresAt: true },
+    });
+    // The devices already signed in hear about this one immediately; a device
+    // that was offline still finds it through GET /auth/security-events.
+    this.sessionSockets.toUser(userId, 'session:new', {
+      id:        session.id,
+      ip:        meta.ip?.slice(0, 64) ?? null,
+      userAgent: meta.userAgent?.slice(0, 255) ?? null,
+      createdAt: session.createdAt,
     });
     return {
       user,

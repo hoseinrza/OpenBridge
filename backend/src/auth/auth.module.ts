@@ -6,6 +6,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JWT_SECRET, JWT_EXPIRES_IN } from '../config/env';
 import { RateLimitGuard } from '../common/rate-limit.guard';
+import { SessionSockets } from '../common/session-sockets';
 
 @Module({
   imports: [
@@ -15,8 +16,8 @@ import { RateLimitGuard } from '../common/rate-limit.guard';
       signOptions: { expiresIn: JWT_EXPIRES_IN },
     }),
   ],
-  providers:   [AuthService, JwtStrategy, RateLimitGuard],
+  providers:   [AuthService, JwtStrategy, RateLimitGuard, SessionSockets],
   controllers: [AuthController],
-  exports:     [JwtModule],
+  exports:     [JwtModule, SessionSockets],
 })
 export class AuthModule {}

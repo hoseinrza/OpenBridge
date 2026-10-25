@@ -105,7 +105,7 @@ export class CallsGateway implements OnGatewayInit, OnGatewayDisconnect {
     if (!isId(body?.callId)) return { ok: false, error: 'تماس مشخص نیست' };
 
     try {
-      return await this.calls.accept(socket.data.userId, body.callId, body.keyFingerprint);
+      return await this.calls.accept(socket.data.userId, body.callId);
     } catch (err) {
       return this.failure(err, 'پاسخ به تماس ناموفق بود');
     }

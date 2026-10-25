@@ -68,11 +68,11 @@ test('sends the composer text and clears the input', async () => {
 test('locks the composer of an encrypted chat instead of offering a send', () => {
   const chat = makeChat({ messages: [], locked: true });
   const view = renderChat();
-  expect(view.getByText(/این گفتگو سرتاسری رمزنگاری شده/)).toBeTruthy();
-  expect(view.getByText(/برای خواندنشان از نسخهٔ وب استفاده کن/)).toBeTruthy();
+  expect(view.getByText(/پیام‌های قدیمیِ این گفتگو/)).toBeTruthy();
+  expect(view.getByText(/هنوز پیام خواندنی روی سرور نیست/)).toBeTruthy();
   const input = view.getByLabelText('متن پیام');
   expect(input.props.editable).toBe(false);
-  expect(input.props.placeholder).toBe('نوشتن در این گفتگو فقط از نسخهٔ وب ممکن است');
+  expect(input.props.placeholder).toBe('نوشتن در این نسخه برای این گفتگو هنوز باز نشده');
   expect(view.getByLabelText('ضبط پیام صوتی')).toBeDisabled();
   expect(chat.sendMessage).not.toHaveBeenCalled();
 });

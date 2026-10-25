@@ -189,13 +189,15 @@ ensure_env() {
   if [ ! -f .env ]; then
     log "Generating .env with random secrets"
     cp .env.example .env
-    local pg_pass jwt_secret livekit_key livekit_secret public_ip
+    local pg_pass jwt_secret content_key livekit_key livekit_secret public_ip
     pg_pass=$(openssl rand -hex 24)
     jwt_secret=$(openssl rand -hex 32)
+    content_key=$(openssl rand -base64 32)
     livekit_key="lk_$(openssl rand -hex 12)"
     livekit_secret=$(openssl rand -hex 32)
     sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=${pg_pass}#" .env
     sed -i "s#^JWT_SECRET=.*#JWT_SECRET=${jwt_secret}#" .env
+    sed -i "s#^CONTENT_KEY=.*#CONTENT_KEY=${content_key}#" .env
     sed -i "s#^LIVEKIT_API_KEY=.*#LIVEKIT_API_KEY=${livekit_key}#" .env
     sed -i "s#^LIVEKIT_API_SECRET=.*#LIVEKIT_API_SECRET=${livekit_secret}#" .env
 
@@ -207,6 +209,13 @@ ensure_env() {
     fi
   else
     log ".env already exists, leaving it as-is"
+    # The API refuses to boot without the content key, so an older .env gets
+    # one generated here. Never regenerate an existing key: it would make
+    # every sealed message and upload unreadable.
+    if ! grep -q '^CONTENT_KEY=' .env; then
+      printf '\nCONTENT_KEY=%s\n' "$(openssl rand -base64 32)" >> .env
+      log "Added CONTENT_KEY to .env"
+    fi
     # An older deployment predates calls. Add the media keys once, without ever
     # rotating a value the operator may already have configured.
     local livekit_key livekit_secret public_ip

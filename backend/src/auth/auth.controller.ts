@@ -79,9 +79,25 @@ export class AuthController {
     return this.auth.listSessions(request.user.id, request.user.sessionId);
   }
 
+  // New sessions since this one last acknowledged them. The answer is a list of
+  // session rows, not opaque events, so the banner can show browser, IP and time
+  // without a second request.
+  @Get('security-events')
+  @UseGuards(JwtAuthGuard)
+  securityEvents(@Req() request: AuthenticatedRequest) {
+    return this.auth.securityEvents(request.user.id, request.user.sessionId);
+  }
+
+  @Post('security-events/ack')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  acknowledgeSecurityEvents(@Req() request: AuthenticatedRequest) {
+    return this.auth.acknowledgeSecurityEvents(request.user.id, request.user.sessionId);
+  }
+
   @Delete('sessions/:id')
   @UseGuards(JwtAuthGuard)
   revokeSession(@Req() request: AuthenticatedRequest, @Param('id', new ParseUUIDPipe()) sessionId: string) {
-    return this.auth.revokeSession(request.user.id, sessionId);
+    return this.auth.revokeSession(request.user.id, request.user.sessionId, sessionId);
   }
 }
