@@ -30,13 +30,15 @@ export default function SettingsScreen() {
       <View style={[styles.group, styles.identity]}>
         <Avatar uri={currentUser.avatar} name={currentUser.name} size={56} />
         <View style={styles.identityText}>
-          <Text style={styles.name}>{currentUser.name}</Text>
-          <Text style={styles.username} dir="ltr">@{currentUser.username}</Text>
+          <Text style={styles.name} numberOfLines={1}>{currentUser.name}</Text>
+          {!!currentUser?.username && (
+            <Text style={styles.username} numberOfLines={1} dir="ltr">@{currentUser.username}</Text>
+          )}
         </View>
       </View>
 
       <Text style={styles.sectionTitle}>ظاهر</Text>
-      <View style={styles.group}>
+      <View style={styles.group} accessibilityRole="radiogroup" accessibilityLabel="حالت نمایش">
         {THEME_OPTIONS.map((option, index) => {
           const selected = themeMode === option.value;
           return (
@@ -44,7 +46,7 @@ export default function SettingsScreen() {
               key={option.value}
               onPress={() => setThemeMode(option.value)}
               accessibilityRole="radio"
-              accessibilityState={{ selected }}
+              accessibilityState={{ checked: selected }}
               accessibilityLabel={option.label}
               style={({ pressed }) => [
                 styles.row,
@@ -53,7 +55,9 @@ export default function SettingsScreen() {
               ]}
             >
               <Text style={styles.rowLabel}>{option.label}</Text>
-              {selected && <FontAwesome6 name="check" size={14} color={colors.accent} />}
+              {/* accentText is the icon-on-dark-surface token; accent fails
+                  contrast against the dark card. */}
+              {selected && <FontAwesome6 name="check" size={14} color={colors.accentText} />}
             </Pressable>
           );
         })}
@@ -73,6 +77,9 @@ export default function SettingsScreen() {
   );
 }
 
+// The rows follow the rendered convention of the screens around this one
+// (ChatListScreen, ContactsScreen, ChatProfileScreen): content starts at the
+// right edge with `row-reverse`, and the text is right-aligned.
 function makeStyles(colors) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.bg },
@@ -85,33 +92,34 @@ function makeStyles(colors) {
       overflow: 'hidden',
     },
     identity: {
-      flexDirection: 'row',
+      flexDirection: 'row-reverse',
       alignItems: 'center',
       gap: spacing.md,
       padding: spacing.md,
     },
     identityText: { flex: 1 },
-    name: { ...navFonts.bold, fontSize: type.lg, color: colors.text1 },
-    username: { ...navFonts.regular, fontSize: type.sm, color: colors.text2, marginTop: 2 },
+    name: { ...navFonts.bold, fontSize: type.lg, color: colors.text1, textAlign: 'right' },
+    username: { ...navFonts.regular, fontSize: type.sm, color: colors.text2, textAlign: 'right', marginTop: 2 },
     sectionTitle: {
       ...navFonts.medium,
       fontSize: type.sm,
       color: colors.text3,
+      textAlign: 'right',
+      paddingHorizontal: spacing.md,
       marginTop: spacing.sm,
-      marginStart: spacing.xs,
     },
     row: {
-      flexDirection: 'row',
+      flexDirection: 'row-reverse',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      gap: spacing.md,
       paddingHorizontal: spacing.md,
       paddingVertical: 14,
     },
     rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
     rowPressed: { opacity: 0.7 },
-    rowLabel: { ...navFonts.medium, fontSize: type.base, color: colors.text1 },
+    rowLabel: { ...navFonts.medium, fontSize: type.base, color: colors.text1, flex: 1, textAlign: 'right' },
     logout: {
-      flexDirection: 'row',
+      flexDirection: 'row-reverse',
       alignItems: 'center',
       justifyContent: 'center',
       gap: spacing.sm,

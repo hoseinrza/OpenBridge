@@ -8,7 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { fontAssets, fonts, navFonts, useAppTheme } from './src/theme';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
-import { SettingsProvider } from './src/context/SettingsContext';
+import { SettingsProvider, useSettings } from './src/context/SettingsContext';
 import { SocketProvider } from './src/context/SocketContext';
 import { CallProvider } from './src/context/CallContext';
 import CallOverlay from './src/components/CallOverlay';
@@ -82,6 +82,7 @@ function RootNavigator() {
 
 function AppShell() {
   const [fontsLoaded, fontError] = useFonts(fontAssets);
+  const { ready: settingsReady } = useSettings();
   const { dark, colors } = useAppTheme();
 
   const navTheme = useMemo(() => ({
@@ -97,11 +98,15 @@ function AppShell() {
     fonts: navFonts,
   }), [dark, colors]);
 
-  useEffect(() => {
-    if (fontsLoaded || fontError) SplashScreen.hideAsync();
-  }, [fontsLoaded, fontError]);
+  // The fonts are not enough: the stored theme arrives one tick later, and
+  // hiding the splash before that paints the wrong colours until it hydrates.
+  const booted = (fontsLoaded || !!fontError) && settingsReady;
 
-  if (!fontsLoaded && !fontError) return null;
+  useEffect(() => {
+    if (booted) SplashScreen.hideAsync();
+  }, [booted]);
+
+  if (!booted) return null;
 
   return (
     <AuthProvider>

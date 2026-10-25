@@ -50,10 +50,12 @@ export default function SettingsPanel({ currentUser, onClose, onEditProfile, onL
               <dt>نام</dt>
               <dd>{currentUser.name}</dd>
             </div>
-            <div className="settings-fact">
-              <dt>نام کاربری</dt>
-              <dd dir="ltr">@{currentUser.username}</dd>
-            </div>
+            {currentUser.username && (
+              <div className="settings-fact">
+                <dt>نام کاربری</dt>
+                <dd dir="ltr">@{currentUser.username}</dd>
+              </div>
+            )}
             {currentUser.phone && (
               <div className="settings-fact">
                 <dt>شماره</dt>
