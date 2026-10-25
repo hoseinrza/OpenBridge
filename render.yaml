@@ -23,6 +23,11 @@ services:
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
+      # Base64 of exactly 32 random bytes (`openssl rand -base64 32`). Must be
+      # set in the dashboard before the first deploy: the API will not start
+      # without it, and rotating it makes existing sealed rows unreadable.
+      - key: CONTENT_KEY
+        sync: false
       - key: JWT_EXPIRES_IN
         value: 7d
       - key: NODE_ENV

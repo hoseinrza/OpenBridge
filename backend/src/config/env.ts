@@ -19,6 +19,11 @@ function required(name: string): string {
 export const JWT_SECRET = required('JWT_SECRET');
 export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN?.trim() || '7d';
 
+// Message text and uploaded bytes are sealed at rest with a key derived from
+// this master secret. It is required: without it the process refuses to start
+// rather than quietly writing plaintext into the database.
+export const CONTENT_KEY = required('CONTENT_KEY');
+
 if (IS_PRODUCTION && JWT_SECRET.length < 32) {
   throw new Error('JWT_SECRET must be at least 32 characters in production');
 }
