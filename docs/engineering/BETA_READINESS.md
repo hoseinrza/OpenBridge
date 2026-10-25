@@ -488,6 +488,42 @@ Remaining, documented rather than changed:
 
 Full backend suite after these changes: `npm run test:e2e` → 113/113.
 
+### 5.10 Beta environment and operations (Phase 1 Task 10)
+
+The operational contract is now one document: `docs/engineering/BETA_OPERATIONS.md`.
+It covers the four environments and their startup order, the full environment
+variable table with defaults and validation, test-mode OTP, schema pushes and
+seeding, the safe local reset, test commands and required configuration,
+backup/restore, and a release checklist with rollback. What changed while
+writing it:
+
+- **Render health path corrected** from `/api` (no route) to
+  `/api/health/ready`; the compose healthcheck, CI smoke waits and VPS
+  `deploy.sh` now ask the readiness route as well, so a running process with an
+  unreachable database no longer counts as a successful deploy.
+- **Stale operational claims corrected** in `README.md` and `DEPLOY.md`: the
+  security-suite/test counts, the health route, and the statement that CI is
+  green (the Android Maestro job is red on `main`; the CI gate inherits that).
+- **Seeder scope confirmed** from its source: `npm run seed:dev` refuses a
+  non-localhost `DATABASE_URL` or `NODE_ENV=production`, so it cannot fill a Beta
+  environment. CI uses its own disposable seed.
+- **Env validation confirmed** from `backend/src/config/env.ts`: the process
+  refuses to start without `JWT_SECRET`/`CONTENT_KEY`, production enforces the
+  JWT length, and the new maintenance variables default in code and are
+  documented in `backend/.env.example`.
+
+Operational limits that remain, with the reason:
+
+- Backup/restore and rollback are **documented and source-reviewed, not
+  exercised**: the production database is only reachable on the VPS, no
+  production action is authorized, and this machine has no Docker. The VPS
+  `deploy.sh` rollback branch has still never run on a real VPS.
+- A schema-changing release cannot be undone by rolling the image back; the
+  previous code must tolerate additive changes. That is stated in the release
+  checklist, together with the requirement to take a backup first.
+- No Beta environment is deployed. The roadmap's Beta gate is assessed in §6 and
+  the acceptance run; this section only makes the procedure repeatable.
+
 ---
 
 ## 6. Beta acceptance criteria
@@ -561,6 +597,7 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Phase 1.7 parity | Mobile now applies `message:edited`, renders quotes and edited marks, and replies/edits/deletes from the long-press tray; parity matrix and remaining gaps in §5.7. Mobile Jest 96/96; `expo export --platform android` PASS; web `npm run lint`/`npm run build` PASS. |
 | 2026-10-25 | Phase 1.8 calling cases | Signed-webhook cleanup, ring timeout, token TTL/reconnect and signature rejection added to `backend/test/calls.e2e.cjs`; `node --test test/calls.e2e.cjs` → 11/11; `npm run test:e2e` → 110/110. No live media server used; limits stated in §5.8. |
 | 2026-10-25 | Phase 1.9 reliability | `/api/health/ready` DB probe (503 without driver detail) wired into compose, CI and Render; shutdown hooks plus `exec` and 20s grace; indexes on conversations and sessions; hourly pruning of expired OTPs and dead sessions; atomic message+recency write; calls suite deletes its conversations. `npm run test:e2e` → 113/113; `prisma validate` PASS; a calls run afterwards left 0 orphan conversations. Shutdown path is source-reviewed only (no Docker here). §5.9 |
+| 2026-10-25 | Phase 1.10 operations | New `docs/engineering/BETA_OPERATIONS.md` (environments, env table, schema/seed/reset, tests, backup/restore, release checklist, rollback); Render and `deploy.sh` now use the readiness route; stale counts/CI status fixed in `README.md`/`DEPLOY.md`. Backup, restore and rollback are documented and source-reviewed, not executed. §5.10 |
 Next update: after a CI run exercises the Maestro instrumentation (CI watches
 PRs to `main` and pushes to `main`; a push to `beta/phase-1` does not trigger
 it).

@@ -20,7 +20,7 @@ REPO_URL="https://github.com/hoseinrza/OpenBridge.git"
 INSTALL_DIR="${OPENBRIDGE_DIR:-/opt/openbridge}"
 SWAP_FILE="/swapfile"
 SWAP_SIZE="2G"
-HEALTH_PATH="/api/health"
+HEALTH_PATH="/api/health/ready"
 BACKUP_KEEP="${BACKUP_KEEP:-5}"
 # Overridable because the first boot has to run `prisma db push` before the API
 # answers, and a 1 vCPU box needs a lot longer to do that than a big one.

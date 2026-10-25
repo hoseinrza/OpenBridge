@@ -4,6 +4,13 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.10.10] - 2026-10-25
+
+### Docs
+- راهنمای بهره‌برداری بتا در `docs/engineering/BETA_OPERATIONS.md` اضافه شد: محیط‌ها و ترتیب بالا آمدن، جدول متغیرها و اعتبارسنجی، حالت تست OTP، اسکیمای بدون migration و seed فقط-محلی، اجرای تست‌ها، بکاپ و بازیابی، چک‌لیست انتشار و بازگشت.
+- مسیر سلامتِ آمادگی در Render و `deploy.sh` هم به `/api/health/ready` تغییر کرد تا انتشار با دیتابیسِ در دسترس سنجیده شود.
+- آمار تست‌ها، مسیر سلامت و وضعیت CI در `README.md` و `DEPLOY.md` با واقعیت فعلی هم‌تراز شد.
+
 ## [1.10.9] - 2026-10-25
 
 ### Added

@@ -228,12 +228,12 @@ the stage before it, so the slow jobs never start on code the fast jobs reject:
 |-------|-----|----------------|
 | 0 · detect | `changes` | Path detection for PRs; main/schedule/manual always run the mobile E2E |
 | 1 · static | `web-lint`, `backend-check` | ESLint clean · Prisma schema valid · TypeScript compiles |
-| 2 · tests | `backend-e2e` | The 19 security tests pass against real PostgreSQL |
+| 2 · tests | `backend-e2e` | The 41 security cases plus the wider e2e suite (113 cases) pass against real PostgreSQL |
 | 2 · tests | `mobile-tests` | Jest + RNTL mobile behavior suite |
 | 2 · tests | `mobile-e2e` | Maestro on an API-34 emulator against a real PostgreSQL + NestJS backend (main, mobile PRs, nightly) |
 | 2b | `dependencies` | `npm audit` findings (reports, never blocks) |
 | 3 · artefacts | `web-build`, `mobile-bundle` | The Vite bundle builds · the Expo Hermes bundle builds |
-| 4 · ship path | `deploy-dry-run` | Both Docker images build, `docker compose up` serves the SPA, `/api/health` answers **through nginx**, and Socket.IO handshakes |
+| 4 · ship path | `deploy-dry-run` | Both Docker images build, `docker compose up` serves the SPA, `/api/health/ready` answers **through nginx** (database included), and Socket.IO handshakes |
 | — | `ci-gate` | One required check for branch protection |
 
 Make `CI gate` the required status check rather than listing every job, so the
@@ -252,7 +252,7 @@ It stays inert until you opt in:
 On the server, every redeploy runs the same seven stages: fetch → refuse the
 commit if CI is not green → check out the tested SHA → `pg_dump` into
 `backups/` (last 5 kept) → build images while the old containers keep serving →
-swap → wait for `/api/health` through nginx. If health never arrives, it checks
+swap → wait for `/api/health/ready` through nginx. If health never arrives, it checks
 out the previous commit, rebuilds, and records the bad SHA in
 `.deploy-failed-sha` so the cron cannot crash-loop on it. Tune the wait with
 `HEALTH_DEADLINE` on very slow boxes.
