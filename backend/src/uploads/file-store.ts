@@ -1,5 +1,25 @@
-import { readFile, rename, writeFile } from 'fs/promises';
+import { readFile, rename, unlink, writeFile } from 'fs/promises';
 import { ContentCipher } from '../common/content-crypto';
+
+// On Windows an antivirus or the search indexer can still hold a file it just
+// saw for a few dozen milliseconds, and a rename onto it fails with EPERM or
+// EACCES. Those three codes mean "wait and try again"; any other one is a real
+// failure and goes back to the caller unchanged.
+const LOCK_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const RENAME_ATTEMPTS = 4;
+
+async function replaceFile(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (attempt >= RENAME_ATTEMPTS || !LOCK_CODES.has(code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, attempt * 25));
+    }
+  }
+}
 
 /**
  * Seals a file multer has just written, in place. The bytes are renamed into
@@ -9,8 +29,13 @@ import { ContentCipher } from '../common/content-crypto';
 export async function sealStoredFile(path: string, filename: string, cipher: ContentCipher): Promise<void> {
   const sealed = cipher.sealFile(filename, await readFile(path));
   const staging = `${path}.sealing`;
-  await writeFile(staging, sealed);
-  await rename(staging, path);
+  try {
+    await writeFile(staging, sealed);
+    await replaceFile(staging, path);
+  } catch (error) {
+    await unlink(staging).catch(() => {});
+    throw error;
+  }
 }
 
 export async function readStoredFile(path: string, filename: string, cipher: ContentCipher): Promise<Buffer> {

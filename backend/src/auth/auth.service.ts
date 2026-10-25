@@ -325,6 +325,14 @@ export class AuthService {
   }
 
   async revokeSession(userId: string, requesterSessionId: string, targetSessionId: string) {
+    // Ownership is settled before the age rule: a session that is not yours
+    // answers like one that never existed, whatever the caller's device age.
+    const target = await this.prisma.session.findFirst({
+      where: { id: targetSessionId, userId },
+      select: { id: true },
+    });
+    if (!target) throw new NotFoundException('نشست پیدا نشد');
+
     if (targetSessionId !== requesterSessionId) {
       const requester = await this.prisma.session.findFirst({
         where: { id: requesterSessionId, userId, revokedAt: null, expiresAt: { gt: new Date() } },

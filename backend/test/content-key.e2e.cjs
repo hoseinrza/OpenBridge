@@ -22,6 +22,7 @@ const { io } = require('socket.io-client');
 const { PrismaClient } = require('@prisma/client');
 const { AppModule } = require('../dist/app.module');
 const { isOriginAllowed } = require('../dist/config/env');
+const { isSealed, openStoredText } = require('./fixtures');
 
 const API_PREFIX = '/api';
 const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -167,7 +168,11 @@ test('a chat that once used MLS keeps working and seals everything new', async (
   });
   const byId = new Map(rows.map(row => [row.id, row]));
   assert.equal(byId.get(first.id).conversationId, conversationId, 'both messages live in that chat');
-  assert.equal(byId.get(first.id).text, before, 'the earlier row was already stored in the clear');
+  // Sealing is a property of the write, not of the chat: this row was sent
+  // before the flag existed and still landed sealed, which is why a new device
+  // can read the whole chat instead of only its second half.
+  assert.ok(isSealed(byId.get(first.id).text), 'the earlier row is sealed as well');
+  assert.equal(openStoredText(conversationId, byId.get(first.id).text), before, 'and opens to what was typed');
   assert.match(byId.get(second.id).text, /^obx1\./, 'the new row is sealed even in a legacy chat');
 
   const history = await api(`/messages/${alice.user.id}`, { token: bob.token });

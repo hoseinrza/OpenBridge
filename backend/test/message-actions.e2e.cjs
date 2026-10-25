@@ -23,6 +23,7 @@ const { io } = require('socket.io-client');
 const { PrismaClient } = require('@prisma/client');
 const { AppModule } = require('../dist/app.module');
 const { isOriginAllowed } = require('../dist/config/env');
+const { isSealed, openStoredText } = require('./fixtures');
 
 const API_PREFIX = '/api';
 
@@ -364,7 +365,8 @@ test('delete for me hides the row from that account alone', async () => {
     select: { text: true, deletedAt: true, hides: { select: { userId: true } } },
   });
   assert.equal(hiddenRow.deletedAt, null, 'the row itself is untouched');
-  assert.equal(hiddenRow.text, 'only bob loses this one', 'with its text intact');
+  assert.ok(isSealed(hiddenRow.text), 'and its text is sealed at rest, like every other row');
+  assert.equal(openStoredText(group.id, hiddenRow.text), 'only bob loses this one', 'opening it gives back what alice typed');
   assert.deepEqual(hiddenRow.hides, [{ userId: bob.user.id }], 'one hide, for one viewer');
 
   // An id you hid is not on your screen, so it is not something you can act on.
@@ -413,8 +415,12 @@ test('a legacy encrypted chat still edits its rows, and the rewrite is sealed', 
   assert.equal(enabled.status, 201, 'the chat opts into encryption');
   const conversationId = enabled.data.conversationId;
 
+  // Sealing belongs to the write, not to the chat's flag: a row sent before the
+  // switch went through the same path as one sent after it, so nothing on this
+  // disk is plaintext.
   const rowBefore = await prisma.message.findUnique({ where: { id: sent.id }, select: { text: true } });
-  assert.equal(rowBefore.text, 'before encryption', 'the legacy row was stored in the clear');
+  assert.ok(isSealed(rowBefore.text), 'the row written before the switch is sealed too');
+  assert.equal(openStoredText(conversationId, rowBefore.text), 'before encryption', 'and opens to what was typed');
 
   // The row is still the sender's to rewrite. What changed with server-key
   // content is where the new text lands: the same sealed format as a fresh
