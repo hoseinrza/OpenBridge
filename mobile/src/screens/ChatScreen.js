@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, I18nManager, Image, KeyboardAvoidingView, Linking, Platform,
+  ActivityIndicator, Alert, FlatList, I18nManager, Image, KeyboardAvoidingView, Linking, Platform,
   Pressable, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { FontAwesome6 } from '@expo/vector-icons';
@@ -40,8 +40,18 @@ function isPlayable(msg) {
   return msg.type === 'voice' || msg.type === 'audio';
 }
 
-function buildRows(messages) {
-  const rows = [];
+// What a quoted row says in one line: the text when it has any, otherwise the
+// kind of attachment it carries. A quote of a deleted message says so instead
+// of leaving an empty strip.
+function quoteLabel(quote) {
+  if (quote.deleted) return 'پیام حذف شد';
+  if (quote.text) return quote.text;
+  if (quote.type === 'image') return 'تصویر';
+  if (quote.type === 'voice' || quote.type === 'audio') return 'پیام صوتی';
+  return quote.name || 'فایل';
+}
+
+function buildRows(messages) {  const rows = [];
   let prevDay = null;
 
   messages.forEach((msg) => {
@@ -68,11 +78,18 @@ export default function ChatScreen({ route, navigation }) {
     messages, isTyping, typingName, connected, locked,
     historyState, historyError, retryHistory,
     sendMessage, sendVoice, notifyTyping, toggleReaction,
+    editMessage, deleteMessage,
   } = useChat(peer, currentUser);
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [reactionPicker, setReactionPicker] = useState(null);
+  // The message the next send quotes, held whole so the strip above the
+  // composer can show who said what without another lookup.
+  const [replyTo, setReplyTo] = useState(null);
+  // The message being rewritten. Editing and replying share the composer but
+  // never at once: starting one clears the other.
+  const [editing, setEditing] = useState(null);
   const listRef = useRef(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [isRecording, setIsRecording] = useState(false);
@@ -123,7 +140,18 @@ export default function ChatScreen({ route, navigation }) {
     });
   }, [navigation, peer, startCall, styles, colors.text1]);
 
-  useEffect(() => { setReactionPicker(null); }, [peer?.id]);
+  useEffect(() => { setReactionPicker(null); setReplyTo(null); setEditing(null); }, [peer?.id]);
+
+  // If the quoted or rewritten row disappears — deleted for everyone, or hidden
+  // on this account by another device — the strip goes with it, so the composer
+  // never points at a message the server would refuse to attach.
+  useEffect(() => {
+    if (replyTo && !messages.some(m => m.id === replyTo.id)) setReplyTo(null);
+    if (editing && !messages.some(m => m.id === editing.id)) {
+      setEditing(null);
+      setText('');
+    }
+  }, [messages, replyTo, editing]);
 
   // Tap once to react, tap the same emoji again to take it back; the server
   // answers with the finished list and the chips redraw from that.
@@ -139,14 +167,52 @@ export default function ChatScreen({ route, navigation }) {
     if (!value || sending || locked) return;
     setSending(true);
     setError('');
-    const result = await sendMessage(value);
+    // Keep the quote or edit argument out of the call when there is none, so a
+    // plain send stays exactly the call it has always been.
+    const result = editing
+      ? await editMessage(editing.id, value)
+      : replyTo
+        ? await sendMessage(value, replyTo.id)
+        : await sendMessage(value);
     setSending(false);
     if (!result.ok) {
       setError(result.error);
       return;
     }
     setText('');
-  }, [text, sending, sendMessage, locked]);
+    setReplyTo(null);
+    setEditing(null);
+  }, [text, sending, sendMessage, editMessage, locked, replyTo, editing]);
+
+  const startEdit = useCallback((msg) => {
+    setReplyTo(null);
+    setReactionPicker(null);
+    setEditing(msg);
+    setText(msg.text ?? '');
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditing(null);
+    setText('');
+  }, []);
+
+  // A delete is asked twice: the tray only opens the question, and the answer
+  // chooses the scope. Deleting "for everyone" is offered only on one's own
+  // message, because the server refuses it anywhere else.
+  const confirmDelete = useCallback((msg) => {
+    setReactionPicker(null);
+    const remove = async (scope) => {
+      setError('');
+      const result = await deleteMessage(msg.id, scope);
+      if (!result.ok) setError(result.error);
+    };
+    const options = [{ text: 'لغو', style: 'cancel' }];
+    if (msg.side === 'mine') {
+      options.push({ text: 'حذف برای همه', style: 'destructive', onPress: () => { void remove('everyone'); } });
+    }
+    options.push({ text: 'حذف برای من', style: 'destructive', onPress: () => { void remove('me'); } });
+    Alert.alert('حذف پیام', 'این پیام حذف شود؟', options);
+  }, [deleteMessage]);
 
   // ── Voice ────────────────────────────────────────────
   // The phone counts the length while it records and that same number travels
@@ -264,6 +330,17 @@ export default function ChatScreen({ route, navigation }) {
               <Text style={styles.sender} numberOfLines={1}>{msg.sender || 'کاربر'}</Text>
             )}
 
+            {!!msg.replyTo && (
+              <View style={[styles.quote, isMine && styles.quoteMine]}>
+                <Text style={[styles.quoteSender, isMine && styles.quoteTextMine]} numberOfLines={1}>
+                  {msg.replyTo.sender || 'کاربر'}
+                </Text>
+                <Text style={[styles.quoteText, isMine && styles.quoteTextMine]} numberOfLines={1}>
+                  {quoteLabel(msg.replyTo)}
+                </Text>
+              </View>
+            )}
+
             {isPlayable(msg) && msg.src ? (
               <VoiceBubble
                 id={msg.id}
@@ -306,39 +383,75 @@ export default function ChatScreen({ route, navigation }) {
 
             {pickerOpen && (
               <View
-                style={[styles.tapbackRow, isMine ? styles.tapbackRowMine : styles.tapbackRowOther]}
+                style={[styles.tapbackTray, isMine ? styles.tapbackTrayMine : styles.tapbackTrayOther]}
                 accessibilityRole="menu"
               >
-                {REACTIONS.map(emoji => (
+                <View style={styles.tapbackRow}>
                   <Pressable
-                    key={emoji}
-                    testID={`reaction-option-${emoji}`}
-                    style={[
-                      styles.tapback,
-                      isMine && styles.tapbackOut,
-                      held.has(emoji) && styles.tapbackHeld,
-                      held.has(emoji) && isMine && styles.tapbackOutHeld,
-                    ]}
-                    onPress={() => onReact(msg.id, emoji)}
+                    testID={`reply-option-${msg.id}`}
+                    style={[styles.tapback, isMine && styles.tapbackOut]}
+                    onPress={() => { setEditing(null); setReplyTo(msg); setReactionPicker(null); }}
                     accessibilityRole="button"
-                    accessibilityState={{ selected: held.has(emoji) }}
-                    accessibilityLabel={held.has(emoji) ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                    accessibilityLabel="پاسخ به این پیام"
                   >
-                    <Text style={styles.tapbackText}>{emoji}</Text>
+                    <FontAwesome6 name="reply" size={13} color={isMine ? colors.onBubbleOut : colors.text2} />
                   </Pressable>
-                ))}
-                <Pressable
-                  style={[styles.tapbackClose, isMine && styles.tapbackOut]}
-                  onPress={() => setReactionPicker(null)}
-                  accessibilityRole="button"
-                  accessibilityLabel="بستن واکنش‌ها"
-                >
-                  <FontAwesome6 name="xmark" size={11} color={isMine ? colors.onBubbleOut : colors.text2} />
-                </Pressable>
+                  {isMine && msg.type === 'text' && (
+                    <Pressable
+                      testID={`edit-option-${msg.id}`}
+                      style={[styles.tapback, styles.tapbackOut]}
+                      onPress={() => startEdit(msg)}
+                      accessibilityRole="button"
+                      accessibilityLabel="ویرایش این پیام"
+                    >
+                      <FontAwesome6 name="pen-to-square" size={13} color={colors.onBubbleOut} />
+                    </Pressable>
+                  )}
+                  <Pressable
+                    testID={`delete-option-${msg.id}`}
+                    style={[styles.tapback, isMine && styles.tapbackOut]}
+                    onPress={() => confirmDelete(msg)}
+                    accessibilityRole="button"
+                    accessibilityLabel="حذف این پیام"
+                  >
+                    <FontAwesome6 name="trash-can" size={13} color={isMine ? colors.onBubbleOut : colors.text2} />
+                  </Pressable>
+                </View>
+                <View style={styles.tapbackRow}>
+                  {REACTIONS.map(emoji => (
+                    <Pressable
+                      key={emoji}
+                      testID={`reaction-option-${emoji}`}
+                      style={[
+                        styles.tapback,
+                        isMine && styles.tapbackOut,
+                        held.has(emoji) && styles.tapbackHeld,
+                        held.has(emoji) && isMine && styles.tapbackOutHeld,
+                      ]}
+                      onPress={() => onReact(msg.id, emoji)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: held.has(emoji) }}
+                      accessibilityLabel={held.has(emoji) ? `برداشتن واکنش ${emoji}` : `افزودن واکنش ${emoji}`}
+                    >
+                      <Text style={styles.tapbackText}>{emoji}</Text>
+                    </Pressable>
+                  ))}
+                  <Pressable
+                    style={[styles.tapbackClose, isMine && styles.tapbackOut]}
+                    onPress={() => setReactionPicker(null)}
+                    accessibilityRole="button"
+                    accessibilityLabel="بستن واکنش‌ها"
+                  >
+                    <FontAwesome6 name="xmark" size={11} color={isMine ? colors.onBubbleOut : colors.text2} />
+                  </Pressable>
+                </View>
               </View>
             )}
 
             <View style={styles.metaRow}>
+              {!!msg.editedAt && (
+                <Text style={[styles.edited, isMine && styles.timeMine]}>ویرایش شد</Text>
+              )}
               <Text style={[styles.time, isMine && styles.timeMine]}>{msg.time}</Text>
               {isMine && (
                 <FontAwesome6
@@ -497,6 +610,46 @@ export default function ChatScreen({ route, navigation }) {
         </View>
       )}
 
+      {!!editing && !isRecording && !voiceBusy && (
+        <View style={styles.replyBar} accessibilityLabel="ویرایش پیام">
+          <View style={styles.replyBarLine} />
+          <View style={styles.replyBarBody}>
+            <Text style={styles.replyBarSender}>ویرایش پیام</Text>
+            <Text style={styles.replyBarText} numberOfLines={1}>{editing.text || 'بدون متن'}</Text>
+          </View>
+          <Pressable
+            testID="edit-cancel"
+            onPress={cancelEdit}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="لغو ویرایش"
+          >
+            <FontAwesome6 name="xmark" size={14} color={colors.text2} />
+          </Pressable>
+        </View>
+      )}
+
+      {!!replyTo && !editing && !isRecording && !voiceBusy && (
+        <View style={styles.replyBar} accessibilityLabel={`پاسخ به ${replyTo.side === 'mine' ? 'پیام خودت' : replyTo.sender || peer?.name || 'کاربر'}`}>
+          <View style={styles.replyBarLine} />
+          <View style={styles.replyBarBody}>
+            <Text style={styles.replyBarSender} numberOfLines={1}>
+              {replyTo.side === 'mine' ? 'شما' : replyTo.sender || peer?.name || 'کاربر'}
+            </Text>
+            <Text style={styles.replyBarText} numberOfLines={1}>{quoteLabel(replyTo)}</Text>
+          </View>
+          <Pressable
+            testID="reply-cancel"
+            onPress={() => setReplyTo(null)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="لغو پاسخ"
+          >
+            <FontAwesome6 name="xmark" size={14} color={colors.text2} />
+          </Pressable>
+        </View>
+      )}
+
       {isRecording || voiceBusy ? (
         <View style={[styles.voiceRow, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
           <Pressable
@@ -556,7 +709,7 @@ export default function ChatScreen({ route, navigation }) {
               onPress={onSend}
               disabled={!canSend}
               accessibilityRole="button"
-              accessibilityLabel="ارسال پیام"
+              accessibilityLabel={editing ? 'ذخیرهٔ ویرایش' : 'ارسال پیام'}
               accessibilityState={{ disabled: !canSend }}
             >
               {sending
@@ -702,6 +855,20 @@ function makeStyles(colors) {
     bubbleTextMine: { color: colors.onBubbleOut },
     textMine: { color: colors.onBubbleOut },
 
+    quote: {
+      borderLeftWidth: 3,
+      borderLeftColor: colors.accent,
+      borderRadius: radius.sm,
+      backgroundColor: colors.surface2,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
+      gap: 1,
+    },
+    quoteMine: { borderLeftColor: '#FFE0DE', backgroundColor: 'rgba(255,255,255,0.16)' },
+    quoteSender: { color: colors.accentText, fontFamily: fonts.semibold, fontSize: type.xs },
+    quoteText: { color: colors.text2, fontFamily: fonts.regular, fontSize: type.xs },
+    quoteTextMine: { color: 'rgba(255,255,255,0.9)' },
+
     image: { width: 220, height: 160, maxWidth: '100%', borderRadius: radius.sm },
     fileRow: {
       flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,
@@ -733,19 +900,18 @@ function makeStyles(colors) {
     reactionText: { color: colors.text1, fontFamily: fonts.regular, fontSize: 14, lineHeight: 18 },
 
     /* Floats above the bubble instead of sitting in its flow, so opening it
-       never changes the bubble height or moves the conversation. Own messages
-       anchor to their right edge, incoming ones to their left, so the tray
-       always opens toward the middle of the screen. */
-    tapbackRow: {
+       never changes the bubble height or moves the conversation. Two rows keep
+       the action set (reply, edit, delete) and the reactions on a phone width;
+       own messages anchor to their right edge, incoming ones to their left, so
+       the tray always opens toward the middle of the screen. */
+    tapbackTray: {
       position: 'absolute',
-      top: -44,
+      top: -84,
       zIndex: 20,
-      flexDirection: 'row',
-      alignItems: 'center',
       gap: 2,
       paddingHorizontal: 3,
       paddingVertical: 3,
-      borderRadius: radius.pill,
+      borderRadius: radius.lg,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface3,
@@ -755,8 +921,9 @@ function makeStyles(colors) {
       shadowOffset: { width: 0, height: 3 },
       elevation: 8,
     },
-    tapbackRowMine: { right: 0 },
-    tapbackRowOther: { left: 0 },
+    tapbackTrayMine: { right: 0 },
+    tapbackTrayOther: { left: 0 },
+    tapbackRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
     tapback: {
       width: 34, height: 34,
       borderRadius: radius.pill,
@@ -783,6 +950,18 @@ function makeStyles(colors) {
     metaRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 4 },
     time: { color: colors.text3, fontFamily: fonts.regular, fontSize: 10.5 },
     timeMine: { color: 'rgba(255,255,255,0.78)' },
+    edited: { color: colors.text3, fontFamily: fonts.regular, fontSize: 10 },
+
+    replyBar: {
+      flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,
+      paddingHorizontal: spacing.md, paddingVertical: spacing.xs,
+      borderTopWidth: 1, borderTopColor: colors.border,
+      backgroundColor: colors.surface2,
+    },
+    replyBarLine: { width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: colors.accent },
+    replyBarBody: { flex: 1, gap: 1 },
+    replyBarSender: { color: colors.accentText, fontFamily: fonts.semibold, fontSize: type.xs, textAlign: 'right' },
+    replyBarText: { color: colors.text2, fontFamily: fonts.regular, fontSize: type.xs, textAlign: 'right' },
 
     typingRow: {
       flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm,

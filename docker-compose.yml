@@ -69,13 +69,17 @@ services:
     volumes:
       - uploads:/app/uploads
     # The CMD runs `prisma db push` before booting, so the first check has to
-    # wait for a schema sync on a 1 vCPU box.
+    # wait for a schema sync on a 1 vCPU box. `ready` also proves Postgres is
+    # reachable, which a static liveness answer would hide.
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 4
       start_period: 120s
+    # Long enough for Nest's shutdown hooks to disconnect Prisma and finish the
+    # active calls; the default 10s is close to the Prisma teardown alone.
+    stop_grace_period: 20s
 
   # Self-hosted media SFU. It speaks WebSocket on 7880 (reverse-proxied by nginx
   # at /livekit/), ICE/TCP on 7881 and WebRTC UDP on 7882. 7880 is deliberately

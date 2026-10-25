@@ -1,12 +1,12 @@
 {
   "name": "chatapp-backend",
-  "version": "1.10.0",
+  "version": "1.10.11",
   "private": true,
   "scripts": {
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "build": "nest build",
-    "test:e2e": "npm run build && node --test test/content-crypto.test.cjs test/message-encryption.test.cjs test/legacy-import.test.cjs test/upload-encryption.test.cjs test/security.e2e.cjs test/message-actions.e2e.cjs test/e2ee-client.e2e.cjs test/calls.e2e.cjs test/content-key.e2e.cjs test/legacy-import.e2e.cjs",
+    "test:e2e": "npm run build && node --test test/content-crypto.test.cjs test/message-encryption.test.cjs test/legacy-import.test.cjs test/upload-encryption.test.cjs test/security.e2e.cjs test/message-actions.e2e.cjs test/e2ee-client.e2e.cjs test/calls.e2e.cjs test/content-key.e2e.cjs test/legacy-import.e2e.cjs test/health.e2e.cjs test/maintenance.e2e.cjs",
     "seed:dev": "node test/dev-chat-seed.mjs",
     "prisma:gen": "prisma generate",
     "prisma:validate": "prisma validate",
@@ -22,12 +22,12 @@
     "@nestjs/platform-socket.io": "^10.0.0",
     "@nestjs/websockets": "^10.0.0",
     "@prisma/client": "^5.0.0",
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
     "dotenv": "^16.6.1",
     "livekit-server-sdk": "2.19.2",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.5.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.0",
@@ -44,5 +44,10 @@
     "prisma": "^5.0.0",
     "socket.io-client": "^4.8.4",
     "typescript": "^5.3.0"
+  },
+  "overrides": {
+    "body-parser": "^1.20.9",
+    "multer": "^2.5.0",
+    "qs": "^6.16.1"
   }
 }

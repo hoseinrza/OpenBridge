@@ -925,19 +925,25 @@ export class MessagesService {
       ? data.forwardedFrom.trim().slice(0, 80) || null
       : null;
 
-    const message = await this.prisma.message.create({
-      data: {
-        conversationId,
-        senderId,
-        ...stored,
-        replyToId,
-        forwardedFrom,
-      },
-      include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
-    });
-    await this.prisma.conversation.update({
-      where: { id: conversationId },
-      data:  { updatedAt: new Date() },
+    // The row and the chat's recency stamp belong together: a message without
+    // the stamp sorts as old, and a stamp without the message bumps a chat for
+    // nothing. One transaction keeps a failed send from leaving either behind.
+    const message = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.message.create({
+        data: {
+          conversationId,
+          senderId,
+          ...stored,
+          replyToId,
+          forwardedFrom,
+        },
+        include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
+      });
+      await tx.conversation.update({
+        where: { id: conversationId },
+        data:  { updatedAt: new Date() },
+      });
+      return created;
     });
     return this.toWireMessage(message);
   }

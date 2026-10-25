@@ -60,7 +60,7 @@ docker compose ps
 سلامت `api`، `web` و `livekit` از healthcheck واقعی میاد؛ می‌تونی مستقیم هم چکش کنی:
 
 ```bash
-curl http://localhost/api/health      # {"status":"ok",...}
+curl http://localhost/api/health/ready   # {"status":"ok","db":"up"}
 docker compose exec -T livekit wget -q -O- http://127.0.0.1:7880/   # OK
 ```
 
@@ -155,10 +155,10 @@ docker compose restart
 | مرحله | جاب | چی را ثابت می‌کنه |
 |-------|-----|-------------------|
 | ۱ · ایستا | `web-lint`, `backend-check` | ESLint تمیز · اسکیمای Prisma معتبر · TypeScript کامپایل می‌شه |
-| ۲ · تست | `backend-e2e` | ۱۶ تست امنیتی روی PostgreSQL واقعی |
+| ۲ · تست | `backend-e2e` | ۴۱ پروندهٔ امنیتی و در کل ۱۱۳ تست e2e روی PostgreSQL واقعی |
 | ۲ب · ممیزی | `dependencies` | یافته‌های `npm audit` (فقط گزارش، جلوگیری نمی‌کنه) |
 | ۳ · خروجی | `web-build`, `mobile-bundle` | بیلد Vite · باندل Hermes اکسپو |
-| ۴ · مسیر انتشار | `deploy-dry-run` | هر دو ایمیج Docker ساخته می‌شن، `docker compose up` فرانت را سرو می‌کنه، `/api/health` **از پشت nginx** جواب می‌ده و دست‌دهی Socket.IO برقراره |
+| ۴ · مسیر انتشار | `deploy-dry-run` | هر دو ایمیج Docker ساخته می‌شن، `docker compose up` فرانت را سرو می‌کنه، `/api/health/ready` **از پشت nginx** جواب می‌ده و دست‌دهی Socket.IO برقراره |
 | — | `ci-gate` | تنها چکی که لازم است در branch protection اجباری بشه |
 
 در تنظیمات ریپو، به‌جای تک‌تک جاب‌ها، فقط `CI gate` را required کن؛ این‌طور می‌تونی
@@ -185,8 +185,8 @@ docker compose restart
 از API گیت‌هاب می‌پرسه (برای ریپوی عمومی بدون توکن کار می‌کنه) و اگر نپرسه فقط
 هشدار می‌ده — پس دروازهٔ اصلی همان `deploy.yml` است.
 
-وضعیت مشاهده‌شده (۲۰۲۶-۱۰-۲۱): CI روی GitHub Actions اجرا شده و سبز است —
-شامل مرحلهٔ ساخت ایمیج‌های Docker و smoke test همان compose. ولی `deploy.yml`
+وضعیت مشاهده‌شده (۲۰۲۶-۱۰-۲۵): مرحله‌های Docker و smoke همان compose سبزند، ولی job اندروید (Maestro) روی main قرمز است و `CI gate` هم به همین دلیل قرمز می‌شود —
+جزئیات در `docs/engineering/BETA_READINESS.md` §5.2 آمده است. `deploy.yml`
 همیشه `skipped` است چون `DEPLOY_ENABLED` روی `true` نیست و سکرت‌های SSH وجود
 ندارند. پس تا وقتی سرور و سکرت‌ها آماده نشوند، هیچ دیپلوی Production انجام
 نمی‌شود. تنها بخشی که هنوز روی VPS واقعی آزمایش نشده، همان redeploy/rollback

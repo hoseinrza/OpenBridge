@@ -37,6 +37,19 @@ function normalize(msg, myId) {
     createdAt:      new Date(msg.createdAt).getTime(),
     read:           msg.read,
     reactions:      groupReactions(msg.reactions, myId),
+    editedAt:       msg.editedAt ? new Date(msg.editedAt).getTime() : null,
+    // The server resolves the quoted row before it answers, so this phone never
+    // has to hold the other side's history to show what a reply points at.
+    replyTo:        msg.replyTo
+      ? {
+          id:      msg.replyTo.id,
+          type:    (msg.replyTo.type ?? 'TEXT').toLowerCase(),
+          text:    msg.replyTo.text ?? '',
+          name:    msg.replyTo.fileName,
+          sender:  msg.replyTo.sender?.name ?? msg.replyTo.sender?.username,
+          deleted: Boolean(msg.replyTo.deleted),
+        }
+      : null,
   };
 }
 
@@ -183,6 +196,23 @@ export function useChat(peer, currentUser, onIncoming) {
       )));
     };
 
+    // An edit is delivered to every open device, the sender's own included, so
+    // a message written here and changed on the web must not keep its old text
+    // until the screen is reopened.
+    const onEdited = (msg) => {
+      const p  = peerRef.current;
+      const me = currentUserRef.current;
+      if (!me || !p) return;
+      const belongs = p.kind === 'group'
+        ? msg.conversationId === p.id
+        : (
+            (msg.senderId === me.id && msg.receiverId === p.id) ||
+            (msg.senderId === p.id && msg.receiverId === me.id)
+          );
+      if (!belongs) return;
+      setMessages(prev => prev.map(m => (m.id === msg.id ? normalize(msg, me.id) : m)));
+    };
+
     // A delete — for everyone or for this account alone — takes the row out of
     // this list. The id is enough: the list only ever holds the open chat, and a
     // delete for me reaches only this account's own devices.
@@ -210,6 +240,7 @@ export function useChat(peer, currentUser, onIncoming) {
     socket.on('typing:start', onTypingStart);
     socket.on('typing:stop', onTypingStop);
     socket.on('reaction:changed', onReaction);
+    socket.on('message:edited', onEdited);
     socket.on('message:deleted', onDeleted);
     socket.on('e2ee:envelope', onEnvelope);
     socket.on('connect', onConnect);
@@ -220,6 +251,7 @@ export function useChat(peer, currentUser, onIncoming) {
       socket.off('typing:start', onTypingStart);
       socket.off('typing:stop', onTypingStop);
       socket.off('reaction:changed', onReaction);
+      socket.off('message:edited', onEdited);
       socket.off('message:deleted', onDeleted);
       socket.off('e2ee:envelope', onEnvelope);
       socket.off('connect', onConnect);
@@ -257,7 +289,7 @@ export function useChat(peer, currentUser, onIncoming) {
   }, [peer?.id, currentUser?.id, loadHistory]);
 
   // ── Send ──────────────────────────────────────────────
-  const sendMessage = useCallback(async (text) => {
+  const sendMessage = useCallback(async (text, replyToId) => {
     const trimmed = text?.trim();
     if (!trimmed) return { ok: false, error: 'متن پیام خالی است' };
     if (locked) {
@@ -270,6 +302,9 @@ export function useChat(peer, currentUser, onIncoming) {
     const payload = peer.kind === 'group'
       ? { conversationId: peer.id, type: 'TEXT', text: trimmed }
       : { toId: peer.id, type: 'TEXT', text: trimmed };
+    // Only sent when quoting: the server treats an absent field and an empty
+    // one the same, but the wire stays what a plain message has always been.
+    if (replyToId) payload.replyToId = replyToId;
 
     clearTimeout(typingTimerRef.current);
     socket.emit('typing:stop', peer.kind === 'group' ? { conversationId: peer.id } : { toId: peer.id });
@@ -322,6 +357,37 @@ export function useChat(peer, currentUser, onIncoming) {
     }
   }, [socket, connected, peer?.id, peer?.kind, locked]);
 
+  // ── Edit and delete ───────────────────────────────────
+  // Both go through the same kind of acknowledgement as sending: the answer is
+  // the server's verdict, and the visible change arrives later as the broadcast
+  // every other device receives. `scope` is the caller's decision between
+  // "everyone" and "me"; the server validates it.
+  const editMessage = useCallback(async (msgId, text) => {
+    const value = text?.trim();
+    if (!value) return { ok: false, error: 'متن ویرایش خالی است' };
+    if (!socket || !connected) {
+      return { ok: false, error: 'اتصال به سرور برقرار نیست؛ دوباره تلاش کن' };
+    }
+    try {
+      await emitWithAck(socket, 'message:edit', { messageId: msgId, text: value });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message ?? 'ویرایش پیام ناموفق بود' };
+    }
+  }, [socket, connected]);
+
+  const deleteMessage = useCallback(async (msgId, scope) => {
+    if (!socket || !connected) {
+      return { ok: false, error: 'اتصال به سرور برقرار نیست؛ دوباره تلاش کن' };
+    }
+    try {
+      await emitWithAck(socket, 'message:delete', { messageId: msgId, scope });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message ?? 'حذف پیام ناموفق بود' };
+    }
+  }, [socket, connected]);
+
   // ── Typing notification ──────────────────────────────
   const notifyTyping = useCallback(() => {
     if (!socket || !peer || locked) return;
@@ -346,5 +412,6 @@ export function useChat(peer, currentUser, onIncoming) {
     messages, isTyping, typingName, connected, locked,
     historyState, historyError, retryHistory,
     sendMessage, sendVoice, notifyTyping, toggleReaction,
+    editMessage, deleteMessage,
   };
 }

@@ -558,3 +558,43 @@ test('deleting a chat removes it and its history for both people', async () => {
   const refused = await api(`/messages/conversations/${group.id}`, { method: 'DELETE', token: alice.token });
   assert.equal(refused.status, 404, 'a group id is not accepted here');
 });
+
+// The server keeps no per-device replay queue for ordinary messages: a device
+// that was away catches up by reading history. This pins that contract — the
+// messages are there, newest first, once each, and live delivery resumes on the
+// same account without a new sign-in.
+test('messages sent while a member is offline are in history when they return', async () => {
+  const { alice, bob } = global.__ctx;
+
+  sockets.bob.disconnect();
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(sockets.bob.connected, false, 'bob is offline');
+
+  const whileAway = await sendGroupText(sockets.alice, 'sent while bob was away');
+  await tick();
+  const justBefore = await sendGroupText(sockets.alice, 'sent one moment later');
+  await tick();
+
+  const history = await groupHistory(bob.token);
+  assert.equal(findMessage(history, whileAway)?.text, 'sent while bob was away', 'first missed row is in history');
+  assert.equal(findMessage(history, justBefore)?.text, 'sent one moment later', 'second missed row is in history');
+  assert.ok(
+    history.findIndex(m => m.id === justBefore) > history.findIndex(m => m.id === whileAway),
+    'history is chronological, so the later send comes after the earlier one',
+  );
+
+  const reconnected = await connectSocket(bob.token);
+  assert.equal(reconnected.connected, true, 'the same account signs back in on the socket');
+  sockets.bob = reconnected.socket;
+  // The connection handler joins the member's rooms; a send fired in the same
+  // tick could otherwise race that join.
+  await tick(100);
+
+  const delivered = waitMessageText(sockets.bob, 'delivered after the reconnect');
+  const live = await sendGroupText(sockets.alice, 'delivered after the reconnect');
+  assert.equal((await delivered)?.id, live, 'live delivery resumes');
+
+  const again = await groupHistory(bob.token);
+  assert.equal(again.filter(m => m.id === whileAway).length, 1, 'the catch-up read does not duplicate a row');
+  assert.equal(again.filter(m => m.id === live).length, 1, 'and the live message appears exactly once');
+});

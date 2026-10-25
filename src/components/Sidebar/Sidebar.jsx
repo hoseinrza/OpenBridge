@@ -231,7 +231,7 @@ export default function Sidebar({
           const meta = preview
             ? (isGroup && user.preview.senderName ? `${user.preview.senderName}: ${preview}` : preview)
             : user.encrypted
-              ? 'رمزنگاری‌شده'
+              ? 'تاریخچهٔ رمزنگاری‌شده'
               : (isGroup ? 'هنوز پیامی نیست' : (STATUS_TEXT[user.status] ?? ''));
           const faUnread = user.unread.toLocaleString('fa-IR');
 

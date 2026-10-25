@@ -7,7 +7,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   // This config covers the web app only; the backend and mobile app have
   // their own toolchains and compiled output.
-  globalIgnores(['dist', 'backend', 'mobile', 'capacitor']),
+  globalIgnores(['dist', 'backend', 'mobile', 'capacitor', 'graphify-out']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

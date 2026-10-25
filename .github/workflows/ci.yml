@@ -311,7 +311,7 @@ jobs:
       - name: Wait for the API
         run: |
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:3000/api/health; then exit 0; fi
+            if curl -fsS http://127.0.0.1:3000/api/health/ready; then exit 0; fi
             sleep 1
           done
           cat /tmp/openbridge-api.log
@@ -372,14 +372,59 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            adb install -r mobile/android/app/build/outputs/apk/release/app-release.apk
-            adb logcat -c
             set +e
-            maestro test --format junit --output "$RUNNER_TEMP/maestro-report-1.xml" mobile/.maestro > "$RUNNER_TEMP/maestro-1.log" 2>&1
+            APK=mobile/android/app/build/outputs/apk/release/app-release.apk
+            {
+              echo '## Maestro run'
+              echo "sdk=$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+              echo "maestro=$(maestro --version 2>&1 | tail -n 1)"
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            # Boot and install are reported separately: when the job fails before
+            # the first Maestro attempt, the old script left no trace of why.
+            echo '### phase 1: device'
+            adb wait-for-device
+            echo "boot_completed=$(adb shell getprop sys.boot_completed | tr -d '\r')"
+            adb devices -l
+            if [ ! -f "$APK" ]; then
+              echo "::error title=Maestro::APK not found at $APK"
+              ls -R mobile/android/app/build/outputs/apk || true
+              exit 1
+            fi
+
+            echo '### phase 2: install'
+            install_log="$RUNNER_TEMP/adb-install.log"
+            adb install -r "$APK" > "$install_log" 2>&1
+            install_status=$?
+            cat "$install_log"
+            if [ $install_status -ne 0 ]; then
+              echo "::error title=Maestro::APK install failed (exit $install_status)"
+              adb logcat -d > "$RUNNER_TEMP/logcat.txt"
+              exit 1
+            fi
+
+            echo '### phase 3: launch smoke'
+            adb logcat -c
+            adb shell am start -n com.openbridge.mobile/.MainActivity > "$RUNNER_TEMP/launch.log" 2>&1
+            echo "am start exit=$?"
+            cat "$RUNNER_TEMP/launch.log"
+            sleep 5
+            if adb shell pidof com.openbridge.mobile; then
+              echo "app process is running after launch"
+            else
+              echo "::warning title=Maestro::app process not running five seconds after launch"
+            fi
+            adb logcat -d > "$RUNNER_TEMP/logcat-launch.txt"
+            adb exec-out screencap -p > "$RUNNER_TEMP/launch.png" || true
+
+            echo '### phase 4: flow'
+            maestro test --format junit --debug-output "$RUNNER_TEMP/maestro-debug" \
+              --output "$RUNNER_TEMP/maestro-report-1.xml" mobile/.maestro > "$RUNNER_TEMP/maestro-1.log" 2>&1
             status=$?
             if [ $status -ne 0 ]; then
               echo "First Maestro attempt failed; retrying once"
-              maestro test --format junit --output "$RUNNER_TEMP/maestro-report-2.xml" mobile/.maestro > "$RUNNER_TEMP/maestro-2.log" 2>&1
+              maestro test --format junit --debug-output "$RUNNER_TEMP/maestro-debug" \
+                --output "$RUNNER_TEMP/maestro-report-2.xml" mobile/.maestro > "$RUNNER_TEMP/maestro-2.log" 2>&1
               status=$?
             fi
             adb logcat -d > "$RUNNER_TEMP/logcat.txt"
@@ -413,8 +458,13 @@ jobs:
           path: |
             ${{ runner.temp }}/maestro-report-*.xml
             ${{ runner.temp }}/maestro-*.log
+            ${{ runner.temp }}/maestro-debug
             ${{ runner.temp }}/emulator-failure.png
+            ${{ runner.temp }}/launch.png
+            ${{ runner.temp }}/launch.log
+            ${{ runner.temp }}/adb-install.log
             ${{ runner.temp }}/logcat.txt
+            ${{ runner.temp }}/logcat-launch.txt
             /home/runner/.maestro/tests
             mobile/.maestro/**/*.png
             e2e-chat-after-reaction.png
@@ -449,8 +499,8 @@ jobs:
       - name: Wait for the API through nginx
         run: |
           for i in $(seq 1 60); do
-            if curl -fsS http://localhost:${WEB_PORT}/api/health | grep -q '"status":"ok"'; then
-              curl -fsS http://localhost:${WEB_PORT}/api/health; echo; exit 0
+            if curl -fsS http://localhost:${WEB_PORT}/api/health/ready | grep -q '"status":"ok"'; then
+              curl -fsS http://localhost:${WEB_PORT}/api/health/ready; echo; exit 0
             fi
             sleep 5
           done
@@ -458,11 +508,25 @@ jobs:
           docker compose ps
           docker compose logs --no-color api | tail -60
           exit 1
-      - name: Check the SPA and the Socket.IO handshake
+      - name: Check the SPA, the security headers and the Socket.IO handshake
         run: |
           curl -fsS http://localhost:${WEB_PORT}/ | grep -qi '<div id="root">'
           curl -fsS "http://localhost:${WEB_PORT}/socket.io/?EIO=4&transport=polling" -o /tmp/handshake
           grep -q '"sid"' /tmp/handshake
+
+          # The headers are added in nginx.conf; this asserts they survive both
+          # the SPA location and the API proxy, and that the version banner is
+          # gone.
+          assert_headers() {
+            local url="$1" label="$2" headers
+            headers=$(curl -fsS -D - -o /dev/null "$url")
+            echo "$headers" | grep -qi '^x-content-type-options: nosniff' || { echo "missing nosniff on $label" >&2; exit 1; }
+            echo "$headers" | grep -qi '^x-frame-options: DENY' || { echo "missing frame deny on $label" >&2; exit 1; }
+            echo "$headers" | grep -qi '^referrer-policy: no-referrer' || { echo "missing referrer policy on $label" >&2; exit 1; }
+            if echo "$headers" | grep -qiE '^server: nginx/[0-9]'; then echo "nginx version leaked on $label" >&2; exit 1; fi
+          }
+          assert_headers "http://localhost:${WEB_PORT}/" SPA
+          assert_headers "http://localhost:${WEB_PORT}/api/health" API
       - name: Container health report
         run: docker compose ps
       - if: always()

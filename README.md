@@ -54,6 +54,15 @@
   `NODE_ENV=production` it answers `503` («ارسال پیامک هنوز فعال نشده است») and
   creates no code. Sign-up therefore works only in development until a gateway
   is integrated.
+  The integration point is `AuthService.requestOtp`
+  (`backend/src/auth/auth.service.ts`): the `if (!OTP_TEST_MODE)` branch that
+  currently answers `503` is where the provider call belongs. `OTP_TEST_MODE` is
+  derived only from `NODE_ENV` (`backend/src/config/env.ts`), so no deployment
+  variable can switch the test code back on. When adding a provider: send after
+  the code row is stored, delete or expire that row if delivery fails, and remove
+  `testCode` from the response in the same change. `backend/test/security.e2e.cjs`
+  boots the API with `NODE_ENV=production` and fails if the response ever carries
+  a test code again.
 - 🔓 **Content is not end-to-end encrypted.** Sealing happens on the server, with
   a key the server holds, so an operator with `CONTENT_KEY` and the database can
   read every message and file. The trade is deliberate: it buys encryption at rest
@@ -219,12 +228,12 @@ the stage before it, so the slow jobs never start on code the fast jobs reject:
 |-------|-----|----------------|
 | 0 · detect | `changes` | Path detection for PRs; main/schedule/manual always run the mobile E2E |
 | 1 · static | `web-lint`, `backend-check` | ESLint clean · Prisma schema valid · TypeScript compiles |
-| 2 · tests | `backend-e2e` | The 19 security tests pass against real PostgreSQL |
+| 2 · tests | `backend-e2e` | The 41 security cases plus the wider e2e suite (113 cases) pass against real PostgreSQL |
 | 2 · tests | `mobile-tests` | Jest + RNTL mobile behavior suite |
 | 2 · tests | `mobile-e2e` | Maestro on an API-34 emulator against a real PostgreSQL + NestJS backend (main, mobile PRs, nightly) |
 | 2b | `dependencies` | `npm audit` findings (reports, never blocks) |
 | 3 · artefacts | `web-build`, `mobile-bundle` | The Vite bundle builds · the Expo Hermes bundle builds |
-| 4 · ship path | `deploy-dry-run` | Both Docker images build, `docker compose up` serves the SPA, `/api/health` answers **through nginx**, and Socket.IO handshakes |
+| 4 · ship path | `deploy-dry-run` | Both Docker images build, `docker compose up` serves the SPA, `/api/health/ready` answers **through nginx** (database included), and Socket.IO handshakes |
 | — | `ci-gate` | One required check for branch protection |
 
 Make `CI gate` the required status check rather than listing every job, so the
@@ -243,13 +252,17 @@ It stays inert until you opt in:
 On the server, every redeploy runs the same seven stages: fetch → refuse the
 commit if CI is not green → check out the tested SHA → `pg_dump` into
 `backups/` (last 5 kept) → build images while the old containers keep serving →
-swap → wait for `/api/health` through nginx. If health never arrives, it checks
+swap → wait for `/api/health/ready` through nginx. If health never arrives, it checks
 out the previous commit, rebuilds, and records the bad SHA in
 `.deploy-failed-sha` so the cron cannot crash-loop on it. Tune the wait with
 `HEALTH_DEADLINE` on very slow boxes.
 
-> Observed state (2026-10-21): CI runs on GitHub Actions and is green, including
-> the Docker compose smoke stage. `Deploy` is `skipped` because
+> Observed state (2026-10-25): every job is green except the Android Maestro
+> job (`2e · Mobile E2E`), which has failed on every recent `main` run; the
+> `CI gate` job therefore fails with it. Instrumentation for that step landed in
+> `beta/phase-1` and waits for a run to diagnose it — see
+> [docs/engineering/BETA_READINESS.md](docs/engineering/BETA_READINESS.md) §5.2.
+> The Docker compose smoke stage passes. `Deploy` is `skipped` because
 > `vars.DEPLOY_ENABLED` is not `true`; it stays inert until the SSH secrets
 > exist. No production deployment has been performed, and the redeploy/rollback
 > branch on a real VPS is still unverified.
@@ -374,3 +387,4 @@ cross-origin calls in production. Remember that production OTP requests return
 - [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md) — protocol evaluation and rollout design
 - [docs/engineering/UI_UX_REDESIGN.md](docs/engineering/UI_UX_REDESIGN.md) — design tokens, screens, verified QA
 - [docs/engineering/OVERNIGHT_PROGRESS.md](docs/engineering/OVERNIGHT_PROGRESS.md) — what shipped, batch by batch, with the verification actually performed
+- [docs/engineering/BETA_OPERATIONS.md](docs/engineering/BETA_OPERATIONS.md) — environments, configuration, backup/restore, release checklist and rollback
