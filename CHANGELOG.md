@@ -4,6 +4,26 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.10.1] - 2026-10-25
+
+### Added
+- سند `docs/engineering/BETA_READINESS.md`: خط پایهٔ فاز بتا — نقشهٔ معماری،
+  وضعیت واقعی هر قابلیت، شواهد اجراشده، ریسک‌ها و معیارهای پذیرش.
+
+### Fixed
+- `npm run lint` حالا `graphify-out/` را نادیده می‌گیرد. پیش‌تر ESLint فایل
+  مینی‌شدهٔ گراف محلی را هم می‌خواند و ۱۹۹ خطای بی‌ربط می‌داد، در حالی که CI آن
+  پوشه را ندارد؛ حالا lint محلی و CI یکی‌اند.
+
+### Verified
+- `npm run lint`، `npm run build` و `npm run test:e2ee` (۱۷/۱۷) سبز.
+- بک‌اند: `npm run build` و `npm run test:e2e` روی PostgreSQL محلی، ۱۰۳/۱۰۳ سبز.
+- موبایل: ۱۱ فایل و ۸۱ تست Jest سبز؛ `npx expo export --platform android` بستهٔ
+  Hermes (۴٫۸ مگابایت) ساخت.
+- CI روی `main` هنوز قرمز است: مرحلهٔ Maestro اندروید و به‌تبع آن `CI gate`؛
+  `npm audit` بک‌اند هم ۱۱ یافتهٔ production دارد (۱ critical). هر دو در سند خط
+  پایه ثبت شده‌اند.
+
 ## [1.10.0] - 2026-10-25
 
 ### Added
