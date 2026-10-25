@@ -37,6 +37,9 @@ const { isOriginAllowed } = require('../dist/config/env');
 const API_PREFIX = '/api';
 const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const createdUserIds = [];
+// Conversations do not belong to a user row, so deleting the accounts at the end
+// leaves the chat itself behind. Track what this suite creates and remove it.
+const createdConversationIds = [];
 const otpPhones = [];
 const sockets = {};
 
@@ -218,12 +221,26 @@ before(async () => {
     text: 'call test seed eve',
   });
   assert.equal(seeded.ok, true, 'second direct conversation seed');
+
+  // Both seeds run against freshly created accounts, so every direct chat they
+  // belong to is one this suite made.
+  const chats = await prisma.conversation.findMany({
+    where: {
+      isGroup: false,
+      participants: { some: { userId: { in: [alice.user.id, eve.user.id] } } },
+    },
+    select: { id: true },
+  });
+  createdConversationIds.push(...chats.map((chat) => chat.id));
 });
 
 after(async () => {
   for (const socket of Object.values(sockets)) {
     try { socket?.disconnect(); } catch { /* ignore */ }
   }
+  try {
+    await prisma?.conversation.deleteMany({ where: { id: { in: createdConversationIds } } });
+  } catch { /* ignore cleanup errors */ }
   try {
     await prisma?.user.deleteMany({ where: { id: { in: createdUserIds } } });
   } catch { /* ignore cleanup errors */ }
@@ -382,6 +399,7 @@ test('E2EE direct call issues one server-held media key and refuses mobile', asy
     },
   });
   assert.ok(conversation.id);
+  createdConversationIds.push(conversation.id);
 
   // An encrypted invite needs no client-supplied key material: the server owns
   // the media key and the callee must not learn it before a token is issued.
@@ -435,6 +453,7 @@ test('group call authorizes membership and ends when the last member leaves', as
   });
   assert.equal(groupResponse.status, 201);
   const groupId = groupResponse.data.id;
+  createdConversationIds.push(groupId);
 
   const outsider = await emitAck(sockets.eve, 'call:group-start', {
     callId: randomUUID(), conversationId: groupId, type: 'audio',

@@ -38,7 +38,7 @@ function row(overrides = {}) {
 
 function fakePrisma({ e2ee = false, history = [], current = null } = {}) {
   const calls = { create: null, update: null };
-  return {
+  const prisma = {
     calls,
     conversation: {
       findUnique: async ({ where }) => ({ id: where.id, e2ee }),
@@ -61,6 +61,10 @@ function fakePrisma({ e2ee = false, history = [], current = null } = {}) {
       },
     },
   };
+  // The send is wrapped in a transaction; the in-memory fake has no rollback to
+  // offer, so the callback runs against the same tables.
+  prisma.$transaction = async (fn) => fn(prisma);
+  return prisma;
 }
 
 function service(prisma) {

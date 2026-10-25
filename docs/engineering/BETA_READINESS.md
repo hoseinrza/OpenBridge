@@ -263,14 +263,15 @@ day; the installed versions in the lockfile back them up.
 - The roadmap's Phase 1 Task 2 acceptance is still not met while `2e` is red;
   the instrumentation needs one CI run on a branch that CI watches.
 
-### 5.4 Test and account cleanup (low, for Phase 1.9)
+### 5.4 Test and account cleanup (resolved in Phase 1.9)
 
 The local database after the audit runs held 24 conversations with no
 participants and no messages. They came from the e2e suites, which delete their
 temporary users (cascading the participant rows) but not the conversations those
-users created. The rows are unreachable and were removed by hand, but a repeated
-run grows the table. The suites should delete their conversations explicitly, or
-a maintenance query should drop participant-less conversations.
+users created. `backend/test/calls.e2e.cjs` now records every conversation it
+creates and deletes them before the users; the other suites already did. The 26
+rows accumulated by the runs since then were removed by hand (empty,
+participant-less, no messages), and a repeated suite run no longer adds any.
 
 ### 5.4 Security findings carried forward (assessed, not new)
 
@@ -426,6 +427,67 @@ memory, so a restart drops active calls and a second API instance would not see
 them; Phase 1 Task 9 (§7) carries that into the backend-reliability work rather
 than treating it as a calling defect.
 
+### 5.9 Backend reliability and database (Phase 1 Task 9)
+
+What changed in this phase, and how it is evidenced:
+
+- **Liveness vs readiness.** `GET /api/health` stays a static process answer.
+  `GET /api/health/ready` runs `SELECT 1` and answers 503 `{status:'error',db:'down'}`
+  when Postgres is unreachable, without echoing the driver message or host.
+  The compose healthcheck, the CI smoke waits and Render’s
+  `healthCheckPath` now use `/api/health/ready` (Render previously pointed at
+  `/api`, which has no route). Covered by `backend/test/health.e2e.cjs`
+  (liveness, ready-up, ready-down with an injected query failure, recovery).
+- **Graceful shutdown.** `main.ts` calls `app.enableShutdownHooks()`, so Nest
+  runs `PrismaService.onModuleDestroy` (`$disconnect`) and
+  `CallsService.onModuleDestroy` (stop the sweep, end live calls) on SIGTERM.
+  The Docker image now uses `exec node dist/main`, making node PID 1 instead of
+  `sh`, and compose allows 20s (`stop_grace_period`) for teardown. The image
+  is not built locally (no Docker, §5.5), so this part is verified by source and
+  configuration review, not by an observed container stop.
+- **Indexes.** `Conversation` gains `@@index([isGroup, updatedAt])` for the chat
+  list’s filter and sort; `Session` gains indexes on `expiresAt` and
+  `revokedAt` for pruning and security alerts. Applied with `prisma db push`
+  (the project has no migrations directory), and the schema validates.
+- **Housekeeping.** `MaintenanceService` runs every
+  `MAINTENANCE_INTERVAL_SECONDS` (default 3600, unref’d so it never holds the
+  process open). One pass deletes expired one-time codes and sessions that have
+  expired or were revoked more than `MAINTENANCE_SESSION_RETENTION_DAYS` ago;
+  live and recently revoked sessions stay for the security history. The interval
+  and retention are documented in `backend/.env.example`. Covered by
+  `backend/test/maintenance.e2e.cjs`, which seeds expired, long-revoked,
+  recently revoked and live rows and calls the pass directly. Logs carry counts
+  only.
+- **Atomic send.** `MessagesService.sendToConversation` now writes the message
+  and the conversation’s recency stamp in one `$transaction`. The in-memory
+  fake used by `message-encryption.test.cjs` models the callback so the unit
+  harness keeps running; the real rollback path is not forced by a test.
+- **Test isolation.** `calls.e2e.cjs` deletes the conversations it creates, and
+  a verification run afterwards left zero participant-less conversations (§5.4).
+
+Remaining, documented rather than changed:
+
+- **In-memory state.** Calls, presence, auth throttling and socket rate limits
+  are per process. A restart drops active calls; a second API instance would not
+  see the first’s calls or presence. Multi-instance hosting needs shared state
+  or sticky routing before it can be considered.
+- **Pagination.** Message history is offset-paged (`skip` capped at 100000), so
+  rows sharing a `createdAt` can repeat or vanish across a page boundary. Shared
+  media uses a `createdAt < cursor` keyset, which drops same-millisecond rows.
+  Links, envelopes and legacy status already use a correct keyset. The clients
+  would need a cursor contract change, so this stays a known limitation.
+- **Chat list cost.** `listConversations` and `listGroups` issue two counts per
+  chat (N+1) and are bounded only by how many chats a user has. Fine at Beta
+  scale, not at growth scale.
+- **User directory.** `GET /api/users` returns every account without a limit.
+  Both clients expose a `fetchUsers` helper but no screen calls it; the
+  security suite uses it to prove phone numbers are hidden. Capping or removing
+  it is a product decision, recorded here so it is not mistaken for a leak fix.
+- **No file GC.** Uploads deleted on the error path are unlinked, but blobs left
+  by account or conversation deletion are not swept from disk.
+
+Full backend suite after these changes: `npm run test:e2e` → 113/113.
+
 ---
 
 ## 6. Beta acceptance criteria
@@ -498,6 +560,7 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Phase 1.6 encryption claims | Client encryption strings matched to the server-held model; chat-list fallback changed to an encrypted-history label; no end-to-end claim on any surface; legacy hand-back already covered. `npm run lint` and `npm run build` exit 0. §5.6 |
 | 2026-10-25 | Phase 1.7 parity | Mobile now applies `message:edited`, renders quotes and edited marks, and replies/edits/deletes from the long-press tray; parity matrix and remaining gaps in §5.7. Mobile Jest 96/96; `expo export --platform android` PASS; web `npm run lint`/`npm run build` PASS. |
 | 2026-10-25 | Phase 1.8 calling cases | Signed-webhook cleanup, ring timeout, token TTL/reconnect and signature rejection added to `backend/test/calls.e2e.cjs`; `node --test test/calls.e2e.cjs` → 11/11; `npm run test:e2e` → 110/110. No live media server used; limits stated in §5.8. |
+| 2026-10-25 | Phase 1.9 reliability | `/api/health/ready` DB probe (503 without driver detail) wired into compose, CI and Render; shutdown hooks plus `exec` and 20s grace; indexes on conversations and sessions; hourly pruning of expired OTPs and dead sessions; atomic message+recency write; calls suite deletes its conversations. `npm run test:e2e` → 113/113; `prisma validate` PASS; a calls run afterwards left 0 orphan conversations. Shutdown path is source-reviewed only (no Docker here). §5.9 |
 Next update: after a CI run exercises the Maestro instrumentation (CI watches
 PRs to `main` and pushes to `main`; a push to `beta/phase-1` does not trigger
 it).

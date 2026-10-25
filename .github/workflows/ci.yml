@@ -311,7 +311,7 @@ jobs:
       - name: Wait for the API
         run: |
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:3000/api/health; then exit 0; fi
+            if curl -fsS http://127.0.0.1:3000/api/health/ready; then exit 0; fi
             sleep 1
           done
           cat /tmp/openbridge-api.log
@@ -499,8 +499,8 @@ jobs:
       - name: Wait for the API through nginx
         run: |
           for i in $(seq 1 60); do
-            if curl -fsS http://localhost:${WEB_PORT}/api/health | grep -q '"status":"ok"'; then
-              curl -fsS http://localhost:${WEB_PORT}/api/health; echo; exit 0
+            if curl -fsS http://localhost:${WEB_PORT}/api/health/ready | grep -q '"status":"ok"'; then
+              curl -fsS http://localhost:${WEB_PORT}/api/health/ready; echo; exit 0
             fi
             sleep 5
           done

@@ -9,6 +9,7 @@ import { ChatModule }     from './chat/chat.module';
 import { UploadsModule }  from './uploads/uploads.module';
 import { E2eeModule }     from './e2ee/e2ee.module';
 import { CallsModule }    from './calls/calls.module';
+import { MaintenanceModule } from './maintenance/maintenance.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { CallsModule }    from './calls/calls.module';
     UploadsModule,
     E2eeModule,
     CallsModule,
+    MaintenanceModule,
   ],
   controllers: [AppController],
 })

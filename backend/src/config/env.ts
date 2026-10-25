@@ -84,6 +84,11 @@ export const REFRESH_TOKEN_TTL_DAYS = positiveInt('REFRESH_TOKEN_TTL_DAYS', 30);
 // there, even if its phone number and OTP were stolen.
 export const SESSION_REVOKE_COOLDOWN_DAYS = positiveInt('SESSION_REVOKE_COOLDOWN_DAYS', 30);
 
+// Expired OTP rows and dead sessions are pruned on this interval. A revoked
+// session is kept for a while so the security history can still name it.
+export const MAINTENANCE_INTERVAL_SECONDS = positiveInt('MAINTENANCE_INTERVAL_SECONDS', 3600);
+export const MAINTENANCE_SESSION_RETENTION_DAYS = positiveInt('MAINTENANCE_SESSION_RETENTION_DAYS', 30);
+
 // E2EE device registration and the public KeyPackage pool. The server only ever
 // stores opaque public blobs, so the caps exist to bound storage and to keep
 // the bundle endpoint from being used as a free data store.

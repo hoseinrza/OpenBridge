@@ -35,4 +35,5 @@ EXPOSE 3000
 # The dedupe has to run before `db push`: the reaction index became
 # (userId, messageId), and rows from the old "one row per emoji" model would
 # make the new unique index fail to create, which would stop the API booting.
-CMD ["sh", "-c", "npx prisma db execute --file prisma/sql/dedupe-reactions.sql --schema prisma/schema.prisma && npx prisma db push --skip-generate && node dist/main"]
+# `exec` makes node PID 1 so the stop signal reaches the app instead of `sh`.
+CMD ["sh", "-c", "npx prisma db execute --file prisma/sql/dedupe-reactions.sql --schema prisma/schema.prisma && npx prisma db push --skip-generate && exec node dist/main"]

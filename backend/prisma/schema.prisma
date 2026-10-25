@@ -200,6 +200,9 @@ model Session {
   revokedAt   DateTime?
 
   @@index([userId])
+  // Pruning and security alerts scan by these two timestamps, not by user.
+  @@index([expiresAt])
+  @@index([revokedAt])
   @@map("sessions")
 }
 
@@ -225,6 +228,8 @@ model Conversation {
   envelopes    E2eeEnvelope[]
   blobs        EncryptedBlob[]
 
+  // The chat list filters direct/group and orders by recency.
+  @@index([isGroup, updatedAt])
   @@map("conversations")
 }
 

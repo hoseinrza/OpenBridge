@@ -1,12 +1,12 @@
 {
   "name": "chatapp-backend",
-  "version": "1.10.8",
+  "version": "1.10.9",
   "private": true,
   "scripts": {
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "build": "nest build",
-    "test:e2e": "npm run build && node --test test/content-crypto.test.cjs test/message-encryption.test.cjs test/legacy-import.test.cjs test/upload-encryption.test.cjs test/security.e2e.cjs test/message-actions.e2e.cjs test/e2ee-client.e2e.cjs test/calls.e2e.cjs test/content-key.e2e.cjs test/legacy-import.e2e.cjs",
+    "test:e2e": "npm run build && node --test test/content-crypto.test.cjs test/message-encryption.test.cjs test/legacy-import.test.cjs test/upload-encryption.test.cjs test/security.e2e.cjs test/message-actions.e2e.cjs test/e2ee-client.e2e.cjs test/calls.e2e.cjs test/content-key.e2e.cjs test/legacy-import.e2e.cjs test/health.e2e.cjs test/maintenance.e2e.cjs",
     "seed:dev": "node test/dev-chat-seed.mjs",
     "prisma:gen": "prisma generate",
     "prisma:validate": "prisma validate",
