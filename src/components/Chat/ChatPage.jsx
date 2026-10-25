@@ -239,7 +239,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const {
     messages, isTyping, typingPeer, connected,
     historyState, historyError, retryHistory,
-    encrypted, secureMode,
+    encrypted, secureMode, legacyPending,
     sendMessage, forwardMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
   } = useChat(activeUser, currentUser, handleIncoming, handleGroupUpdated);
 
@@ -506,6 +506,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               searchQuery={searchQuery}
               encrypted={encrypted}
               secureMode={secureMode}
+              legacyPending={legacyPending}
               historyState={historyState}
               historyError={historyError}
               onRetryHistory={retryHistory}

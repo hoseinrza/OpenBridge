@@ -47,28 +47,45 @@ function Skeleton() {
 
 // The line at the top of a chat says how this conversation is stored. Content
 // is sealed at rest with a key the server holds, so every signed-in device of
-// the account can read it. A chat created under the old MLS scheme also has
-// older rows that only devices holding its client-side keys can open.
-function e2eeNotice({ encrypted, secureMode, isGroup }) {
+// the account can read it.
+//
+// A chat that predates the switch still has old envelopes. A device holding
+// their keys hands them back as it opens the chat, so `legacyPending` is what
+// is left: zero means the whole history has been moved over and the chat is
+// ordinary from now on, whatever flag it still carries.
+const faCount = new Intl.NumberFormat('fa-IR');
+
+function e2eeNotice({ encrypted, secureMode, isGroup, legacyPending }) {
   const storage = isGroup
     ? 'پیام‌ها و فایل‌های این گروه روی سرور رمزگذاری‌شده ذخیره می‌شوند؛ دستگاه‌های واردشده به حساب اعضا می‌توانند آن‌ها را بخوانند.'
     : 'پیام‌ها و فایل‌های این گفتگو روی سرور رمزگذاری‌شده ذخیره می‌شوند؛ دستگاه‌های واردشده به حسابت می‌توانند آن‌ها را بخوانند.';
 
-  if (encrypted) {
-    if (secureMode === 'unavailable') {
-      return { tone: 'pending', text: `${storage} پیام‌های قدیمی این گفتگو روی این دستگاه باز نمی‌شوند.` };
-    }
+  if (!encrypted || legacyPending === 0) return { tone: 'on', text: storage };
+
+  const count = Number.isInteger(legacyPending) && legacyPending > 0 ? faCount.format(legacyPending) : null;
+  if (secureMode === 'unavailable') {
     return {
-      tone: 'on',
-      text: `${storage} پیام‌های قدیمی‌تر با رمزنگاری سرتاسری قبلی ذخیره شده‌اند و فقط روی دستگاه‌هایی که کلیدشان را دارند خوانده می‌شوند.`,
+      tone: 'pending',
+      text: count
+        ? `${storage} ${count} پیام قدیمی هنوز فقط با رمزنگاری قبلی ذخیره شده‌اند و این دستگاه کلیدشان را ندارد؛ دستگاهی که کلید دارد باید یک بار این گفتگو را باز کند.`
+        : `${storage} پیام‌های قدیمی این گفتگو روی این دستگاه باز نمی‌شوند.`,
     };
   }
-  return { tone: 'on', text: storage };
+  if (count) {
+    return {
+      tone: 'on',
+      text: `${storage} ${count} پیام قدیمی هنوز فقط با رمزنگاری قبلی ذخیره شده‌اند؛ با باز کردن این گفتگو روی دستگاهی که کلیدشان را دارد، به سرور منتقل می‌شوند.`,
+    };
+  }
+  return {
+    tone: 'on',
+    text: `${storage} پیام‌های قدیمی‌تر با رمزنگاری سرتاسری قبلی ذخیره شده‌اند و فقط روی دستگاه‌هایی که کلیدشان را دارند خوانده می‌شوند.`,
+  };
 }
 
 export default function MessageList({
   messages, activeUser, onReact, onReply, onForward, onEdit, onDelete, onToast, searchQuery,
-  encrypted, secureMode,
+  encrypted, secureMode, legacyPending,
   historyState, historyError, onRetryHistory, onOpenProfile,
 }) {
   const listRef   = useRef(null);
@@ -93,6 +110,7 @@ export default function MessageList({
     encrypted,
     secureMode,
     isGroup,
+    legacyPending,
   });
   const newCount = !searchQuery && !atBottom
     ? Math.max(0, messages.length - seenCount)

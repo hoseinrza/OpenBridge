@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   apiCall, fetchGroupMessages, fetchMessages, resolveUrl, uploadFile,
 } from '../services/api.js';
-import { getE2ee, initE2ee } from '../services/e2ee.js';
+import { backfillLegacy, getE2ee, initE2ee } from '../services/e2ee.js';
 import { connectSocket, emitWithAck } from '../services/socket.js';
 
 // What this device can do with a conversation's legacy MLS history:
@@ -10,8 +10,9 @@ import { connectSocket, emitWithAck } from '../services/socket.js';
 //   open         this device holds the group's keys and reads the old envelopes
 //   plain        no MLS group at all; every message is a server row
 //   unavailable  the chat has old envelopes this device holds no keys for
-// New messages no longer travel on this path; it only decides whether the
-// history written before server-key content is readable here.
+// New messages no longer travel on this path. A device that can open the old
+// stream hands it back once (services/e2ee backfillLegacy); from then on the
+// history is ordinary sealed rows and this mode stops mattering.
 const timeIn = (value) => new Date(value).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
 
 // Reactions arrive as the rows behind them, one per person per message, because
@@ -45,9 +46,14 @@ function normalize(msg, myId) {
     // this number instead of asking the container, which is the one field a
     // browser-written voice file is not certain to carry.
     durationMs:   Number.isInteger(msg.durationMs) ? msg.durationMs : null,
-    // A stored row has nowhere to keep a waveform, so a plaintext recording draws
-    // a pattern instead. Only an encrypted sender can carry the real bars.
-    peaks:        null,
+    // An imported legacy row carries its sender's descriptor, and with it the
+    // real waveform. A row written today has none, so a recording draws the
+    // pattern instead.
+    attachment:   msg.attachment ?? null,
+    peaks:        msg.attachment?.peaks ?? null,
+    // The envelope sequence this row came from, when it was imported. A reader
+    // uses it to drop the copy it already holds in its own legacy cache.
+    legacySeq:    Number.isInteger(msg.legacySeq) ? msg.legacySeq : null,
     side:         msg.senderId === myId ? 'mine' : 'other',
     senderId:     msg.senderId,
     receiverId:   msg.receiverId,
@@ -149,7 +155,17 @@ function normalizeEncrypted(message, peer) {
 function mergeMessages(prev, incoming) {
   const byId = new Map(prev.map(m => [m.id, m]));
   for (const m of incoming) byId.set(m.id, m);
-  return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
+
+  // Once a legacy envelope has been imported, its server row and the local
+  // copy describe the same message under two ids. The server row is the one
+  // every device can read, so the local copy steps aside.
+  const imported = new Set();
+  for (const message of byId.values()) {
+    if (Number.isInteger(message.legacySeq)) imported.add(message.legacySeq);
+  }
+  return [...byId.values()]
+    .filter(message => !(message.encrypted && imported.has(message.seq)))
+    .sort((a, b) => a.createdAt - b.createdAt);
 }
 
 function isGroup(target) {
@@ -192,6 +208,9 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   const [typingPeer,   setTypingPeer]   = useState(null);
   const [connected,    setConnected]    = useState(false);
   const [secure,       setSecure]       = useState(null);
+  // How many of this chat's old envelopes are still only ciphertext. Null means
+  // nobody has asked yet; zero means the legacy stream is fully handed back.
+  const [legacyPending, setLegacyPending] = useState(null);
   const [historyState, setHistoryState] = useState('idle'); // idle | loading | ready | error
   const [historyError, setHistoryError] = useState('');
   const [historyNonce, setHistoryNonce] = useState(0);
@@ -388,8 +407,10 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     (async () => {
       const client = await initE2ee({ id: currentUserId });
       const group = isGroup(target);
+      // A group is named by its conversation id; a direct chat only learns the
+      // id from the probe below.
+      let conversationId = group ? target.id : null;
       try {
-        let conversationId;
         let streamError = null;
 
         if (group) {
@@ -425,13 +446,38 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
         if (cancelled) return;
         setSecure({ mode: 'open', conversationId, error: caught.error ?? streamError });
         setMessages(prev => mergeMessages(prev, history.map(m => normalizeEncrypted(m, target))));
+
+        // The old stream is readable only while this device keeps its keys.
+        // Handing it back turns it into rows every device can read, so the chat
+        // stops depending on one browser. Best-effort: whatever this device
+        // cannot read stays pending, and the notice reports it.
+        void backfillLegacy({ id: currentUserId }, conversationId)
+          .then((result) => {
+            if (cancelled) return;
+            setLegacyPending(result.pending);
+            if (result.imported > 0) {
+              refreshHistoryRef.current();
+              // The chat list's preview may have been an old envelope's line;
+              // it is a server row now.
+              onIncomingRef.current?.();
+            }
+          })
+          .catch(() => {});
       } catch (error) {
         if (cancelled) return;
         setSecure({
           mode: 'unavailable',
-          conversationId: target.id,
+          conversationId: conversationId ?? target.id,
           reason: error.message || 'این گفتگو روی این دستگاه رمزگشایی نمی‌شود',
         });
+        // No keys here, but the server still knows how much history is waiting
+        // for a device that has them. Ask, so the notice can report the count
+        // instead of implying the whole chat is unreadable.
+        if (conversationId) {
+          apiCall(`messages/${conversationId}/legacy-status?take=1`)
+            .then(status => { if (!cancelled) setLegacyPending(status.pending ?? null); })
+            .catch(() => {});
+        }
       }
     })().finally(() => {
       openingRef.current = false;
@@ -746,6 +792,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     setMessages([]);
     setTypingPeer(null);
     setSecure(null);
+    setLegacyPending(null);
     setHistoryState('idle');
     setHistoryError('');
   }, []);
@@ -764,6 +811,9 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     // rows are opened here when this device can; its new messages are not.
     encrypted: targetUser?.encrypted === true || open,
     secureMode: secure?.mode ?? null,
+    // Old envelopes still waiting for a device with the keys, or null while
+    // that is not known. The notice uses it to say how much is left.
+    legacyPending,
     sendMessage, forwardMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
   };
 }

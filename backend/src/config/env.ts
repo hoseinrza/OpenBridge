@@ -115,6 +115,11 @@ export const E2EE_MAX_GROUP_MEMBERS = positiveInt('E2EE_MAX_GROUP_MEMBERS', 16);
 export const E2EE_MAX_ENVELOPE_CHARS = positiveInt('E2EE_MAX_ENVELOPE_CHARS', 16384);
 // How many envelopes a reconnecting client may pull in one catch-up page.
 export const E2EE_ENVELOPE_PAGE = positiveInt('E2EE_ENVELOPE_PAGE', 200);
+// Legacy history backfill: a device decrypts the envelopes it already holds and
+// hands the plaintext back to be stored like any other row. One request carries
+// this many items; a long conversation is imported over several requests, and
+// each one is idempotent.
+export const LEGACY_IMPORT_BATCH = positiveInt('LEGACY_IMPORT_BATCH', 100);
 export const E2EE_REGISTER_LIMIT = positiveInt('E2EE_REGISTER_LIMIT', 30);
 export const E2EE_REGISTER_WINDOW_SECONDS = positiveInt('E2EE_REGISTER_WINDOW_SECONDS', 600);
 

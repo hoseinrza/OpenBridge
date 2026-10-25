@@ -1,7 +1,7 @@
 # Server-key content encryption for multi-device access
 
-Status: accepted 2026-10-24. Phases 1 (sessions) and 2 (content) implemented in
-`feat/session-devices`; phases 3–4 pending.
+Status: accepted 2026-10-24. Phases 1 (sessions), 2 (content) and 3 (legacy
+history) implemented in `feat/session-devices`; phase 4 pending.
 
 This supersedes the “no escrow, no server-side recovery” rule in
 `docs/engineering/E2EE_DESIGN.md` §4. That document still describes the MLS
@@ -86,13 +86,42 @@ Implemented in `feat/session-devices`.
 - The web client no longer uses MLS for new sends; `shared/e2ee` remains only to
   read old history.
 
+## Legacy history (phase 3)
+
+Implemented in `feat/session-devices`.
+
+- `POST /messages/:conversationId/legacy-import` takes up to
+  `LEGACY_IMPORT_BATCH` decrypted items. Each item is matched to an envelope by
+  sequence; only `kind = MESSAGE` counts, and the row's author and time come
+  from the envelope, never from the caller. Text is sealed with the same
+  conversation key as a new send. An attachment carries the sender's descriptor
+  verbatim, but its blob must belong to this conversation and its key/nonce must
+  decode to 32/12 bytes.
+- `Message.legacyEnvelopeId` is unique, so an import is idempotent: a retry
+  skips existing rows and still repairs `E2eeEnvelope.migratedAt` after a
+  dropped response. Two devices importing the same stream race safely on that
+  unique index.
+- `GET /messages/:conversationId/legacy-status` reports `total`, `imported`,
+  `pending` and the pending sequences (paged by `afterSeq`). There is no
+  “unreadable” mark: an envelope nobody has handed back stays pending, and a
+  device that later holds the keys can still import it.
+- `shared/e2ee` remains the only thing that can open an envelope. The web client
+  calls `backfillLegacy` after catch-up, maps its cached history to import items
+  (quote ids `e2ee-<seq>` become `replyToSeq`), posts them in batches, refreshes
+  the server history, and drops its local copy once a server row carries the
+  same `legacySeq`. A device without keys asks only for the status, so the chat
+  can say how many messages are waiting instead of implying they are lost.
+- Rows imported with an attachment expose `attachment` (descriptor) on the wire
+  and keep `legacySeq`; both are `null` for every row written after the switch.
+
 ## Phases
 
 2. Encrypt/decrypt messages and uploads with the server key; accept normal
    sends into legacy E2EE conversations; switch web clients off MLS for new
-   sends.
+   sends. — done.
 3. Backfill legacy MLS history: an idempotent endpoint keyed by envelope id,
    client upload of decrypted rows, then mark them migrated. Rows that no
    device can decrypt remain unreadable and are reported, not silently dropped.
+   — done.
 4. Calls: issue a per-call key from the server instead of MLS; remove the
    remaining MLS key dependency; clean up copy on web and mobile.
