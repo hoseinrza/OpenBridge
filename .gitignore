@@ -45,6 +45,9 @@ lerna-debug.log*
 *.local
 .DS_Store
 
+# Local tooling output
+graphify-out/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
