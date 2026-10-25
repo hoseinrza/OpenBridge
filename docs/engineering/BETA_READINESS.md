@@ -88,6 +88,7 @@ per-call key generated and held by the API, delivered only to web clients.
 | `npm run build` (backend) | **PASS** | `nest build`. |
 | `npm run test:e2e` (backend) | **PASS 103/103** (8.7 s) | Against local PostgreSQL. Includes crypto unit tests, content sealing/opening, legacy import, upload encryption/range serving, and the security, message-action, calls, content-key and client-level E2EE suites. |
 | `node --test test/security.e2e.cjs` (backend) | **PASS 41/41** (12.7 s) | Re-run for Phase 1.3 with three new cases: single-use/retired OTP codes, the four accepted phone spellings, and a production-mode boot that must answer `503` with no `testCode`. |
+| `npm run test:e2e` (backend), after Phase 1.3/1.4 | **PASS 107/107** | The suite grew by the three OTP cases, an offline-then-reconnect case, and an expired-signed-URL assertion inside the uploads case. |
 | `npm run test:ci` (mobile) | **PASS 11 suites / 81 tests** | Jest + RNTL. |
 | `npx expo export --platform android` (mobile) | **PASS** | Hermes bundle `index-f1388b6c8ec19ef4b17675b00a8087e7.hbc` (4.8 MB) plus assets in `dist-ci`. |
 | `npm audit --omit=dev --audit-level=high` (backend) | **PASS** after upgrade | Baseline was 11 findings (1 critical, 4 high, 6 moderate). After `bcrypt@6`, `multer@2.5.0` and the `body-parser`/`qs` overrides the high/critical count is 0; 6 moderate advisories remain on paths this app does not use (§5.1). |
@@ -359,6 +360,7 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Stale CI claims corrected | `README.md`, `docs/SECURITY.md`. §5.3 |
 | 2026-10-25 | Lockfile root versions synced to 1.10.2; orphan test conversations removed | `package-lock.json`, `backend/package-lock.json`, `mobile/package-lock.json` (2 lines each); 24 participant-less conversations deleted locally. §5.4 |
 | 2026-10-25 | Phase 1.3 auth cases | `node --test test/security.e2e.cjs` → 41/41; new cases named in §3. README documents the SMS integration point. |
+| 2026-10-25 | Phase 1.4 messaging cases | Offline→reconnect catch-up and an authentic-but-expired file URL; `npm run test:e2e` → 107/107. |
 
 Next update: after a CI run exercises the Maestro instrumentation (CI watches
 PRs to `main` and pushes to `main`; a push to `beta/phase-1` does not trigger

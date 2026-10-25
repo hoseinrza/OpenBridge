@@ -3,6 +3,7 @@ require('reflect-metadata');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
+const { createHmac } = require('node:crypto');
 const { readFile, unlink } = require('node:fs/promises');
 const net = require('node:net');
 const { tmpdir } = require('node:os');
@@ -915,6 +916,15 @@ test('uploads are type-checked and only readable through signed URLs', async () 
 
   const tampered = await fetch(`${origin}${API_PREFIX}${signedUrl.replace(/sig=[a-f0-9]{4}/, 'sig=dead')}`);
   assert.equal(tampered.status, 403, 'tampered signature');
+
+  // A correctly signed URL whose window has closed is refused too, so an
+  // address copied out of a response does not become a permanent capability.
+  const expiredAt = Math.floor(Date.now() / 1000) - 10;
+  const expiredSig = createHmac('sha256', process.env.FILE_URL_SECRET?.trim() || process.env.JWT_SECRET)
+    .update(`${filename}:${expiredAt}`)
+    .digest('hex');
+  const expired = await fetch(`${origin}${API_PREFIX}/uploads/${filename}?exp=${expiredAt}&sig=${expiredSig}`);
+  assert.equal(expired.status, 403, 'an authentic but expired signature is refused');
 
   assert.match(filename, /^[a-f0-9-]+\.png$/);
   assert.equal(uploadedFiles.includes(filename), true);

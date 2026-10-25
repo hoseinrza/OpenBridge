@@ -4,6 +4,18 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.10.4] - 2026-10-25
+
+### Added
+- آزمون «برگشت به گفتگو»: پیام‌هایی که وقتی یک عضو آفلاین بود فرستاده شده‌اند،
+  پس از اتصال دوباره در تاریخچه هستند، به ترتیب زمانی، هر کدام یک بار؛ و
+  تحویل زنده هم روی همان حساب از سر گرفته می‌شود.
+- در آزمون پیوست‌ها، حالتی که امضای لینک معتبر ولی منقضی است هم بررسی می‌شود؛
+  لینک قدیمی دیگر به یک دسترسی دائمی تبدیل نمی‌شود.
+
+### Verified
+- `npm run test:e2e` بک‌اند: ۱۰۷/۱۰۷ سبز.
+
 ## [1.10.3] - 2026-10-25
 
 ### Added
