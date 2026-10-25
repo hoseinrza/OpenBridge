@@ -6,7 +6,7 @@ import VoiceWaveBubble from './VoiceWaveBubble.jsx';
 import { formatSize } from '../../utils/format.js';
 import './EncryptedMedia.css';
 
-// Renders one attachment whose bytes the server cannot open.
+// Renders one attachment whose bytes the server stores only as ciphertext.
 //
 // A decrypted file has no address, so it can only be shown from an object URL
 // this component makes and then gives back. That is also why the loading rules
@@ -15,7 +15,7 @@ import './EncryptedMedia.css';
 // person watching it asks for it. If authentication fails the promise rejects
 // and nothing is ever displayed — a changed file has no other rendering path.
 
-const LOCKED_NOTE = 'این پیام فقط روی دستگاه شما و طرف مقابل رمزگشایی می‌شود';
+const LOADING_NOTE = 'در حال بازکردن تصویر…';
 const FAILED_NOTE = 'بازکردن فایل ناموفق بود';
 
 export default function EncryptedMedia({ attachment, kind, name, size, onOpen }) {
@@ -147,7 +147,7 @@ export default function EncryptedMedia({ attachment, kind, name, size, onOpen })
         <div className={`enc-media-state ${state === 'error' ? 'is-error' : ''}`}
              role={state === 'error' ? 'alert' : 'status'}>
           <i className={`fas ${state === 'error' ? 'fa-triangle-exclamation' : 'fa-spinner fa-spin'}`} aria-hidden="true" />
-          <span>{state === 'error' ? error : LOCKED_NOTE}</span>
+          <span>{state === 'error' ? error : LOADING_NOTE}</span>
           {state === 'error' && (
             <button type="button" className="enc-media-retry" onClick={load}>تلاش دوباره</button>
           )}

@@ -44,6 +44,7 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      CONTENT_KEY: ${CONTENT_KEY:?set CONTENT_KEY in .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       TRUST_PROXY: ${TRUST_PROXY:-1}
       UPLOAD_SCAN_ENABLED: ${UPLOAD_SCAN_ENABLED:-false}

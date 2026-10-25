@@ -91,8 +91,10 @@ export default function ChatScreen({ route, navigation }) {
   const rows = useMemo(() => buildRows(messages).reverse(), [messages]);
 
   // Calls sit in the header, next to the conversation they belong to. A chat
-  // that is encrypted on the web opens this screen locked, and the call context
-  // explains why mobile cannot join its E2EE room instead of downgrading it.
+  // whose history was written with the old MLS keys opens this screen locked:
+  // those envelopes are unreadable here and this build keeps its composer
+  // closed, while the web client still holds the keys. Fresh rows arrive
+  // server-encrypted and are readable like any other chat.
   useLayoutEffect(() => {
     if (!navigation?.setOptions) return undefined;
     navigation.setOptions({
@@ -410,7 +412,7 @@ export default function ChatScreen({ route, navigation }) {
       <Text style={styles.introName}>{peer?.name}</Text>
       <Text style={styles.introMeta}>
         {locked
-          ? 'فقط در نسخهٔ وب قابل خواندن'
+          ? 'تاریخچهٔ قدیمی فقط در وب'
           : `${peer?.status === 'online' ? 'آنلاین' : 'آفلاین'}${peer?.username ? ` · @${peer.username}` : ''}`}
       </Text>
     </View>
@@ -431,7 +433,7 @@ export default function ChatScreen({ route, navigation }) {
       {locked && (
         <View style={styles.lockedBar} accessibilityRole="alert">
           <Text style={styles.lockedText}>
-            این گفتگو سرتاسری رمزنگاری شده؛ خواندن و فرستادن پیام در آن فقط از نسخهٔ وب ممکن است.
+            پیام‌های قدیمیِ این گفتگو با رمزنگاری قبلی ذخیره شده‌اند و این نسخه نمی‌تواند بخواندشان. محتوای تازه روی سرور رمزگذاری‌شده ذخیره می‌شود؛ برای تاریخچهٔ قدیمی و نوشتن، از نسخهٔ وب استفاده کن.
           </Text>
         </View>
       )}
@@ -463,7 +465,7 @@ export default function ChatScreen({ route, navigation }) {
             <View style={styles.centerState}>
               <Text style={styles.stateText}>
                 {locked
-                  ? 'پیام‌های این گفتگو فقط روی دستگاه اعضا رمزگشایی می‌شوند؛ برای خواندنشان از نسخهٔ وب استفاده کن.'
+                  ? 'هنوز پیام خواندنی روی سرور نیست؛ برای آوردن تاریخچهٔ قدیمی یک‌بار این گفتگو را در نسخهٔ وب باز کن.'
                   : 'هنوز پیامی رد و بدل نشده — اولین پیام را بنویس.'}
               </Text>
             </View>
@@ -537,7 +539,7 @@ export default function ChatScreen({ route, navigation }) {
             onChangeText={(value) => { setText(value); setError(''); notifyTyping(); }}
             editable={!locked}
             placeholder={locked
-              ? 'نوشتن در این گفتگو فقط از نسخهٔ وب ممکن است'
+              ? 'نوشتن در این نسخه برای این گفتگو هنوز باز نشده'
               : (connected ? 'پیامت را بنویس…' : 'در انتظار اتصال…')}
             placeholderTextColor={colors.text3}
             multiline

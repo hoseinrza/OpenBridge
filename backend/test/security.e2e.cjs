@@ -3,7 +3,7 @@ require('reflect-metadata');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
-const { unlink } = require('node:fs/promises');
+const { readFile, unlink } = require('node:fs/promises');
 const net = require('node:net');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
@@ -11,6 +11,7 @@ const { EICAR } = require('./fixtures');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-least-32-characters-long';
+process.env.CONTENT_KEY = process.env.CONTENT_KEY || 'Y2ktb25seS1jb250ZW50LWtleS0zMi1ieXRlcy0wMDA=';
 // The suite opens several sessions and finishes several sign-ups; keep the
 // throttles wide enough not to interfere, except the per-phone bucket, which
 // the throttling test exercises on purpose.
@@ -370,6 +371,19 @@ test('missing JWT_SECRET fails fast at startup', () => {
   });
   assert.notEqual(result.status, 0, 'process must exit non-zero');
   assert.match(`${result.stdout}${result.stderr}`, /JWT_SECRET/);
+});
+
+test('missing CONTENT_KEY fails fast at startup', () => {
+  const env = { ...process.env, NODE_ENV: 'production' };
+  delete env.CONTENT_KEY;
+  const result = spawnSync(process.execPath, [join(__dirname, '..', 'dist', 'main.js')], {
+    cwd: tmpdir(),
+    env,
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  assert.notEqual(result.status, 0, 'process must exit non-zero');
+  assert.match(`${result.stdout}${result.stderr}`, /CONTENT_KEY/);
 });
 
 test('rejects unauthenticated and forged HTTP requests', async () => {
@@ -857,6 +871,12 @@ test('uploads are type-checked and only readable through signed URLs', async () 
   assert.match(valid.data.url, /^\/uploads\/[a-f0-9-]+\.png$/);
 
   const filename = valid.data.url.split('/').pop();
+  // The bytes the browser keeps looking at are not the bytes on disk: the
+  // scanner saw the plaintext, then the file was sealed under its stored name.
+  const stored = await readFile(join(process.cwd(), 'uploads', filename));
+  assert.equal(stored.subarray(0, 4).toString('ascii'), 'OBX1', 'the upload is sealed at rest');
+  assert.equal(stored.includes(PNG_1X1), false, 'the original bytes are not on disk');
+
   const unsigned = await fetch(`${origin}${API_PREFIX}${valid.data.url}`);
   assert.equal(unsigned.status, 403, 'unsigned download');
 
@@ -875,6 +895,13 @@ test('uploads are type-checked and only readable through signed URLs', async () 
   assert.equal(signed.status, 200, 'signed download');
   assert.equal(signed.headers.get('content-type'), 'image/png');
   assert.equal(signed.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(signed.headers.get('accept-ranges'), 'bytes', 'a player may seek');
+  assert.deepEqual(Buffer.from(await signed.arrayBuffer()), PNG_1X1, 'the download decrypts to the original bytes');
+
+  const range = await fetch(`${origin}${API_PREFIX}${signedUrl}`, { headers: { Range: 'bytes=2-9' } });
+  assert.equal(range.status, 206, 'a range is served as a range');
+  assert.equal(range.headers.get('content-range'), `bytes 2-9/${PNG_1X1.length}`);
+  assert.deepEqual(Buffer.from(await range.arrayBuffer()), PNG_1X1.subarray(2, 10), 'and cut from the plaintext');
 
   const tampered = await fetch(`${origin}${API_PREFIX}${signedUrl.replace(/sig=[a-f0-9]{4}/, 'sig=dead')}`);
   assert.equal(tampered.status, 403, 'tampered signature');

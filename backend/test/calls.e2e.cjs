@@ -10,6 +10,7 @@ const { randomUUID } = require('node:crypto');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-least-32-characters-long';
+process.env.CONTENT_KEY = process.env.CONTENT_KEY || 'Y2ktb25seS1jb250ZW50LWtleS0zMi1ieXRlcy0wMDA=';
 process.env.LIVEKIT_URL = 'ws://127.0.0.1:7880';
 process.env.LIVEKIT_API_KEY = 'test-api-key';
 process.env.LIVEKIT_API_SECRET = 'test-api-secret-at-least-32-characters';
@@ -220,6 +221,7 @@ test('direct call: ring, authorization, token grants, end', async () => {
   const bobToken = await callToken(callId, bob.token);
   assert.equal(bobToken.status, 201);
   assert.equal(bobToken.data.e2ee, false);
+  assert.equal(bobToken.data.mediaKey, null, 'a plaintext call issues no media key');
   assert.equal(bobToken.data.url, 'ws://127.0.0.1:7880');
   const claims = decodeJwt(bobToken.data.token);
   assert.equal(claims.sub, bob.user.id, 'identity is the authenticated user');
@@ -306,7 +308,7 @@ test('an offline user is not rung and no call record is made', async () => {
   assert.match(ack.error, /در دسترس/);
 });
 
-test('E2EE direct call requires matching key fingerprints and refuses mobile', async () => {
+test('E2EE direct call issues one server-held media key and refuses mobile', async () => {
   const carol = await createUser('carol');
   const frank = await createUser('frank');
   const carolSocket = await connectSocket(carol.token);
@@ -327,43 +329,46 @@ test('E2EE direct call requires matching key fingerprints and refuses mobile', a
   });
   assert.ok(conversation.id);
 
-  const fingerprint = 'A'.repeat(43);
-  const missing = await emitAck(sockets.carol, 'call:invite', {
-    callId: randomUUID(), toId: frank.user.id, type: 'video',
-  });
-  assert.equal(missing.ok, false, 'an encrypted call without a fingerprint is refused');
-
+  // An encrypted invite needs no client-supplied key material: the server owns
+  // the media key and the callee must not learn it before a token is issued.
   const callId = randomUUID();
   const incoming = waitEvent(frankSocket.socket, 'call:incoming');
   const ack = await emitAck(sockets.carol, 'call:invite', {
-    callId, toId: frank.user.id, type: 'video', keyFingerprint: fingerprint,
+    callId, toId: frank.user.id, type: 'video',
   });
   assert.equal(ack.ok, true);
   assert.equal(ack.e2ee, true);
+
   const ring = await incoming;
   assert.equal(ring?.e2ee, true);
-  assert.equal(ring?.keyFingerprint, fingerprint);
-  assert.equal(Object.prototype.hasOwnProperty.call(ring, 'key'), false, 'the key itself never travels');
+  assert.equal(Object.prototype.hasOwnProperty.call(ring, 'keyFingerprint'), false);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(ring, 'mediaKey'),
+    false,
+    'the key never travels with the ring',
+  );
 
-  const wrong = await emitAck(sockets.frank, 'call:accept', {
-    callId, keyFingerprint: 'B'.repeat(43),
-  });
-  assert.equal(wrong.ok, false, 'a mismatched epoch is refused');
-
-  const accepted = await emitAck(sockets.frank, 'call:accept', { callId, keyFingerprint: fingerprint });
+  const accepted = await emitAck(sockets.frank, 'call:accept', { callId });
   assert.equal(accepted.ok, true);
 
-  const mobile = await callToken(callId, frank.token, { client: 'mobile', keyFingerprint: fingerprint });
-  assert.equal(mobile.status, 403, 'mobile cannot join without an MLS key');
+  const mobile = await callToken(callId, frank.token, { client: 'mobile' });
+  assert.equal(mobile.status, 403, 'mobile cannot join an encrypted call');
 
-  const noFingerprint = await callToken(callId, frank.token, { client: 'web' });
-  assert.equal(noFingerprint.status, 403);
-
-  const tokenResponse = await callToken(callId, frank.token, { client: 'web', keyFingerprint: fingerprint });
+  const tokenResponse = await callToken(callId, frank.token, { client: 'web' });
   assert.equal(tokenResponse.status, 201);
   assert.equal(tokenResponse.data.e2ee, true);
+  assert.equal(typeof tokenResponse.data.mediaKey, 'string');
+  assert.equal(Buffer.from(tokenResponse.data.mediaKey, 'base64').length, 32);
   assert.equal(Object.prototype.hasOwnProperty.call(tokenResponse.data, 'keyFingerprint'), false);
   assert.ok(!JSON.stringify(tokenResponse.data).includes('test-api-secret'));
+
+  const again = await callToken(callId, frank.token, { client: 'web' });
+  assert.equal(again.status, 201);
+  assert.equal(again.data.mediaKey, tokenResponse.data.mediaKey, 'the key belongs to the call, not the request');
+
+  const callerToken = await callToken(callId, carol.token, { client: 'web' });
+  assert.equal(callerToken.status, 201);
+  assert.equal(callerToken.data.mediaKey, tokenResponse.data.mediaKey, 'both sides share the call key');
 
   await emitAck(sockets.carol, 'call:end', { callId });
 });

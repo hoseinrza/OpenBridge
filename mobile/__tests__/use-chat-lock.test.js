@@ -47,7 +47,7 @@ test('locks an open plaintext chat when its first encrypted envelope arrives', a
   await waitFor(() => expect(result.current.locked).toBe(true));
   expect(await result.current.sendMessage('hello')).toEqual({
     ok: false,
-    error: 'این گفتگو سرتاسری رمزنگاری شده؛ نوشتن در آن فقط از نسخهٔ وب ممکن است',
+    error: 'این گفتگو پیام‌های قدیمیِ رمزنگاری‌شده دارد؛ نوشتن در آن از این نسخه فعلاً ممکن نیست',
   });
   expect(mockSocket.emit).not.toHaveBeenCalledWith('message:send', expect.anything());
 });

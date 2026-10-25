@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChat } from '../../hooks/useChat.js';
 import {
   apiCall, fetchUser, fetchConversations, fetchGroups, normalizeUser, normalizeGroup,
+  listSecurityEvents, acknowledgeSecurityEvents,
 } from '../../services/api.js';
 import { initE2ee } from '../../services/e2ee.js';
 import Sidebar from '../Sidebar/Sidebar.jsx';
@@ -10,6 +11,7 @@ import MessageList from './MessageList.jsx';
 import TypingIndicator from './TypingIndicator.jsx';
 import InputArea from './InputArea.jsx';
 import ProfileModal from '../Profile/ProfileModal.jsx';
+import SessionsModal from '../Profile/SessionsModal.jsx';
 import ChatProfilePanel from '../Profile/ChatProfilePanel.jsx';
 import NewChatModal from '../NewChat/NewChatModal.jsx';
 import ForwardModal from './ForwardModal.jsx';
@@ -25,6 +27,9 @@ function previewFromServer(lastMessage, myId) {
     text:       lastMessage.text ?? '',
     fileName:   lastMessage.fileName ?? null,
     senderName: lastMessage.sender?.id === myId ? 'شما' : (lastMessage.sender?.name ?? null),
+    // Used to pick between this preview and one built from the legacy MLS
+    // history: a mixed chat can have both, and the newer message wins.
+    at:         lastMessage.createdAt ? new Date(lastMessage.createdAt).getTime() : 0,
   };
 }
 
@@ -49,7 +54,14 @@ function previewFromEncrypted(message, chat, myId) {
     senderName: message.mine || message.senderId === myId
       ? 'شما'
       : (chat.participants?.find(p => p.id === message.senderId)?.name ?? null),
+    at:         message.at ? new Date(message.at).getTime() : 0,
   };
+}
+
+function alertWhen(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('fa-IR', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 async function directConversationId(peerId, cache) {
@@ -63,9 +75,10 @@ async function directConversationId(peerId, cache) {
   }
 }
 
-// An encrypted transcript never reaches the server in readable form, so the
-// preview comes from this device's own decrypted history. Direct chats get
-// their conversation id from the same read-only probe the chat itself uses.
+// A chat that once used MLS keeps its older messages only in this device's own
+// decrypted history, so its newest line can be newer than anything the server
+// has. Direct chats get their conversation id from the same read-only probe the
+// chat itself uses.
 async function addEncryptedPreviews(chats, myId, idCache) {
   if (!chats.some(chat => chat.encrypted)) return chats;
   const client = await initE2ee({ id: myId }).catch(() => null);
@@ -77,7 +90,12 @@ async function addEncryptedPreviews(chats, myId, idCache) {
       : await directConversationId(chat.id, idCache);
     if (!conversationId) return chat;
     const last = await client.lastMessage(conversationId).catch(() => null);
-    return last ? { ...chat, preview: previewFromEncrypted(last, chat, myId) } : chat;
+    if (!last) return chat;
+    // The server now previews newer messages from the same chat. Keep whichever
+    // message is more recent instead of letting the local history always win.
+    const local = previewFromEncrypted(last, chat, myId);
+    if (chat.preview?.at && local?.at && chat.preview.at > local.at) return chat;
+    return { ...chat, preview: local };
   }));
 }
 
@@ -88,6 +106,9 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const [searchOpen, setSearchOpen]       = useState(false);
   const [profileTarget, setProfileTarget] = useState(null); // { user, isOwn } | null
   const [profileOpen, setProfileOpen]     = useState(false);
+  const [sessionsOpen, setSessionsOpen]   = useState(false);
+  // Sessions that signed in after this device last acknowledged the list.
+  const [securityAlerts, setSecurityAlerts] = useState([]);
   const [newChatOpen, setNewChatOpen]     = useState(false);
   const [chatsLoading, setChatsLoading]   = useState(true);
   const [chatsError, setChatsError]       = useState(false);
@@ -108,6 +129,44 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const directConversationIds = useRef(new Map());
 
   useEffect(() => { activeUserIdRef.current = activeUser?.id ?? null; }, [activeUser?.id]);
+
+  // Security alerts are polled rather than pushed: the chat socket is owned by
+  // the chat hook, and an alert that arrives a minute late is still an alert.
+  // Reconnecting or returning to the tab checks immediately.
+  const refreshSecurityAlerts = useCallback(async () => {
+    try {
+      setSecurityAlerts(await listSecurityEvents());
+    } catch {
+      // A failed check must never take the conversation down with it.
+    }
+  }, []);
+
+  useEffect(() => {
+    const kickoff = setTimeout(refreshSecurityAlerts, 0);
+    const timer = setInterval(refreshSecurityAlerts, 60_000);
+    const onFocus = () => refreshSecurityAlerts();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshSecurityAlerts();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearTimeout(kickoff);
+      clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshSecurityAlerts]);
+
+  async function dismissSecurityAlerts() {
+    setSecurityAlerts([]);
+    try {
+      await acknowledgeSecurityEvents();
+    } catch {
+      // If the acknowledgement did not reach the server, the next poll puts
+      // the alert back instead of letting it disappear silently.
+    }
+  }
 
   // New accounts start with an empty conversation list — people only show up
   // here once a message has actually been exchanged with them. Conversations
@@ -163,8 +222,8 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
 
   // A group's name, photo and bio are server metadata, so an edit made on any
   // member's device arrives as the whole row and is applied to both the list and
-  // the chat on screen — no reload, and the encrypted preview of a group whose
-  // wire carries no plaintext stays the one this device already has.
+  // the chat on screen — no reload, and a preview the row did not carry stays
+  // the one this device already has.
   const handleGroupUpdated = useCallback((wire) => {
     const group = normalizeGroup(wire);
     if (!group?.id) return;
@@ -180,7 +239,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const {
     messages, isTyping, typingPeer, connected,
     historyState, historyError, retryHistory,
-    encrypted, secureMode, encryptionNote, blockedReason,
+    encrypted, secureMode, legacyPending,
     sendMessage, forwardMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
   } = useChat(activeUser, currentUser, handleIncoming, handleGroupUpdated);
 
@@ -375,6 +434,35 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
       />
 
       <div className="chat-main">
+        {securityAlerts.length > 0 && (
+          <div className="conn-banner session-alert" role="alert">
+            <i className="fas fa-shield-halved" aria-hidden="true" />
+            <div className="session-alert-copy">
+              <strong>دستگاه جدیدی وارد حساب شد</strong>
+              <span>
+                {securityAlerts[0].ip ?? 'IP نامشخص'} — {alertWhen(securityAlerts[0].createdAt)}
+                {securityAlerts.length > 1
+                  && ` — و ${securityAlerts.length.toLocaleString('fa-IR')} مورد دیگر`}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="session-alert-action"
+              onClick={() => { dismissSecurityAlerts(); setSessionsOpen(true); }}
+            >
+              مدیریت دستگاه‌ها
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={dismissSecurityAlerts}
+              aria-label="بستن هشدار ورود"
+            >
+              <i className="fas fa-xmark" aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
         {activeUser ? (
           <>
             <ChatHeader
@@ -418,7 +506,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               searchQuery={searchQuery}
               encrypted={encrypted}
               secureMode={secureMode}
-              encryptionNote={encryptionNote}
+              legacyPending={legacyPending}
               historyState={historyState}
               historyError={historyError}
               onRetryHistory={retryHistory}
@@ -431,7 +519,6 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
               onSend={sendFromComposer}
               onTyping={notifyTyping}
               connected={connected}
-              blocked={blockedReason}
               editing={editing}
               onSaveEdit={saveEdit}
               onCancelEdit={cancelEdit}
@@ -489,14 +576,23 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           user={profileTarget.isOwn ? currentUser : profileTarget.user}
           isOwn={profileTarget.isOwn}
           onMessage={handleMessageFromProfile}
+          onSessions={profileTarget.isOwn
+            ? () => { setProfileTarget(null); setSessionsOpen(true); }
+            : undefined}
           onClose={closeProfile}
           onSaved={handleProfileSaved}
         />
       )}
 
+      {sessionsOpen && (
+        <SessionsModal
+          onClose={() => setSessionsOpen(false)}
+          onRevoked={refreshSecurityAlerts}
+        />
+      )}
+
       {newChatOpen && (
         <NewChatModal
-          currentUser={currentUser}
           onClose={() => setNewChatOpen(false)}
           onSelect={handleStartConversation}
           onGroupCreated={handleGroupCreated}

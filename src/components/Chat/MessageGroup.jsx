@@ -99,7 +99,7 @@ const SWIPE_MAX = 72;
 
 export default function MessageGroup({
   message, first = true, last = true, isGroup = false, onReact, searchQuery,
-  onOpenImage, onReply, onForward, onEdit, onDelete, onToast, chatEncrypted = false,
+  onOpenImage, onReply, onForward, onEdit, onDelete, onToast,
   onOpenProfile, onJumpToMessage,
 }) {
   const [menu, setMenu] = useState(null); // { anchor, viaKeyboard } | null
@@ -408,7 +408,6 @@ export default function MessageGroup({
         <MessageActionsMenu
           anchor={menu.anchor}
           message={message}
-          chatEncrypted={chatEncrypted}
           held={[...mine]}
           onReact={pickReaction}
           onReply={() => onReply?.(message)}

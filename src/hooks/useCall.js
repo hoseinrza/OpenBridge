@@ -3,13 +3,11 @@ import { ExternalE2EEKeyProvider, Room, RoomEvent, Track } from 'livekit-client'
 import E2EEWorker from 'livekit-client/e2ee-worker?worker';
 import { apiCall } from '../services/api.js';
 import { connectSocket, emitWithAck } from '../services/socket.js';
-import { exportCallKey } from '../services/e2ee.js';
 
 const RING_BACKSTOP_MS = 60_000;
 const SOCKET_LOSS_GRACE_MS = 12_000;
 const END_NOTICE_MS = 3_200;
 const PREPARING_TIMEOUT_MS = 12_000;
-const KEY_TIMEOUT_MS = 10_000;
 const CALL_PHASES = new Set(['outgoing', 'incoming', 'connecting', 'active']);
 
 function newCallId() {
@@ -24,17 +22,6 @@ function newCallId() {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-/** A promise that cannot leave the preparing screen waiting forever. */
-function withTimeout(promise, ms, message) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (error) => { clearTimeout(timer); reject(error); },
-    );
-  });
 }
 
 function reasonText(payload, info) {
@@ -76,16 +63,17 @@ function reasonText(payload, info) {
  *
  * Security shape:
  * - The server decides who may ring, accept and receive a room token.
- * - In an encrypted chat the media key is derived locally from the MLS group's
- *   exporter secret. Only its SHA-256 fingerprint is sent, so the server can
- *   reject a mismatched epoch but never learns the key.
- * - If a call is expected to be encrypted and the key cannot be derived or the
- *   remote side does not confirm encryption, the client refuses to continue.
+ * - For an encrypted call the server issues one random media key per call and
+ *   holds it. The client receives that key with the room token and hands it to
+ *   LiveKit's key provider, so media is encrypted on the wire and between the
+ *   participants' browsers — but the server can decrypt it by design.
+ * - If a call is expected to be encrypted and the server does not issue a key,
+ *   or the remote side does not confirm encryption, the client refuses to
+ *   continue.
  */
 export function useCall(currentUser) {
   const [phase, setPhase] = useState('idle'); // idle | preparing | outgoing | incoming | connecting | active | ended
   const [callInfo, setCallInfo] = useState(null);
-  const [keyReady, setKeyReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -105,8 +93,6 @@ export function useCall(currentUser) {
   const socketRef = useRef(null);
   const phaseRef = useRef('idle');
   const infoRef = useRef(null);
-  const keyRef = useRef(null);
-  const keyReadyRef = useRef(false);
   const roomRef = useRef(null);
   const workerRef = useRef(null);
   const keyProviderRef = useRef(null);
@@ -124,7 +110,6 @@ export function useCall(currentUser) {
   const micRef = useRef(true);
   const camRef = useRef(false);
   const screenRef = useRef(false);
-  const incomingGenRef = useRef(0);
   const startGenRef = useRef(0);
   const handlersRef = useRef({});
 
@@ -238,9 +223,6 @@ export function useCall(currentUser) {
     clearTimeout(verifyTimerRef.current);
     verifyTimerRef.current = null;
     cleanupRoom();
-    keyRef.current = null;
-    keyReadyRef.current = false;
-    setKeyReady(false);
     verifiedRef.current = false;
     connectingRef.current = false;
     endingRef.current = false;
@@ -266,9 +248,6 @@ export function useCall(currentUser) {
     clearEndTimer();
     clearPreparingTimer();
     cleanupRoom();
-    keyRef.current = null;
-    keyReadyRef.current = false;
-    setKeyReady(false);
     verifiedRef.current = false;
     connectingRef.current = false;
     endingRef.current = false;
@@ -322,7 +301,7 @@ export function useCall(currentUser) {
     }
     if (verifiedRef.current && remotes.some((participant) => !participant.isEncrypted)) {
       setEncryptionState('failed');
-      failCall('رمزنگاری سرتاسری یکی از طرف‌ها خاموش شد؛ تماس بسته شد');
+      failCall('رمزنگاری یکی از طرف‌ها خاموش شد؛ تماس بسته شد');
       return;
     }
     setEncryptionState('pending');
@@ -340,7 +319,7 @@ export function useCall(currentUser) {
       const verified = r.isE2EEEnabled
         && remotes.length > 0
         && remotes.every((participant) => participant.isEncrypted);
-      if (!verified) failCall('رمزنگاری سرتاسری این تماس تأیید نشد؛ تماس بسته شد');
+      if (!verified) failCall('رمزنگاری این تماس تأیید نشد؛ تماس بسته شد');
     }, limit);
   }, [failCall]);
 
@@ -370,7 +349,7 @@ export function useCall(currentUser) {
     on(RoomEvent.Reconnecting, () => setConnectionState('reconnecting'));
     on(RoomEvent.Reconnected, () => setConnectionState('connected'));
     on(RoomEvent.ConnectionStateChanged, (state) => setConnectionState(String(state).toLowerCase()));
-    on(RoomEvent.EncryptionError, () => failCall('رمزنگاری سرتاسری این تماس با خطا مواجه شد'));
+    on(RoomEvent.EncryptionError, () => failCall('رمزنگاری رسانهٔ این تماس با خطا مواجه شد'));
     on(RoomEvent.Disconnected, () => {
       if (roomRef.current !== r || endingRef.current) return;
       failCall('اتصال تماس قطع شد');
@@ -388,10 +367,9 @@ export function useCall(currentUser) {
     changePhase('connecting');
 
     try {
-      const key = keyRef.current;
       const issued = await apiCall(`calls/${info.callId}/token`, {
         method: 'POST',
-        body: { client: 'web', keyFingerprint: key?.fingerprint },
+        body: { client: 'web' },
       });
       if (!mountedRef.current) return;
       if (Boolean(issued?.e2ee) !== info.e2ee) {
@@ -400,11 +378,15 @@ export function useCall(currentUser) {
 
       let keyProvider = null;
       let worker = null;
-      if (key) {
+      if (info.e2ee) {
+        if (typeof issued.mediaKey !== 'string' || issued.mediaKey.length === 0) {
+          throw new Error('کلید رسانهٔ این تماس از سرور دریافت نشد؛ تماس بسته شد');
+        }
         keyProvider = new ExternalE2EEKeyProvider();
-        // The shared passphrase is the base64 MLS-derived key. The provider
-        // derives the actual AES key locally; no secret crosses the network.
-        await keyProvider.setKey(key.key);
+        // The server issues one random key per call and hands it over with the
+        // room token. The provider derives the actual AES key locally; the
+        // server keeps its copy so it can decrypt the room by design.
+        await keyProvider.setKey(issued.mediaKey);
         worker = new E2EEWorker();
         keyProviderRef.current = keyProvider;
         workerRef.current = worker;
@@ -424,7 +406,7 @@ export function useCall(currentUser) {
         try {
           await r.setE2EEEnabled(true);
         } catch {
-          throw new Error('رمزنگاری سرتاسری این تماس فعال نشد؛ تماس بسته شد');
+          throw new Error('رمزنگاری رسانهٔ این تماس فعال نشد؛ تماس بسته شد');
         }
       }
 
@@ -478,7 +460,7 @@ export function useCall(currentUser) {
 
   // ── Incoming / accepted / ended ────────────────────────────────
 
-  async function handleIncoming(payload) {
+  function handleIncoming(payload) {
     if (!payload?.callId) return;
     if (phaseRef.current !== 'idle') {
       socketRef.current?.emit('call:reject', { callId: payload.callId });
@@ -496,45 +478,16 @@ export function useCall(currentUser) {
       from: payload.from ?? null,
       group: kind === 'group' ? (payload.group ?? null) : null,
       e2ee: payload.e2ee === true,
-      keyFingerprint: payload.keyFingerprint ?? null,
     };
 
     clearEndTimer();
     setInfo(info);
-    keyRef.current = null;
-    keyReadyRef.current = !info.e2ee;
-    setKeyReady(!info.e2ee);
     setError('');
     setNotice('');
     markBusy(false);
     setEncryptionState(info.e2ee ? 'pending' : 'none');
     changePhase('incoming');
     scheduleRingBackstop();
-
-    if (!info.e2ee) return;
-
-    const generation = incomingGenRef.current + 1;
-    incomingGenRef.current = generation;
-    try {
-      const chat = kind === 'group'
-        ? { kind: 'group', id: info.conversationId }
-        : { kind: 'user', id: payload.from?.id };
-      if (!chat.id) throw new Error('طرف این تماس مشخص نیست');
-      const key = await exportCallKey(currentUser, chat, info.callId);
-      if (generation !== incomingGenRef.current || phaseRef.current !== 'incoming') return;
-      if (!key) throw new Error('این گفتگو روی این دستگاه کلید رمزنگاری ندارد');
-      if (!info.keyFingerprint || key.fingerprint !== info.keyFingerprint) {
-        throw new Error('کلید رمزنگاری این تماس با دستگاه شما هم‌خوان نیست');
-      }
-      keyRef.current = key;
-      keyReadyRef.current = true;
-      setKeyReady(true);
-    } catch (err) {
-      if (generation !== incomingGenRef.current) return;
-      if (phaseRef.current !== 'incoming') return;
-      socketRef.current?.emit('call:reject', { callId: info.callId });
-      finishWithNotice(err?.message || 'کلید رمزنگاری این تماس در دسترس نیست', { isError: true, ms: 3_600 });
-    }
   }
 
   function handleAccepted(payload) {
@@ -552,12 +505,6 @@ export function useCall(currentUser) {
         return;
       }
       if (phaseRef.current !== 'outgoing') return;
-      if (info.e2ee) {
-        if (!keyRef.current || payload.keyFingerprint !== keyRef.current.fingerprint) {
-          failCall('کلید رمزنگاری طرف مقابل با این تماس هم‌خوان نیست؛ تماس بسته شد');
-          return;
-        }
-      }
       void connectToRoom();
       return;
     }
@@ -572,12 +519,6 @@ export function useCall(currentUser) {
     // A group member joined; only the initiator still needs to open its room.
     setRoomTick((value) => value + 1);
     if (phaseRef.current !== 'outgoing') return;
-    if (info.e2ee) {
-      if (!keyRef.current || payload.keyFingerprint !== keyRef.current.fingerprint) {
-        failCall('کلید رمزنگاری یکی از اعضا با این تماس هم‌خوان نیست؛ تماس بسته شد');
-        return;
-      }
-    }
     void connectToRoom();
   }
 
@@ -587,9 +528,6 @@ export function useCall(currentUser) {
     if (phaseRef.current === 'ended' || phaseRef.current === 'idle') return;
     clearRing();
     cleanupRoom();
-    keyRef.current = null;
-    keyReadyRef.current = false;
-    setKeyReady(false);
     verifiedRef.current = false;
     markBusy(false);
     setNotice(reasonText(payload, info));
@@ -732,19 +670,17 @@ export function useCall(currentUser) {
       peer: kind === 'direct' ? chat : null,
       group: kind === 'group' ? chat : null,
       e2ee: encrypted,
-      keyFingerprint: null,
     };
 
     clearEndTimer();
     setInfo(base);
     changePhase('preparing');
     markBusy(true);
-    setKeyReady(false);
     setError('');
     setNotice('');
 
     // The preparing screen must always end. This covers an old backend that
-    // never acks, a stalled MLS derivation and a lost invite packet alike.
+    // never acks and a lost invite packet alike.
     clearPreparingTimer();
     preparingTimerRef.current = setTimeout(() => {
       if (phaseRef.current !== 'preparing') return;
@@ -754,27 +690,9 @@ export function useCall(currentUser) {
     }, PREPARING_TIMEOUT_MS);
 
     try {
-      let key = null;
-      if (encrypted) {
-        key = await withTimeout(
-          exportCallKey(currentUser, chat, callId),
-          KEY_TIMEOUT_MS,
-          'آماده‌سازی کلید رمزنگاری طول کشید؛ دوباره تلاش کن',
-        );
-        if (startGen !== startGenRef.current) return;
-        if (!key) throw new Error('کلید رمزنگاری این گفتگو در دسترس نیست؛ تماس بسته ماند');
-      }
-      if (startGen !== startGenRef.current) return;
-      keyRef.current = key;
-      keyReadyRef.current = true;
-      setKeyReady(true);
-
-      const next = { ...base, keyFingerprint: key?.fingerprint ?? null };
-      setInfo(next);
-
       const payload = kind === 'group'
-        ? { callId, conversationId: chat.id, type, keyFingerprint: next.keyFingerprint ?? undefined }
-        : { callId, toId: chat.id, type, keyFingerprint: next.keyFingerprint ?? undefined };
+        ? { callId, conversationId: chat.id, type }
+        : { callId, toId: chat.id, type };
       const ack = await emitWithAck(
         socket,
         kind === 'group' ? 'call:group-start' : 'call:invite',
@@ -791,7 +709,7 @@ export function useCall(currentUser) {
         throw new Error('وضعیت رمزنگاری این گفتگو با سرور هم‌خوان نیست؛ تماس بسته شد');
       }
 
-      setInfo({ ...next, conversationId: ack?.conversationId ?? next.conversationId, e2ee: ack?.e2ee === true });
+      setInfo({ ...base, conversationId: ack?.conversationId ?? base.conversationId, e2ee: ack?.e2ee === true });
       clearPreparingTimer();
       changePhase('outgoing');
       scheduleRingBackstop();
@@ -800,9 +718,6 @@ export function useCall(currentUser) {
       }
     } catch (err) {
       if (startGen !== startGenRef.current) return;
-      keyRef.current = null;
-      keyReadyRef.current = false;
-      setKeyReady(false);
       if (socket.connected && infoRef.current?.callId) {
         socket.emit('call:end', { callId: infoRef.current.callId });
       }
@@ -816,10 +731,6 @@ export function useCall(currentUser) {
     const info = infoRef.current;
     const socket = socketRef.current;
     if (!info || phaseRef.current !== 'incoming' || busyRef.current) return;
-    if (info.e2ee && !keyRef.current) {
-      setError('کلید رمزنگاری این تماس هنوز آماده نیست');
-      return;
-    }
     if (!socket?.connected) {
       failCall('اتصال به سرور برقرار نیست');
       return;
@@ -829,10 +740,7 @@ export function useCall(currentUser) {
     markBusy(true);
     changePhase('connecting');
     try {
-      await emitWithAck(socket, 'call:accept', {
-        callId: info.callId,
-        keyFingerprint: keyRef.current?.fingerprint,
-      }, 12_000);
+      await emitWithAck(socket, 'call:accept', { callId: info.callId }, 12_000);
       if (!mountedRef.current) return;
       await connectToRoom();
     } catch (err) {
@@ -922,7 +830,6 @@ export function useCall(currentUser) {
     callInfo,
     peer: callInfo?.peer ?? null,
     group: callInfo?.group ?? null,
-    keyReady,
     busy,
     error,
     notice,

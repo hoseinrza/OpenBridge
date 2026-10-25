@@ -160,6 +160,47 @@
 
 .conn-banner i { color: var(--warning); }
 
+/* A new-device alert stays until this device acknowledges it, so it gets a
+   little more room than the "reconnecting" strip. */
+.session-alert { align-items: flex-start; padding-block: 9px; }
+
+.session-alert > i { margin-top: 2px; }
+
+.session-alert-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.session-alert-copy strong {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.session-alert-copy span {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.session-alert-action {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.session-alert-action:hover { background: var(--surface-2); }
+
 .search-results-bar {
   background: var(--surface-2);
   color: var(--text-2);
@@ -1636,6 +1677,10 @@ button.msg-sender {
 
   .conn-banner,
   .search-results-bar { padding-inline: var(--sp-4); font-size: var(--text-xs); }
+
+  /* At phone width the IP and time get their own line under the actions. */
+  .session-alert { flex-wrap: wrap; row-gap: 4px; }
+  .session-alert-copy { flex-basis: 100%; order: 4; }
 
   .messages {
     padding: var(--sp-4) var(--sp-3) var(--sp-1);

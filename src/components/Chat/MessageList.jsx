@@ -45,37 +45,47 @@ function Skeleton() {
   );
 }
 
-// The line at the top of a chat has to say what this device really does with
-// this conversation, so every case gets its own sentence: the chats that are
-// protected, the ones that will be with the first message, and the ones this
-// device cannot protect at all — never one sentence stretched to fit all three.
-function e2eeNotice({ encrypted, secureMode, isGroup, reason }) {
-  if (encrypted) {
+// The line at the top of a chat says how this conversation is stored. Content
+// is sealed at rest with a key the server holds, so every signed-in device of
+// the account can read it.
+//
+// A chat that predates the switch still has old envelopes. A device holding
+// their keys hands them back as it opens the chat, so `legacyPending` is what
+// is left: zero means the whole history has been moved over and the chat is
+// ordinary from now on, whatever flag it still carries.
+const faCount = new Intl.NumberFormat('fa-IR');
+
+function e2eeNotice({ encrypted, secureMode, isGroup, legacyPending }) {
+  const storage = isGroup
+    ? 'پیام‌ها و فایل‌های این گروه روی سرور رمزگذاری‌شده ذخیره می‌شوند؛ دستگاه‌های واردشده به حساب اعضا می‌توانند آن‌ها را بخوانند.'
+    : 'پیام‌ها و فایل‌های این گفتگو روی سرور رمزگذاری‌شده ذخیره می‌شوند؛ دستگاه‌های واردشده به حسابت می‌توانند آن‌ها را بخوانند.';
+
+  if (!encrypted || legacyPending === 0) return { tone: 'on', text: storage };
+
+  const count = Number.isInteger(legacyPending) && legacyPending > 0 ? faCount.format(legacyPending) : null;
+  if (secureMode === 'unavailable') {
     return {
-      tone: 'on',
-      text: isGroup
-        ? 'پیام، تصویر و فایل این گروه فقط روی دستگاه اعضای آن رمزگشایی می‌شود؛ سرور هیچ‌وقت آن‌ها را نمی‌بیند.'
-        : 'پیام، تصویر و فایل این گفتگو فقط روی دستگاه شما و دستگاه طرف مقابل رمزگشایی می‌شود؛ سرور هیچ‌وقت آن‌ها را نمی‌بیند.',
+      tone: 'pending',
+      text: count
+        ? `${storage} ${count} پیام قدیمی هنوز فقط با رمزنگاری قبلی ذخیره شده‌اند و این دستگاه کلیدشان را ندارد؛ دستگاهی که کلید دارد باید یک بار این گفتگو را باز کند.`
+        : `${storage} پیام‌های قدیمی این گفتگو روی این دستگاه باز نمی‌شوند.`,
     };
   }
-  if (secureMode === 'checking') {
-    return { tone: 'pending', text: 'در حال بررسی است که این گفتگو روی این دستگاه رمزنگاری می‌شود.' };
+  if (count) {
+    return {
+      tone: 'on',
+      text: `${storage} ${count} پیام قدیمی هنوز فقط با رمزنگاری قبلی ذخیره شده‌اند؛ با باز کردن این گفتگو روی دستگاهی که کلیدشان را دارد، به سرور منتقل می‌شوند.`,
+    };
   }
-  if (secureMode === 'unavailable') {
-    return { tone: 'off', text: `این گفتگو روی این دستگاه رمزگشایی نمی‌شود${reason ? ` — ${reason}` : ''}.` };
-  }
-  if (isGroup) {
-    return { tone: 'off', text: 'این گروه سرتاسری رمزنگاری نشده؛ پیام‌هایش روی سرور هم خوانده می‌شوند.' };
-  }
-  if (reason) {
-    return { tone: 'off', text: `این گفتگو فعلاً سرتاسری رمزنگاری نمی‌شود — ${reason}.` };
-  }
-  return { tone: 'pending', text: 'اولین پیام این گفتگو از همین دستگاه رمزنگاری می‌شود؛ از آن لحظه سرور نه متن و نه فایل شما را می‌بیند.' };
+  return {
+    tone: 'on',
+    text: `${storage} پیام‌های قدیمی‌تر با رمزنگاری قبلی ذخیره شده‌اند و فقط روی دستگاهی که کلیدشان را دارد خوانده می‌شوند.`,
+  };
 }
 
 export default function MessageList({
   messages, activeUser, onReact, onReply, onForward, onEdit, onDelete, onToast, searchQuery,
-  encrypted, secureMode, encryptionNote,
+  encrypted, secureMode, legacyPending,
   historyState, historyError, onRetryHistory, onOpenProfile,
 }) {
   const listRef   = useRef(null);
@@ -100,7 +110,7 @@ export default function MessageList({
     encrypted,
     secureMode,
     isGroup,
-    reason: (secureMode === 'unavailable' ? historyError : encryptionNote) || '',
+    legacyPending,
   });
   const newCount = !searchQuery && !atBottom
     ? Math.max(0, messages.length - seenCount)
@@ -227,7 +237,7 @@ export default function MessageList({
             </div>
           ) : row.type === 'secure' ? (
             <div key={row.key} className="secure-sep">
-              <span>از این پیام به بعد، متن فقط روی دستگاه شما و طرف مقابل رمزگشایی می‌شود</span>
+              <span>پیام‌های رمزنگاری‌شدهٔ قدیمی — فقط روی دستگاه‌هایی که کلیدشان را دارند خوانده می‌شوند</span>
             </div>
           ) : (
             <MessageGroup
@@ -236,10 +246,6 @@ export default function MessageList({
               first={row.first}
               last={row.last}
               isGroup={isGroup}
-              // A plaintext row inside a chat this device carries as ciphertext
-              // cannot be rewritten there, so the menu is told and leaves Edit
-              // out instead of offering a save the server always refuses.
-              chatEncrypted={encrypted}
               onReact={onReact}
               onReply={onReply}
               onForward={onForward}

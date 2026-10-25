@@ -31,14 +31,14 @@ function Backdrop({ uri }) {
 function EncNote({ call, compact = false }) {
   const e2ee = call.info?.e2ee === true;
   return (
-    <View style={styles.enc} accessibilityLabel={e2ee ? 'رمزنگاری سرتاسری' : 'بدون رمزنگاری سرتاسری'}>
+    <View style={styles.enc} accessibilityLabel={e2ee ? 'رمزنگاری‌شده' : 'بدون رمزنگاری'}>
       <FontAwesome6
         name={e2ee ? 'lock' : 'lock-open'}
         size={9}
         color={e2ee ? '#9fe7b5' : 'rgba(255,255,255,0.58)'}
       />
       <Text style={[styles.encText, e2ee && styles.encTextOn, compact && styles.encTextCompact]}>
-        {e2ee ? 'رمزنگاری سرتاسری' : 'بدون رمزنگاری سرتاسری'}
+        {e2ee ? 'رمزنگاری‌شده' : 'بدون رمزنگاری'}
       </Text>
     </View>
   );
@@ -89,7 +89,6 @@ function RingScreen({ title, avatar, isGroup, subtitle, children }) {
 }
 
 function Incoming({ call, title, avatar, isGroup, callType, callerName }) {
-  const waitingForKey = call.info?.e2ee === true && !call.keyReady;
   const accepting = call.busy;
 
   return (
@@ -100,11 +99,7 @@ function Incoming({ call, title, avatar, isGroup, callType, callerName }) {
       subtitle={(
         <>
           {callerName && isGroup ? <Text style={styles.from}>{callerName}</Text> : null}
-          <Text style={styles.status}>
-            {waitingForKey
-              ? 'در حال آماده‌سازی رمزنگاری…'
-              : `تماس ${callType === 'video' ? 'ویدیویی' : 'صوتی'} ورودی`}
-          </Text>
+          <Text style={styles.status}>{`تماس ${callType === 'video' ? 'ویدیویی' : 'صوتی'} ورودی`}</Text>
           <EncNote call={call} />
         </>
       )}
@@ -122,8 +117,8 @@ function Incoming({ call, title, avatar, isGroup, callType, callerName }) {
         tone="accept"
         size={68}
         onPress={call.acceptCall}
-        disabled={accepting || waitingForKey}
-        busy={accepting || waitingForKey}
+        disabled={accepting}
+        busy={accepting}
       />
     </RingScreen>
   );

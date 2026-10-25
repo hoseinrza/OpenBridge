@@ -12,6 +12,8 @@ import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { SharedQueryDto } from './dto/shared-query.dto';
 import { DirectPeerDto } from './dto/direct-peer.dto';
 import { EnvelopeQueryDto } from './dto/envelope-query.dto';
+import { ImportLegacyDto } from './dto/import-legacy.dto';
+import { LegacyStatusQueryDto } from './dto/legacy-status-query.dto';
 
 @Controller('messages')
 @UseGuards(JwtAuthGuard)
@@ -29,7 +31,10 @@ export class MessagesController {
       unread:    c.unread,
       e2ee:      c.e2ee,
       updatedAt: c.updatedAt,
-      ...(c.e2ee ? {} : { lastMessage: c.lastMessage ?? null }),
+      // A preview is now readable for every row the server holds, sealed or
+      // not. A chat that only has old envelopes answers null here and the
+      // client still fills the line from the copy on its own device.
+      lastMessage: c.lastMessage ?? null,
     }));
   }
 
@@ -144,6 +149,31 @@ export class MessagesController {
       query.afterSeq ?? 0,
       query.take ?? E2EE_ENVELOPE_PAGE,
     );
+  }
+
+  // ── Legacy history backfill ──────────────────────────
+  // A device that still holds a conversation's MLS keys decrypts the envelopes
+  // it has and hands the plaintext back here. The server stores it sealed like
+  // any other message and marks each envelope it accepted, so a retry is a
+  // no-op and two devices can finish the same stream without duplicating it.
+  @Post(':conversationId/legacy-import')
+  importLegacy(
+    @Request()                          req,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Body()                             dto: ImportLegacyDto,
+  ) {
+    return this.messages.importLegacy(conversationId, req.user.id, dto.items);
+  }
+
+  // What is still only ciphertext. Reported by sequence, not dropped: another
+  // device with the keys can import what this one could not read.
+  @Get(':conversationId/legacy-status')
+  legacyStatus(
+    @Request()                          req,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Query()                            query: LegacyStatusQueryDto,
+  ) {
+    return this.messages.legacyStatus(conversationId, req.user.id, query);
   }
 
   // ── Direct (1-to-1) chat ─────────────────────────────

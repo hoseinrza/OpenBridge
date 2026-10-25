@@ -1,5 +1,5 @@
 import {
-  BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException,
+  BadRequestException, Body, Controller, ForbiddenException, Get, Headers, NotFoundException,
   Param, ParseUUIDPipe, Post, Query, Request, Res, ServiceUnavailableException,
   UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
@@ -11,7 +11,9 @@ import { extname, join, normalize } from 'path';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { ContentCrypto } from '../common/content-crypto.service';
 import { signedEncryptedUrl, verifyFileSignature } from './file-urls';
+import { parseByteRange, readStoredFile, sealStoredFile } from './file-store';
 import { UploadScanner } from './upload-scanner';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
@@ -76,6 +78,7 @@ export class UploadsController {
   constructor(
     private readonly scanner: UploadScanner,
     private readonly prisma: PrismaService,
+    private readonly crypto: ContentCrypto,
   ) {}
 
   private assertUploadRate(userId: string) {
@@ -137,6 +140,16 @@ export class UploadsController {
       throw new BadRequestException('فایل آلوده است');
     }
 
+    // The type check and the scanner both need the original bytes, so sealing
+    // is the last thing that happens to a new upload. If it fails the file is
+    // removed rather than left readable on disk.
+    try {
+      await sealStoredFile(file.path, file.filename, this.crypto);
+    } catch {
+      await unlink(file.path).catch(() => {});
+      throw new ServiceUnavailableException('ذخیره فایل ناموفق بود');
+    }
+
     return {
       url:  `/uploads/${file.filename}`,
       name: file.originalname,
@@ -193,7 +206,7 @@ export class UploadsController {
     }
     if (!membership.conversation.e2ee) {
       await unlink(file.path).catch(() => {});
-      throw new BadRequestException('این گفتگو رمزنگاری سرتاسری ندارد؛ پیوست رمزنگاری‌شده نمی‌پذیرد');
+      throw new BadRequestException('این گفتگو رمزنگاری‌شده نیست؛ پیوست رمزنگاری‌شده نمی‌پذیرد');
     }
 
     const blob = await this.prisma.encryptedBlob.create({
@@ -260,11 +273,15 @@ export class UploadsController {
 
   // Signed URLs are the credential here: the database/API only hands them to
   // authorized conversation participants, and they expire after a short TTL.
+  // The bytes on disk are sealed, so the file is opened in memory and only the
+  // requested slice is sent; media players need the 206/Content-Range pair to
+  // seek inside a recording.
   @Get(':filename')
-  download(
+  async download(
     @Param('filename') filename: string,
     @Query('exp') expiresAt: string,
     @Query('sig') signature: string,
+    @Headers('range') rangeHeader: string | undefined,
     @Res() res: Response,
   ) {
     const safeName = normalize(filename);
@@ -278,9 +295,19 @@ export class UploadsController {
     const mime = EXT_TO_MIME.get(extname(filename).toLowerCase());
     if (!mime) throw new NotFoundException('فایل پیدا نشد');
 
+    let bytes: Buffer;
+    try {
+      bytes = await readStoredFile(join(UPLOAD_DIR, filename), filename, this.crypto);
+    } catch {
+      // A missing file and one that fails its authentication tag answer the
+      // same way: this URL does not lead to content.
+      throw new NotFoundException('فایل پیدا نشد');
+    }
+
     res.setHeader('Content-Type', mime);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader(
       'Content-Disposition',
       // A picture opens in place and so does a recording handed to a phone's
@@ -289,8 +316,20 @@ export class UploadsController {
         ? 'inline'
         : `attachment; filename="${filename}"`,
     );
-    return res.sendFile(join(UPLOAD_DIR, filename), err => {
-      if (err && !res.headersSent) res.status(404).json({ message: 'فایل پیدا نشد' });
-    });
+
+    const range = parseByteRange(rangeHeader, bytes.length);
+    if (range === 'unsatisfiable') {
+      res.setHeader('Content-Range', `bytes */${bytes.length}`);
+      return res.status(416).end();
+    }
+    if (range) {
+      const slice = bytes.subarray(range.start, range.end + 1);
+      res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${bytes.length}`);
+      res.setHeader('Content-Length', String(slice.length));
+      return res.status(206).end(slice);
+    }
+
+    res.setHeader('Content-Length', String(bytes.length));
+    return res.end(bytes);
   }
 }

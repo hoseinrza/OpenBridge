@@ -19,6 +19,11 @@ function required(name: string): string {
 export const JWT_SECRET = required('JWT_SECRET');
 export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN?.trim() || '7d';
 
+// Message text and uploaded bytes are sealed at rest with a key derived from
+// this master secret. It is required: without it the process refuses to start
+// rather than quietly writing plaintext into the database.
+export const CONTENT_KEY = required('CONTENT_KEY');
+
 if (IS_PRODUCTION && JWT_SECRET.length < 32) {
   throw new Error('JWT_SECRET must be at least 32 characters in production');
 }
@@ -74,6 +79,11 @@ export const CONTACT_MATCH_WINDOW_SECONDS = positiveInt('CONTACT_MATCH_WINDOW_SE
 // this many days regardless of activity.
 export const REFRESH_TOKEN_TTL_DAYS = positiveInt('REFRESH_TOKEN_TTL_DAYS', 30);
 
+// A session must be this old before it may sign the account out of another
+// session. A fresh login therefore cannot evict the devices that were already
+// there, even if its phone number and OTP were stolen.
+export const SESSION_REVOKE_COOLDOWN_DAYS = positiveInt('SESSION_REVOKE_COOLDOWN_DAYS', 30);
+
 // E2EE device registration and the public KeyPackage pool. The server only ever
 // stores opaque public blobs, so the caps exist to bound storage and to keep
 // the bundle endpoint from being used as a free data store.
@@ -105,6 +115,11 @@ export const E2EE_MAX_GROUP_MEMBERS = positiveInt('E2EE_MAX_GROUP_MEMBERS', 16);
 export const E2EE_MAX_ENVELOPE_CHARS = positiveInt('E2EE_MAX_ENVELOPE_CHARS', 16384);
 // How many envelopes a reconnecting client may pull in one catch-up page.
 export const E2EE_ENVELOPE_PAGE = positiveInt('E2EE_ENVELOPE_PAGE', 200);
+// Legacy history backfill: a device decrypts the envelopes it already holds and
+// hands the plaintext back to be stored like any other row. One request carries
+// this many items; a long conversation is imported over several requests, and
+// each one is idempotent.
+export const LEGACY_IMPORT_BATCH = positiveInt('LEGACY_IMPORT_BATCH', 100);
 export const E2EE_REGISTER_LIMIT = positiveInt('E2EE_REGISTER_LIMIT', 30);
 export const E2EE_REGISTER_WINDOW_SECONDS = positiveInt('E2EE_REGISTER_WINDOW_SECONDS', 600);
 

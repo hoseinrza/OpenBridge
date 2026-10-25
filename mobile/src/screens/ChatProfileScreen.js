@@ -25,8 +25,8 @@ const TABS = [
   { kind: 'links',  label: 'لینک‌ها', empty: 'لینکی در این گفتگو نیست' },
 ];
 // Members are already on this screen with the chat, so the tab fetches nothing —
-// and it is the one tab an encrypted chat can still show, because a member list
-// is not message content.
+// and it is the one tab a chat with legacy encrypted history can still show,
+// because a member list is not message content.
 const MEMBERS_TAB = { kind: 'members', label: 'اعضا' };
 const CALL_ACTIONS = [
   { id: 'call',  icon: 'phone', label: 'تماس',    kind: 'audio' },
@@ -96,7 +96,8 @@ export default function ChatProfileScreen({ route }) {
     return () => { cancelled = true; };
   }, [peer?.id]);
 
-  // The conversation may have become encrypted since this device last looked.
+  // The conversation may have gained its legacy encrypted history since this
+  // device last looked.
   useEffect(() => {
     let cancelled = false;
     setLocked(peer?.encrypted === true);
@@ -420,7 +421,7 @@ export default function ChatProfileScreen({ route }) {
             ) : locked ? (
               <View style={styles.lockedNote}>
                 <Text style={styles.lockedText}>
-                  این گفتگو سرتاسری رمزنگاری شده؛ فهرست رسانه‌ها و فایل‌ها فقط در نسخهٔ وب نشان داده می‌شود.
+                  پیام‌های قدیمیِ این گفتگو با رمزنگاری قبلی ذخیره شده‌اند؛ فهرست رسانه‌ها و فایل‌ها فقط در نسخهٔ وب نشان داده می‌شود.
                 </Text>
               </View>
             ) : (

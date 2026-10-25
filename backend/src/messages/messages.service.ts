@@ -2,7 +2,8 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { isBase64 } from 'class-validator';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { E2EE_MAX_ENVELOPE_CHARS, E2EE_MAX_GROUP_MEMBERS } from '../config/env';
+import { ContentCrypto } from '../common/content-crypto.service';
+import { E2EE_ENVELOPE_PAGE, E2EE_MAX_ENVELOPE_CHARS, E2EE_MAX_GROUP_MEMBERS, LEGACY_IMPORT_BATCH } from '../config/env';
 import { signedFileUrl } from '../uploads/file-urls';
 import { GroupEvents } from './group-events';
 import { UpdateGroupDto } from './dto/update-group.dto';
@@ -55,6 +56,113 @@ const lastMessageInclude = (userId: string) => ({
 // the number a recording client stops its own timer at.
 const MAX_DURATION_MS = 15 * 60 * 1000;
 
+// ── Legacy history import ────────────────────────────────────────────────────
+//
+// A conversation that predates server-key content holds its old text and files
+// in MLS envelopes no server can read. A device that still has the group keys
+// decrypts them and hands the plaintext back here, where it is stored sealed
+// exactly like a message sent today. Everything below validates that handback:
+// the envelope must exist and be a message, its author and time come from the
+// envelope rather than the caller, and an attachment may only name a blob the
+// server already handed out for this same conversation.
+
+const LEGACY_IMPORT_TYPES = new Set(['TEXT', 'IMAGE', 'FILE', 'AUDIO', 'VIDEO', 'VOICE']);
+const LEGACY_BLOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const LEGACY_KEY_BYTES = 32;
+const LEGACY_NONCE_BYTES = 12;
+const LEGACY_PEAKS_MAX = 64;
+const LEGACY_QUOTE_TYPES = new Set(['text', 'image', 'file', 'audio', 'voice', 'video']);
+
+export interface LegacyImportItem {
+  seq: number;
+  type?: string;
+  text?: string;
+  attachment?: unknown;
+  replyToSeq?: number | null;
+  forwardedFrom?: string | null;
+}
+
+interface LegacyAttachment {
+  blob: string;
+  name: string;
+  mime: string;
+  size: number | null;
+  durationMs: number | null;
+  voice: boolean;
+  peaks: number[] | null;
+  key: string;
+  iv: string;
+  reply?: Record<string, unknown>;
+  forward?: Record<string, unknown>;
+}
+
+// Bytes behind a base64 string, or -1 when the string is not canonical base64.
+// The client's decoder is this strict, so a key that arrives here in any other
+// shape could never open the file it names.
+function base64Bytes(value: unknown): number {
+  if (typeof value !== 'string' || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return -1;
+  return Buffer.from(value, 'base64').length;
+}
+
+function readLegacyPeaks(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const peaks = value
+    .filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry))
+    .slice(0, LEGACY_PEAKS_MAX)
+    .map(entry => Math.round(Math.min(100, Math.max(0, entry))));
+  return peaks.length >= 2 ? peaks : null;
+}
+
+function readLegacyQuote(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const quote = value as Record<string, unknown>;
+  if (typeof quote.id !== 'string' || !quote.id || quote.id.length > 64) return null;
+  return {
+    id:         quote.id,
+    senderName: typeof quote.senderName === 'string' ? quote.senderName.slice(0, 80) || null : null,
+    preview:    typeof quote.preview === 'string' ? quote.preview.slice(0, 180) || null : null,
+    type:       typeof quote.type === 'string' && LEGACY_QUOTE_TYPES.has(quote.type) ? quote.type : 'text',
+  };
+}
+
+function readLegacyForward(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const fromName = (value as Record<string, unknown>).fromName;
+  if (typeof fromName !== 'string' || !fromName.trim()) return null;
+  return { fromName: fromName.trim().slice(0, 80) };
+}
+
+// A legacy descriptor, kept whole only after every field that opens the file
+// checks out. The server still never sees the file's bytes; it keeps the blob
+// id, the key and the nonce so a reader can fetch and decrypt on its own.
+function readLegacyAttachment(value: unknown): LegacyAttachment | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  if (typeof input.blob !== 'string' || !LEGACY_BLOB_ID.test(input.blob)) return null;
+  if (base64Bytes(input.key) !== LEGACY_KEY_BYTES) return null;
+  if (base64Bytes(input.iv) !== LEGACY_NONCE_BYTES) return null;
+
+  const attachment: LegacyAttachment = {
+    blob:       input.blob,
+    name:       typeof input.name === 'string' ? input.name.slice(0, 255) : '',
+    mime:       typeof input.mime === 'string' ? input.mime.slice(0, 100) : 'application/octet-stream',
+    size:       Number.isInteger(input.size) && (input.size as number) >= 0 ? input.size as number : null,
+    durationMs: Number.isInteger(input.durationMs) && (input.durationMs as number) >= 0
+      ? input.durationMs as number
+      : null,
+    voice:      input.voice === true,
+    peaks:      readLegacyPeaks(input.peaks),
+    key:        input.key as string,
+    iv:         input.iv as string,
+  };
+
+  const quote = readLegacyQuote(input.reply);
+  if (quote) attachment.reply = quote;
+  const forward = readLegacyForward(input.forward);
+  if (forward) attachment.forward = forward;
+  return attachment;
+}
+
 // Photos and films in one list, documents in another. A recording and an
 // uploaded audio file are separate shelves too: one is something you listen to
 // where it stands, the other is something you keep. This is also how the
@@ -72,14 +180,6 @@ const SHARED_WHERE = {
   files: { type: 'FILE' },
 } satisfies Record<'media' | 'voice' | 'music' | 'files', Prisma.MessageWhereInput>;
 
-type LinkRow = {
-  id:         string;
-  text:       string;
-  createdAt:  Date;
-  senderId:   string;
-  senderName: string;
-};
-
 // A link runs to the first space or quote, and the punctuation a sentence puts
 // after it is trimmed back — a saved address ending in a full stop is an address
 // that 404s.
@@ -92,7 +192,11 @@ function extractLinks(text: string) {
 
 @Injectable()
 export class MessagesService {
-  constructor(private prisma: PrismaService, private events: GroupEvents) {}
+  constructor(
+    private prisma: PrismaService,
+    private events: GroupEvents,
+    private crypto: ContentCrypto,
+  ) {}
 
   private findDirectConversation(userAId: string, userBId: string) {
     return this.prisma.conversation.findFirst({
@@ -133,7 +237,7 @@ export class MessagesService {
   // `deletedAt` never leaves the server, because the client only renders a
   // tombstone and must not sort or date it by a second clock.
   private toWireMessage(message: any) {
-    const { reads, deletedAt, replyTo, ...rest } = message;
+    const { reads, deletedAt, replyTo, legacyAttachment, legacyEnvelopeId, ...rest } = message;
     const deleted = Boolean(deletedAt);
     const quoted = replyTo
       ? {
@@ -141,7 +245,7 @@ export class MessagesService {
         type:      replyTo.type,
         // A tombstone's text and file name are gone; the quote says so instead
         // of showing what the sender asked to take away.
-        text:      replyTo.deletedAt ? null : replyTo.text,
+        text:      replyTo.deletedAt ? null : this.crypto.openText(message.conversationId, replyTo.text),
         fileName:  replyTo.deletedAt ? null : replyTo.fileName,
         deleted:   Boolean(replyTo.deletedAt),
         sender:    replyTo.sender
@@ -151,10 +255,19 @@ export class MessagesService {
       : null;
     return {
       ...rest,
+      // The row holds sealed text; every reader gets the opened one. A row
+      // written before sealing existed has no prefix and passes through.
+      text: deleted ? null : this.crypto.openText(message.conversationId, rest.text),
       deleted,
       editedAt: rest.editedAt ?? null,
       replyTo: quoted,
       forwardedFrom: rest.forwardedFrom ?? null,
+      // A row imported from the legacy stream keeps both halves of its
+      // identity: the descriptor a reader needs to open the file itself, and
+      // the sequence it can deduplicate against the copy still on its device.
+      // Every other row answers null to both, so a reader has one rule.
+      legacySeq: rest.legacySeq ?? null,
+      attachment: deleted ? null : legacyAttachment ?? null,
       fileUrl: deleted ? null : signedFileUrl(rest.fileUrl),
       sender: rest.sender
         ? { ...rest.sender, avatar: signedFileUrl(rest.sender.avatar) }
@@ -163,11 +276,11 @@ export class MessagesService {
     };
   }
 
-  private toWirePreview(message: any) {
+  private toWirePreview(message: any, conversationId: string) {
     if (!message) return null;
     return {
       type:      message.type,
-      text:      message.text ?? null,
+      text:      this.crypto.openText(conversationId, message.text ?? null),
       fileName:  message.fileName ?? null,
       createdAt: message.createdAt,
       sender:    message.sender
@@ -240,19 +353,11 @@ export class MessagesService {
     const readSeq = new Map(myRows.map(row => [row.conversationId, row.e2eeReadSeq]));
 
     return Promise.all(withPartner.map(async (c) => {
-      // An encrypted conversation has no plaintext rows to count, so unread is
-      // "envelopes above my high-water mark that I did not submit". Controls are
-      // not chat, so they never raise a badge.
-      const unread = c.e2ee
-        ? await this.prisma.e2eeEnvelope.count({
-          where: {
-            conversationId: c.id,
-            senderId:       { not: myId },
-            seq:            { gt: readSeq.get(c.id) ?? 0 },
-            kind:           'MESSAGE',
-          },
-        })
-        : await this.prisma.message.count({
+      // A chat that predates server-key content can hold both kinds of rows:
+      // legacy MLS envelopes and the messages written since. The badge is the
+      // sum, because either one is something this reader has not seen.
+      const [serverUnread, envelopeUnread] = await Promise.all([
+        this.prisma.message.count({
           where: {
             conversationId: c.id,
             senderId:       { not: myId },
@@ -260,15 +365,24 @@ export class MessagesService {
             deletedAt:      null,
             hides:          { none: { userId: myId } },
           },
-        });
+        }),
+        c.e2ee
+          ? this.prisma.e2eeEnvelope.count({
+            where: {
+              conversationId: c.id,
+              senderId:       { not: myId },
+              seq:            { gt: readSeq.get(c.id) ?? 0 },
+              kind:           'MESSAGE',
+            },
+          })
+          : Promise.resolve(0),
+      ]);
       return {
         user:        c.participants[0].user,
-        unread,
+        unread:      serverUnread + envelopeUnread,
         e2ee:        c.e2ee,
         updatedAt:   c.updatedAt,
-        // An encrypted transcript has no readable row to preview, and the chat
-        // list is not allowed to carry message-shaped fields for it at all.
-        ...(c.e2ee ? {} : { lastMessage: this.toWirePreview(c.messages[0]) }),
+        lastMessage: this.toWirePreview(c.messages[0], c.id),
       };
     }));
   }
@@ -429,18 +543,10 @@ export class MessagesService {
     const readSeq = new Map(myRows.map(row => [row.conversationId, row.e2eeReadSeq]));
 
     return Promise.all(groups.map(async (group) => {
-      // An encrypted group keeps no plaintext rows, so its badge counts what the
-      // high-water mark has not covered yet instead of counting messages.
-      const unread = group.e2ee
-        ? await this.prisma.e2eeEnvelope.count({
-          where: {
-            conversationId: group.id,
-            senderId:       { not: myId },
-            seq:            { gt: readSeq.get(group.id) ?? 0 },
-            kind:           'MESSAGE',
-          },
-        })
-        : await this.prisma.message.count({
+      // Same sum as a direct chat: legacy envelopes and server-key messages
+      // both count toward what this reader has not opened yet.
+      const [serverUnread, envelopeUnread] = await Promise.all([
+        this.prisma.message.count({
           where: {
             conversationId: group.id,
             senderId:       { not: myId },
@@ -448,8 +554,19 @@ export class MessagesService {
             deletedAt:      null,
             hides:          { none: { userId: myId } },
           },
-        });
-      return this.toWireGroup(group, unread, this.toWirePreview(group.messages[0]));
+        }),
+        group.e2ee
+          ? this.prisma.e2eeEnvelope.count({
+            where: {
+              conversationId: group.id,
+              senderId:       { not: myId },
+              seq:            { gt: readSeq.get(group.id) ?? 0 },
+              kind:           'MESSAGE',
+            },
+          })
+          : Promise.resolve(0),
+      ]);
+      return this.toWireGroup(group, serverUnread + envelopeUnread, this.toWirePreview(group.messages[0], group.id));
     }));
   }
 
@@ -584,14 +701,11 @@ export class MessagesService {
     return { id: direct.id, e2ee: direct.e2ee };
   }
 
-  // The photos, files and links a chat's profile shows. `target` is either a
-  // group's conversation id or a peer's user id — the two ways the clients
-  // already address a chat — and neither is trusted: membership in whatever it
-  // resolves to is what authorizes the read.
-  //
-  // An encrypted conversation has no readable rows to list, so the answer says
-  // so rather than returning an empty list, which a client would render as "this
-  // chat has no photos" for a chat that has thousands of them.
+  // An encrypted conversation is not a dead end any more: messages written
+  // since the server-key switch live in the same table as every other chat. The
+  // `encrypted` flag still marks a conversation whose older history the client
+  // holds in MLS envelopes, so the panel can show its local lists next to
+  // whatever the server can now return.
   async sharedItems(
     target: string,
     requesterId: string,
@@ -600,48 +714,71 @@ export class MessagesService {
     before?: string,
   ) {
     const conversation = await this.resolveSharedTarget(target, requesterId);
-    if (conversation.e2ee) return { kind, encrypted: true, items: [], nextCursor: null };
-
+    const encrypted = conversation.e2ee;
     const cursor = before ? new Date(before) : null;
 
     if (kind === 'links') {
-      // Which messages carry a link is a question about the text, so it is asked
-      // of the database rather than answered by paging through every message.
-      // A JS Date bound into raw SQL is written in the server's local zone while
-      // these columns hold naive UTC, so the cursor goes in as a UTC wall time.
-      const older = cursor
-        ? Prisma.sql`AND m."createdAt" < ${cursor.toISOString().replace('T', ' ').replace('Z', '')}::timestamp`
-        : Prisma.empty;
-      const rows = await this.prisma.$queryRaw<LinkRow[]>(Prisma.sql`
-        SELECT m.id, m.text, m."createdAt", m."senderId",
-               COALESCE(NULLIF(u."displayName", ''), u.username) AS "senderName"
-        FROM messages m
-        JOIN users u ON u.id = m."senderId"
-        WHERE m."conversationId" = ${conversation.id}
-          AND m."deletedAt" IS NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM message_hides h
-            WHERE h."messageId" = m.id AND h."userId" = ${requesterId}
-          )
-          AND m.type = 'TEXT'
-          AND m.text ~ 'https?://'
-          ${older}
-        ORDER BY m."createdAt" DESC, m.id DESC
-        LIMIT ${take + 1}
-      `);
+      // Finding a link needs the plaintext, so it can no longer be a SQL
+      // predicate. Text rows are opened in batches and the scan stops once the
+      // page is full; `nextCursor` is the last message read, so a client can
+      // continue where this request stopped.
+      const batchSize = Math.max(take * 4, 100);
+      const maxBatches = 8;
+      let boundary: Date | null = cursor;
+      let hasMore = false;
+      let done = false;
+      const items: Array<{
+        id: string; kind: string; url: string; text: string; createdAt: Date;
+        sender: { id: string; name: string };
+      }> = [];
 
-      // The page boundary is a message, never a link inside one, so a message
-      // with several links returns all of them and none of them are skipped.
-      const hasMore = rows.length > take;
-      const items = rows.slice(0, take).flatMap(row => extractLinks(row.text).map((url, index) => ({
-        id:        `${row.id}-${index}`,
-        kind:      'link',
-        url,
-        text:      row.text,
-        createdAt: row.createdAt,
-        sender:    { id: row.senderId, name: row.senderName },
-      })));
-      return { kind, encrypted: false, items, nextCursor: hasMore ? rows[take - 1].createdAt.toISOString() : null };
+      for (let batch = 0; batch < maxBatches && !done; batch++) {
+        const rows = await this.prisma.message.findMany({
+          where: {
+            conversationId: conversation.id,
+            deletedAt:      null,
+            hides:          { none: { userId: requesterId } },
+            type:           'TEXT',
+            ...(boundary ? { createdAt: { lt: boundary } } : {}),
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take:    batchSize,
+          select:  {
+            id:        true,
+            text:      true,
+            createdAt: true,
+            senderId:  true,
+            sender:    { select: { username: true, displayName: true } },
+          },
+        });
+        if (!rows.length) break;
+
+        for (const row of rows) {
+          boundary = row.createdAt;
+          const text = this.crypto.openText(conversation.id, row.text);
+          if (!text) continue;
+          for (const [index, url] of extractLinks(text).entries()) {
+            items.push({
+              id:        `${row.id}-${index}`,
+              kind:      'link',
+              url,
+              text,
+              createdAt: row.createdAt,
+              sender:    { id: row.senderId, name: row.sender.displayName || row.sender.username },
+            });
+          }
+          // The page boundary is a message, never a link inside one, so a
+          // message with several links returns all of them before the page ends.
+          if (items.length > take) {
+            hasMore = true;
+            done = true;
+            break;
+          }
+        }
+        if (!done) hasMore = rows.length === batchSize;
+      }
+
+      return { kind, encrypted, items, nextCursor: hasMore && boundary ? boundary.toISOString() : null };
     }
 
     const rows = await this.prisma.message.findMany({
@@ -663,7 +800,7 @@ export class MessagesService {
     const hasMore = rows.length > take;
     return {
       kind,
-      encrypted: false,
+      encrypted,
       items: rows.slice(0, take).map(row => ({
         id:         row.id,
         kind,
@@ -733,16 +870,14 @@ export class MessagesService {
     replyToId?: string; forwardedFrom?: string;
   }) {
     await this.assertMember(conversationId, senderId);
-    // An encrypted conversation has no plaintext path: accepting one here would
-    // be a silent downgrade the recipients cannot see coming.
-    const conversation = await this.prisma.conversation.findUnique({
-      where:  { id: conversationId },
-      select: { e2ee: true },
-    });
-    if (conversation?.e2ee) {
-      throw new BadRequestException('این گفتگو فقط بسته رمزنگاری‌شده می‌پذیرد');
-    }
     const normalized = this.normalizeOutgoingMessage(data);
+    // The row is written sealed. A conversation marked e2ee by the old MLS
+    // scheme is no different here: its new messages take the same path, and its
+    // legacy envelopes keep working next to them.
+    const stored = {
+      ...normalized,
+      text: normalized.text ? this.crypto.sealText(conversationId, normalized.text) : null,
+    };
 
     // A quote is a reference into this same conversation, never an id the
     // sender can point at somebody else's chat. A tombstone is not replyable.
@@ -765,7 +900,7 @@ export class MessagesService {
       data: {
         conversationId,
         senderId,
-        ...normalized,
+        ...stored,
         replyToId,
         forwardedFrom,
       },
@@ -786,9 +921,9 @@ export class MessagesService {
   // recency stamp: an action on a past message is not new activity, and it must
   // not reorder the chat list.
 
-  // Text-only, sender-only, and never inside an encrypted chat: a plaintext
-  // rewrite there would be a new readable row in a conversation that is
-  // ciphertext-only from its first envelope.
+  // Text-only and sender-only. The replacement is sealed like a new message,
+  // so an edit cannot leave a readable copy behind in a chat whose rows are
+  // otherwise sealed.
   async editMessage(messageId: string, userId: string, text: unknown) {
     if (!isMessageId(messageId)) throw new BadRequestException('پیام نامعتبر است');
 
@@ -800,16 +935,12 @@ export class MessagesService {
         type:           true,
         deletedAt:      true,
         hides:          { where: { userId }, select: { id: true } },
-        conversation:   { select: { e2ee: true } },
       },
     });
     if (!message || message.deletedAt || message.hides.length) throw new NotFoundException('پیام پیدا نشد');
     await this.assertMember(message.conversationId, userId);
     if (message.senderId !== userId) throw new ForbiddenException('فقط فرستنده می‌تواند پیامش را ویرایش کند');
     if (message.type !== 'TEXT') throw new BadRequestException('فقط پیام متنی قابل ویرایش است');
-    if (message.conversation.e2ee) {
-      throw new BadRequestException('پیام این گفتگو رمزنگاری‌شده است و از این راه ویرایش نمی‌شود');
-    }
 
     // The same normalization that guards sending: one limit for one kind of text,
     // so an edit can never grow a message past what a new one would be allowed.
@@ -821,7 +952,7 @@ export class MessagesService {
 
     const updated = await this.prisma.message.update({
       where:   { id: messageId },
-      data:    { text: editedText, editedAt: new Date() },
+      data:    { text: this.crypto.sealText(message.conversationId, editedText!), editedAt: new Date() },
       include: { ...WITH_RELATIONS, reads: { select: { userId: true } } },
     });
     return this.toWireMessage(updated);
@@ -967,7 +1098,7 @@ export class MessagesService {
       where:  { id: conversationId },
       select: { e2ee: true },
     });
-    if (!conversation.e2ee) throw new BadRequestException('این گفتگو رمزنگاری سرتاسری ندارد');
+    if (!conversation.e2ee) throw new BadRequestException('این گفتگو رمزنگاری‌شده نیست');
 
     const [envelope] = await this.prisma.$transaction(async tx => {
       // Transaction-scoped advisory lock: sequence assignment stays gapless
@@ -1007,6 +1138,213 @@ export class MessagesService {
       take,
       select:  { id: true, seq: true, senderId: true, content: true, createdAt: true },
     });
+  }
+
+  // ── Legacy history backfill ──────────────────────────────────────────────
+  //
+  // The old MLS stream is read-only history now: no new message travels on it,
+  // but a device that still holds a conversation's group keys can decrypt what
+  // is already there. It hands that plaintext back once, and from then on the
+  // conversation is an ordinary server-key chat whose history every device can
+  // read. The envelope id makes the handback idempotent, so a retry after a
+  // dropped response stores nothing twice.
+
+  async importLegacy(conversationId: string, requesterId: string, items: LegacyImportItem[]) {
+    await this.assertMember(conversationId, requesterId);
+    if (!Array.isArray(items) || !items.length) throw new BadRequestException('فهرست پیام‌های قدیمی خالی است');
+    if (items.length > LEGACY_IMPORT_BATCH) throw new BadRequestException('تعداد پیام‌های هر درخواست بیش از حد است');
+
+    // A sequence names exactly one envelope, so a batch that repeats one is a
+    // client mistake the server can absorb rather than write twice.
+    const wanted = new Map<number, LegacyImportItem>();
+    let rejected = 0;
+    for (const item of items) {
+      if (!item || !Number.isInteger(item.seq) || item.seq <= 0 || wanted.has(item.seq)) {
+        rejected += 1;
+        continue;
+      }
+      wanted.set(item.seq, item);
+    }
+
+    const envelopes = wanted.size
+      ? await this.prisma.e2eeEnvelope.findMany({
+        where:  { conversationId, seq: { in: [...wanted.keys()] }, kind: 'MESSAGE' },
+        select: { id: true, seq: true, senderId: true, createdAt: true },
+      })
+      : [];
+    const bySeq = new Map(envelopes.map(envelope => [envelope.seq, envelope]));
+
+    const existing = envelopes.length
+      ? await this.prisma.message.findMany({
+        where:  { legacyEnvelopeId: { in: envelopes.map(envelope => envelope.id) } },
+        select: { legacyEnvelopeId: true },
+      })
+      : [];
+    const already = new Set(existing.map(row => row.legacyEnvelopeId));
+
+    // Every descriptor has to name a blob this server handed out for this same
+    // chat. One query answers it for the whole batch; a blob from another
+    // conversation is simply not in the set.
+    const blobIds = new Set<string>();
+    for (const item of wanted.values()) {
+      const raw = item.attachment;
+      if (raw && typeof raw === 'object' && typeof (raw as { blob?: unknown }).blob === 'string') {
+        blobIds.add((raw as { blob: string }).blob);
+      }
+    }
+    const owned = blobIds.size
+      ? await this.prisma.encryptedBlob.findMany({
+        where:  { conversationId, id: { in: [...blobIds] } },
+        select: { id: true },
+      })
+      : [];
+    const ownedBlobs = new Set(owned.map(blob => blob.id));
+
+    let imported = 0;
+    let skipped = 0;
+    const migrated: string[] = [];
+
+    for (const item of [...wanted.values()].sort((a, b) => a.seq - b.seq)) {
+      const envelope = bySeq.get(item.seq);
+      if (!envelope) {
+        // No envelope at that sequence, or one that is a control rather than a
+        // message: either way there is no plaintext this row may claim to be.
+        rejected += 1;
+        continue;
+      }
+      if (already.has(envelope.id)) {
+        skipped += 1;
+        migrated.push(envelope.id);
+        continue;
+      }
+
+      const data = await this.prepareLegacyImport(conversationId, item, envelope, ownedBlobs);
+      if (!data) {
+        rejected += 1;
+        continue;
+      }
+
+      try {
+        await this.prisma.message.create({ data });
+        imported += 1;
+      } catch (error) {
+        // Two devices of the same account can import the same stream at once;
+        // the unique envelope id decides, and the loser counts as a skip.
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          skipped += 1;
+        } else {
+          throw error;
+        }
+      }
+      migrated.push(envelope.id);
+    }
+
+    if (migrated.length) {
+      const migratedAt = new Date();
+      await Promise.all(migrated.map(id => this.prisma.e2eeEnvelope.update({
+        where: { id },
+        data:  { migratedAt },
+      })));
+    }
+
+    return { imported, skipped, rejected };
+  }
+
+  private async prepareLegacyImport(
+    conversationId: string,
+    item: LegacyImportItem,
+    envelope: { id: string; senderId: string; createdAt: Date },
+    ownedBlobs: Set<string>,
+  ): Promise<Prisma.MessageUncheckedCreateInput | null> {
+    const type = typeof item.type === 'string' ? item.type.toUpperCase() : '';
+    if (!LEGACY_IMPORT_TYPES.has(type)) return null;
+
+    const text = typeof item.text === 'string' ? item.text.trim() : '';
+    if (text.length > 4000) return null;
+
+    let attachment: LegacyAttachment | null = null;
+    if (type === 'TEXT') {
+      // A text row is its text. An attachment riding along would be dropped,
+      // and a client that sends one has the wrong type rather than a message.
+      if (!text || item.attachment) return null;
+    } else {
+      // The legacy format gave a file no caption, so text on an attachment is
+      // equally a mismatch.
+      if (text) return null;
+      attachment = readLegacyAttachment(item.attachment);
+      if (!attachment || !ownedBlobs.has(attachment.blob)) return null;
+    }
+
+    let replyToId: string | null = null;
+    if (Number.isInteger(item.replyToSeq) && item.replyToSeq > 0) {
+      const target = await this.prisma.message.findFirst({
+        where:  { conversationId, legacySeq: item.replyToSeq },
+        select: { id: true },
+      });
+      // A quote that cannot be resolved is dropped rather than failing the
+      // import: the message is the history, the quote is decoration.
+      replyToId = target?.id ?? null;
+    }
+
+    const plays = type === 'AUDIO' || type === 'VIDEO' || type === 'VOICE';
+
+    return {
+      conversationId,
+      // The author is the envelope's, never the importer's: a device can hand
+      // back what it decrypted, not claim to have written it.
+      senderId: envelope.senderId,
+      type: type as any,
+      text: type === 'TEXT' ? this.crypto.sealText(conversationId, text) : null,
+      fileUrl: null,
+      fileName: attachment ? attachment.name || null : null,
+      fileSize: attachment?.size ?? null,
+      durationMs: attachment && plays ? attachment.durationMs : null,
+      replyToId,
+      forwardedFrom: typeof item.forwardedFrom === 'string'
+        ? item.forwardedFrom.trim().slice(0, 80) || null
+        : null,
+      // The original time is what puts the row back in its place in the
+      // timeline, not the moment somebody happened to import it.
+      createdAt: envelope.createdAt,
+      legacyEnvelopeId: envelope.id,
+      legacySeq: item.seq,
+      ...(attachment ? { legacyAttachment: attachment as unknown as Prisma.InputJsonValue } : {}),
+    };
+  }
+
+  /**
+   * What of a conversation's legacy stream is still only ciphertext. Pending
+   * envelopes are listed by sequence rather than forgotten, so another device
+   * that holds the keys can finish what this one could not.
+   */
+  async legacyStatus(conversationId: string, requesterId: string, query: { afterSeq?: number; take?: number }) {
+    await this.assertMember(conversationId, requesterId);
+    const afterSeq = Number.isInteger(query.afterSeq) && query.afterSeq > 0 ? query.afterSeq : 0;
+    const take = Number.isInteger(query.take) && query.take > 0 ? query.take : E2EE_ENVELOPE_PAGE;
+    const scope: Prisma.E2eeEnvelopeWhereInput = { conversationId, kind: 'MESSAGE' };
+
+    const [total, pending] = await Promise.all([
+      this.prisma.e2eeEnvelope.count({ where: scope }),
+      this.prisma.e2eeEnvelope.count({ where: { ...scope, migratedAt: null } }),
+    ]);
+    const rows = await this.prisma.e2eeEnvelope.findMany({
+      where:   { ...scope, migratedAt: null, ...(afterSeq ? { seq: { gt: afterSeq } } : {}) },
+      orderBy: { seq: 'asc' },
+      take,
+      select:  { seq: true },
+    });
+    const seqs = rows.map(row => row.seq);
+
+    return {
+      total,
+      // Imported is the remainder rather than a third count: an envelope is
+      // either pending or it is not, so two numbers cannot disagree.
+      imported: total - pending,
+      pending,
+      seqs,
+      // A full page means there may be more; the client asks again from here.
+      nextAfterSeq: seqs.length === take ? seqs[seqs.length - 1] : null,
+    };
   }
 
   /**

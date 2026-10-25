@@ -49,9 +49,10 @@ export interface CallRecord {
   connected: Set<string>;
   status: CallStatus;
   e2ee: boolean;
-  // SHA-256 of the MLS-derived media key, never the key itself. It lets the
-  // server refuse a participant whose MLS epoch disagrees with the caller's.
-  keyFingerprint: string | null;
+  // The server issues one media key per encrypted call and holds it for the
+  // call's lifetime. It is never persisted and never sent to the invitee before
+  // a room token is issued.
+  mediaKey: string | null;
   createdAt: number;
   acceptedAt: number | null;
   connectedAt: number | null;
@@ -65,7 +66,6 @@ export interface CallView {
   kind: CallKind;
   type: CallType;
   e2ee: boolean;
-  keyFingerprint: string | null;
   status: CallStatus;
   callerId: string;
   calleeId: string | null;
@@ -80,7 +80,6 @@ export function toCallView(call: CallRecord): CallView {
     kind: call.kind,
     type: call.type,
     e2ee: call.e2ee,
-    keyFingerprint: call.keyFingerprint,
     status: call.status,
     callerId: call.callerId,
     calleeId: call.calleeId,

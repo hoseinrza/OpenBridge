@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import {
   BadRequestException, ConflictException, ForbiddenException, Injectable, Logger,
   NotFoundException, OnModuleDestroy, OnModuleInit, ServiceUnavailableException,
@@ -79,7 +80,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
   async inviteDirect(
     callerId: string,
-    body: { callId?: unknown; toId?: unknown; type?: unknown; keyFingerprint?: unknown },
+    body: { callId?: unknown; toId?: unknown; type?: unknown },
   ) {
     this.assertConfigured();
     const { toId, type } = body ?? {};
@@ -101,7 +102,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     // account ids unringable, which is the same boundary the chat already has.
     if (!conversation) throw new ForbiddenException('تماس فقط در یک گفتگوی موجود امکان‌پذیر است');
 
-    const keyFingerprint = this.checkFingerprint(conversation.e2ee, body.keyFingerprint);
     if (this.activeForUser(callerId)) throw new ConflictException('شما در تماس دیگری هستید');
     if (this.activeForUser(toId)) throw new ConflictException('کاربر در تماس دیگری است');
 
@@ -124,7 +124,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       calleeId: toId,
       participantIds: [callerId, toId],
       e2ee: conversation.e2ee,
-      keyFingerprint,
+      mediaKey: conversation.e2ee ? randomBytes(32).toString('base64') : null,
     });
 
     this.events.publish('call:incoming', [toId], {
@@ -134,7 +134,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       from: this.wireUser(caller),
       conversationId: conversation.id,
       e2ee: conversation.e2ee,
-      keyFingerprint: call.keyFingerprint,
     });
 
     return {
@@ -148,7 +147,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
   async startGroupCall(
     callerId: string,
-    body: { callId?: unknown; conversationId?: unknown; type?: unknown; keyFingerprint?: unknown },
+    body: { callId?: unknown; conversationId?: unknown; type?: unknown },
   ) {
     this.assertConfigured();
     const { conversationId, type } = body ?? {};
@@ -183,7 +182,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('تماس رمزنگاری‌شدهٔ گروهی حداکثر ۲۰ عضو دارد');
     }
 
-    const keyFingerprint = this.checkFingerprint(group.e2ee, body.keyFingerprint);
     if (this.activeForUser(callerId)) throw new ConflictException('شما در تماس دیگری هستید');
     if (this.activeGroupForConversation(group.id)) {
       throw new ConflictException('یک تماس گروهی در این گفتگو در جریان است');
@@ -204,7 +202,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       calleeId: null,
       participantIds: memberIds,
       e2ee: group.e2ee,
-      keyFingerprint,
+      mediaKey: group.e2ee ? randomBytes(32).toString('base64') : null,
     });
 
     // An invite is sent only to members who are not already on another call.
@@ -219,7 +217,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       from: this.wireUser(caller),
       conversationId: group.id,
       e2ee: group.e2ee,
-      keyFingerprint: call.keyFingerprint,
       group: {
         id: group.id,
         name: group.name ?? 'گروه',
@@ -241,7 +238,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
   // ── Answering ──────────────────────────────────────────────────
 
-  async accept(userId: string, callId: string, keyFingerprint?: unknown) {
+  async accept(userId: string, callId: string) {
     const call = this.requireCall(callId);
     this.assertParticipant(call, userId);
     if (TERMINAL_STATUSES.has(call.status)) {
@@ -270,8 +267,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       return { ok: true, duplicate: true, callId: call.id, e2ee: call.e2ee };
     }
 
-    this.assertMatchingFingerprint(call, keyFingerprint);
-
     // No await between the check above and this write: the event loop cannot
     // interleave a reject or a second accept here.
     if (call.status === 'RINGING') {
@@ -285,7 +280,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     this.events.publish(
       'call:accepted',
       call.participantIds,
-      { callId: call.id, userId, e2ee: call.e2ee, keyFingerprint: call.keyFingerprint },
+      { callId: call.id, userId, e2ee: call.e2ee },
     );
 
     return { ok: true, callId: call.id, e2ee: call.e2ee };
@@ -383,7 +378,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   async token(
     userId: string,
     callId: string,
-    body: { client: 'web' | 'mobile'; keyFingerprint?: unknown },
+    body: { client: 'web' | 'mobile' },
   ) {
     const call = this.requireCall(callId);
     this.assertParticipant(call, userId);
@@ -391,12 +386,15 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     if (TERMINAL_STATUSES.has(call.status)) throw new ConflictException('این تماس پایان یافته است');
 
     if (call.e2ee) {
-      // The mobile client has no MLS state to derive the media key from. It is
-      // refused rather than allowed into the room without encryption.
+      // Mobile has no LiveKit E2EE support. It is refused rather than allowed
+      // into the room without encryption.
       if (body?.client !== 'web') {
-        throw new ForbiddenException('نسخهٔ موبایل فعلاً کلید رمزنگاری این تماس را ندارد');
+        throw new ForbiddenException('نسخهٔ موبایل فعلاً رسانهٔ رمزنگاری‌شدهٔ این تماس را پشتیبانی نمی‌کند');
       }
-      this.assertMatchingFingerprint(call, body?.keyFingerprint);
+      // The key belongs to the call and is held for its lifetime. A missing key
+      // on an encrypted call is a server-side fault, never a reason to mint an
+      // unencrypted token.
+      if (!call.mediaKey) throw new ServiceUnavailableException('کلید رسانهٔ این تماس در دسترس نیست');
     }
 
     if (call.kind === 'direct') {
@@ -420,7 +418,13 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       callId: call.id,
     });
 
-    return { ...issued, callId: call.id, room: call.room, e2ee: call.e2ee };
+    return {
+      ...issued,
+      callId: call.id,
+      room: call.room,
+      e2ee: call.e2ee,
+      mediaKey: call.e2ee ? call.mediaKey : null,
+    };
   }
 
   // ── LiveKit webhooks ───────────────────────────────────────────
@@ -485,7 +489,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     calleeId: string | null;
     participantIds: string[];
     e2ee: boolean;
-    keyFingerprint: string | null;
+    mediaKey: string | null;
   }): CallRecord {
     const id = input.id;
     const call: CallRecord = {
@@ -502,7 +506,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       connected: new Set(),
       status: 'RINGING',
       e2ee: input.e2ee,
-      keyFingerprint: input.keyFingerprint,
+      mediaKey: input.mediaKey,
       createdAt: Date.now(),
       acceptedAt: null,
       connectedAt: null,
@@ -605,9 +609,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     return call;
   }
 
-  // The caller generates the id so it can derive the E2EE key before the ring
-  // is sent. It is not a secret and grants nothing: the room name is built
-  // server-side and access still requires a server-issued token.
+  // The caller still generates the id so its cancel/end refer to one call, but
+  // it is not a secret and grants nothing: the room name is built server-side
+  // and access still requires a server-issued token.
   private claimCallId(value: unknown): string {
     if (typeof value !== 'string'
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
@@ -619,22 +623,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
   private assertParticipant(call: CallRecord, userId: string) {
     if (!call.participantIds.includes(userId)) throw new ForbiddenException('شما در این تماس نیستید');
-  }
-
-  private checkFingerprint(e2ee: boolean, fingerprint: unknown): string | null {
-    if (!e2ee) return null;
-    if (typeof fingerprint !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(fingerprint)) {
-      throw new BadRequestException('اثر انگشت کلید رمزنگاری این تماس لازم است');
-    }
-    return fingerprint;
-  }
-
-  private assertMatchingFingerprint(call: CallRecord, fingerprint: unknown) {
-    if (!call.e2ee) return;
-    if (!call.keyFingerprint) throw new ForbiddenException('کلید رمزنگاری این تماس ثبت نشده است');
-    if (typeof fingerprint !== 'string' || fingerprint !== call.keyFingerprint) {
-      throw new ForbiddenException('کلید رمزنگاری این دستگاه با این تماس هم‌خوان نیست');
-    }
   }
 
   private activeForUser(userId: string): CallRecord | null {

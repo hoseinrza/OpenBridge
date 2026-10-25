@@ -10,6 +10,7 @@ import { MessagesService } from '../messages/messages.service';
 import { GroupEvents } from '../messages/group-events';
 import { RedisService } from '../redis/redis.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { SessionSockets } from '../common/session-sockets';
 import { JWT_SECRET, isOriginAllowed } from '../config/env';
 
 const MAX_PACKET_BYTES = 256 * 1024;
@@ -41,12 +42,14 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     private redis: RedisService,
     private prisma: PrismaService,
     private events: GroupEvents,
+    private sessionSockets: SessionSockets,
   ) {}
 
   // A group rename, a new photo or a new bio is a REST call (the photo has to be
   // uploaded first), so the service publishes it here and every member's open
   // window updates without waiting for the next list refresh.
   afterInit() {
+    this.sessionSockets.setServer(this.server);
     this.events.onGroupUpdated(({ memberIds, group }) => {
       this.server.to(memberIds).emit('group:updated', group);
     });
@@ -98,6 +101,13 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     socket.data.userId = payload.sub;
     socket.data.sessionId = payload.sid;
     socket.join(payload.sub);
+    this.sessionSockets.add(payload.sid, socket);
+    // Presence in the sessions sheet is "has a live socket"; this timestamp is
+    // what an empty sheet row and a just-closed tab still have to show.
+    this.prisma.session.update({
+      where: { id: payload.sid },
+      data:  { lastUsedAt: new Date() },
+    }).catch(() => undefined);
     console.log(`[socket] connected user=${payload.sub} socket=${socket.id}`);
 
     await this.redis.addSocket(payload.sub, socket.id);
@@ -105,10 +115,17 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
   }
 
   async handleDisconnect(socket: Socket) {
-    const { userId } = socket.data;
+    const { userId, sessionId } = socket.data;
     console.log(`[socket] disconnected user=${userId ?? '(none)'} socket=${socket.id}`);
     this.clearRateLimits(socket.id);
     if (!userId) return;
+    if (sessionId) {
+      this.sessionSockets.remove(sessionId, socket);
+      this.prisma.session.update({
+        where: { id: sessionId },
+        data:  { lastUsedAt: new Date() },
+      }).catch(() => undefined);
+    }
     const stillOnline = await this.redis.removeSocket(userId, socket.id);
     if (!stillOnline) this.server.emit('user:offline', { userId });
   }
