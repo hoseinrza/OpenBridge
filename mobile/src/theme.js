@@ -1,6 +1,7 @@
 // Mirrors the web app's design tokens (src/index.css). Keep token names and
 // values in sync so both clients feel like one product.
 import { useColorScheme } from 'react-native';
+import { useSettings } from './context/SettingsContext';
 
 const shared = {
   accent:     '#C5161D',
@@ -130,7 +131,8 @@ export const fontAssets = {
 
 export function useAppTheme() {
   const scheme = useColorScheme();
-  const dark = scheme === 'dark';
+  const { themeMode } = useSettings();
+  const dark = themeMode === 'system' ? scheme === 'dark' : themeMode === 'dark';
   const colors = dark ? darkColors : lightColors;
   return { dark, scheme: dark ? 'dark' : 'light', colors };
 }

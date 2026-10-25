@@ -8,6 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { fontAssets, fonts, navFonts, useAppTheme } from './src/theme';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { SettingsProvider } from './src/context/SettingsContext';
 import { SocketProvider } from './src/context/SocketContext';
 import { CallProvider } from './src/context/CallContext';
 import CallOverlay from './src/components/CallOverlay';
@@ -77,7 +78,7 @@ function RootNavigator() {
   );
 }
 
-export default function App() {
+function AppShell() {
   const [fontsLoaded, fontError] = useFonts(fontAssets);
   const { dark, colors } = useAppTheme();
 
@@ -112,5 +113,13 @@ export default function App() {
         </CallProvider>
       </SocketProvider>
     </AuthProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <SettingsProvider>
+      <AppShell />
+    </SettingsProvider>
   );
 }
