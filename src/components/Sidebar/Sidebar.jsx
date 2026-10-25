@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Avatar from '../ui/Avatar.jsx';
 import Modal from '../ui/Modal.jsx';
 import ThemeToggle from '../ui/ThemeToggle.jsx';
+import SettingsPanel from '../Settings/SettingsPanel.jsx';
 import { formatConversationTime } from '../../utils/time.js';
 import './Sidebar.css';
 
@@ -37,6 +38,7 @@ export default function Sidebar({
 }) {
   const [query, setQuery] = useState('');
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // The row menu is opened by right-click on desktop and by holding the row on
   // a touch screen; it holds the row it belongs to plus the point it opened at.
   const [menuTarget, setMenuTarget] = useState(null); // { id, name, x, y }
@@ -326,6 +328,15 @@ export default function Sidebar({
         </button>
 
         <div className="footer-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            title="تنظیمات"
+            aria-label="تنظیمات"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <i className="fas fa-gear" aria-hidden="true" />
+          </button>
           <ThemeToggle />
           <button
             type="button"
@@ -338,6 +349,15 @@ export default function Sidebar({
           </button>
         </div>
       </footer>
+
+      {settingsOpen && (
+        <SettingsPanel
+          currentUser={currentUser}
+          onClose={() => setSettingsOpen(false)}
+          onEditProfile={() => { setSettingsOpen(false); onOpenProfile?.(); }}
+          onLogoutRequest={() => { setSettingsOpen(false); setConfirmLogout(true); }}
+        />
+      )}
 
       {confirmLogout && (
         <Modal onClose={() => setConfirmLogout(false)} labelledBy="logout-title" className="confirm-modal">
