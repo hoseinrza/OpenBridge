@@ -506,3 +506,39 @@ test('a reply is refused when its target is in another chat or is a tombstone', 
   });
   assert.equal(toTombstone.ok, false, 'a tombstone is not replyable');
 });
+
+test('deleting a chat removes it and its history for both people', async () => {
+  const { alice, dave } = global.__ctx;
+
+  // The chat is addressed the way a list row addresses it: the peer's user id,
+  // not a conversation id the client never sees.
+  const before = await api('/messages/conversations', { token: alice.token });
+  assert.equal(before.status, 200, 'list before delete');
+  assert.equal(before.data.some(c => c.user?.id === dave.user.id), true, 'direct chat exists');
+
+  const announced = waitEvent(sockets.dave, 'conversation:deleted');
+  const deleted = await api(`/messages/conversations/${dave.user.id}`, {
+    method: 'DELETE',
+    token:  alice.token,
+  });
+  assert.equal(deleted.status, 200, `delete: ${JSON.stringify(deleted.data)}`);
+  assert.ok(deleted.data.conversationId, 'the answer names the conversation that went away');
+
+  const seen = await announced;
+  assert.equal(seen?.conversationId, deleted.data.conversationId, 'the peer is told which chat went away');
+  assert.deepEqual(seen.memberIds.sort(), [alice.user.id, dave.user.id].sort(), 'both sides are named');
+
+  const row = await prisma.conversation.findUnique({ where: { id: deleted.data.conversationId } });
+  assert.equal(row, null, 'the conversation row is gone');
+  const leftovers = await prisma.message.count({ where: { conversationId: deleted.data.conversationId } });
+  assert.equal(leftovers, 0, 'its messages cascaded with it');
+
+  const leftAlice = await api('/messages/conversations', { token: alice.token });
+  assert.equal(leftAlice.data.some(c => c.user?.id === dave.user.id), false, 'gone from the deleter list');
+  const leftDave = await api('/messages/conversations', { token: dave.token });
+  assert.equal(leftDave.data.some(c => c.user?.id === alice.user.id), false, 'gone from the peer list');
+
+  // A group is not a chat that can be wiped this way.
+  const refused = await api(`/messages/conversations/${group.id}`, { method: 'DELETE', token: alice.token });
+  assert.equal(refused.status, 404, 'a group id is not accepted here');
+});

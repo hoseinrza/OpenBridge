@@ -159,4 +159,15 @@ export class MessagesController {
       query.skip ?? 0,
     );
   }
+
+  // Delete a 1-to-1 conversation and its whole history. `target` is the peer's
+  // user id (what the chat list is keyed by) or the conversation id. Groups are
+  // not accepted here: leaving a group is a membership action, not a chat wipe.
+  @Delete('conversations/:target')
+  deleteConversation(
+    @Request()                       req,
+    @Param('target', ParseUUIDPipe)  target: string,
+  ) {
+    return this.messages.deleteConversation(target, req.user.id);
+  }
 }

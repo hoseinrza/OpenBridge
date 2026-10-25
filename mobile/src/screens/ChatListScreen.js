@@ -7,7 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { fetchConversations, fetchGroups, normalizeGroup, normalizeUser } from '../services/api';
+import { fetchConversations, fetchGroups, normalizeGroup, normalizeUser, deleteConversation } from '../services/api';
 import { fonts, radius, spacing, type, useAppTheme } from '../theme';
 import { formatConversationTime } from '../utils/time';
 import Avatar from '../components/Avatar';
@@ -21,6 +21,7 @@ export default function ChatListScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState('');
   const [query, setQuery]   = useState('');
+  const [menuTarget, setMenuTarget] = useState(null); // { id, name } | null
 
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
@@ -88,10 +89,14 @@ export default function ChatListScreen({ navigation }) {
     // only when an envelope is announced. The phone does not read it; it just
     // re-reads the list, which now carries the server's e2ee flag.
     socket.on('e2ee:envelope', refresh);
+    // The other side deleted a chat: the list no longer has that row, and this
+    // screen must not keep a name whose history is gone.
+    socket.on('conversation:deleted', refresh);
     socket.on('connect', refresh);
     return () => {
       socket.off('message:new', refresh);
       socket.off('e2ee:envelope', refresh);
+      socket.off('conversation:deleted', refresh);
       socket.off('connect', refresh);
     };
   }, [socket, load]);
@@ -111,6 +116,31 @@ export default function ChatListScreen({ navigation }) {
     ]);
   }
 
+  // A held row offers to delete the whole chat. Groups are left out: leaving a
+  // group is a membership action, not a history wipe.
+  function confirmDeleteChat(item) {
+    if (item.kind === 'group') return;
+    Alert.alert(
+      'حذف گفتگو',
+      `گفتگو با «${item.name}» و همهٔ پیام‌هایش برای هر دو طرف پاک می‌شود. این کار برگشت‌پذیر نیست.`,
+      [
+        { text: 'انصراف', style: 'cancel' },
+        {
+          text: 'حذف گفتگو',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteConversation(item.id);
+              setItems(prev => prev.filter(row => row.id !== item.id));
+            } catch (err) {
+              Alert.alert('حذف ناموفق', err?.message ?? 'حذف گفتگو ناموفق بود');
+            }
+          },
+        },
+      ],
+    );
+  }
+
   function renderRow({ item }) {
     const isGroup = item.kind === 'group';
     const locked = item.encrypted === true;
@@ -122,8 +152,11 @@ export default function ChatListScreen({ navigation }) {
       <Pressable
         style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
         onPress={() => navigation.navigate('Chat', { peer: item })}
+        onLongPress={() => confirmDeleteChat(item)}
+        delayLongPress={480}
         accessibilityRole="button"
         accessibilityLabel={`${item.name}${locked ? '، رمزنگاری‌شده؛ فقط در وب قابل خواندن است' : ''}${unread ? `، ${unread} پیام خوانده‌نشده` : ''}`}
+        accessibilityHint={isGroup ? undefined : 'نگه‌داشتن برای حذف گفتگو'}
       >
         <Avatar
           uri={item.avatar}

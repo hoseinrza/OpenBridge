@@ -7,6 +7,14 @@ export interface GroupUpdated {
   group: unknown;
 }
 
+export interface ConversationDeleted {
+  conversationId: string;
+  // Both people in the 1-to-1 chat: the one who deleted it and the one whose
+  // row has to disappear too.
+  memberIds: string[];
+  byId: string;
+}
+
 // REST owns group edits (an avatar is an upload first), but only the gateway
 // holds the socket server. Rather than import the chat module into the messages
 // module and back, the edit is published here and the gateway relays it.
@@ -28,5 +36,13 @@ export class GroupEvents {
 
   onGroupUpdated(handler: (event: GroupUpdated) => void) {
     this.bus.on('group:updated', handler);
+  }
+
+  publishConversationDeleted(event: ConversationDeleted) {
+    this.bus.emit('conversation:deleted', event);
+  }
+
+  onConversationDeleted(handler: (event: ConversationDeleted) => void) {
+    this.bus.on('conversation:deleted', handler);
   }
 }

@@ -193,7 +193,7 @@ const encryptedSeq = (id) => {
   return match ? Number(match[1]) : null;
 };
 
-export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
+export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated, onConversationDeleted) {
   const [messages,     setMessages]     = useState([]);
   const [typingPeer,   setTypingPeer]   = useState(null);
   const [connected,    setConnected]    = useState(false);
@@ -211,6 +211,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
   const currentUserRef = useRef(currentUser);
   const onIncomingRef  = useRef(onIncoming);
   const onGroupUpdatedRef = useRef(onGroupUpdated);
+  const onConversationDeletedRef = useRef(onConversationDeleted);
   const secureRef      = useRef(null);
   const openingRef     = useRef(false);
   const refreshHistoryRef = useRef(() => {});
@@ -223,6 +224,7 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     currentUserRef.current = currentUser;
     onIncomingRef.current  = onIncoming;
     onGroupUpdatedRef.current = onGroupUpdated;
+    onConversationDeletedRef.current = onConversationDeleted;
     secureRef.current      = secure;
 
     // Pull anything that was persisted while the socket was down and merge it
@@ -438,6 +440,14 @@ export function useChat(targetUser, currentUser, onIncoming, onGroupUpdated) {
     // A group's name, photo and bio are server metadata, so an edit made on any
     // member's device arrives as the whole row rather than a delta.
     socket.on('group:updated', (group) => onGroupUpdatedRef.current?.(group));
+
+    // The other side deleted the chat. Drop the row from the list, and if this
+    // window is showing it, close it rather than leave a transcript whose
+    // conversation no longer exists.
+    socket.on('conversation:deleted', ({ conversationId, memberIds, byId }) => {
+      onIncomingRef.current?.();
+      onConversationDeletedRef.current?.({ conversationId, memberIds: memberIds ?? [], byId });
+    });
 
     return () => {
       socket.disconnect();

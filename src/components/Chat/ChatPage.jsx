@@ -182,7 +182,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
     historyState, historyError, retryHistory,
     encrypted, secureMode, encryptionNote, blockedReason,
     sendMessage, forwardMessage, notifyTyping, toggleReaction, editMessage, deleteMessage, clearMessages,
-  } = useChat(activeUser, currentUser, handleIncoming, handleGroupUpdated);
+  } = useChat(activeUser, currentUser, handleIncoming, handleGroupUpdated, handleConversationDeleted);
 
   // Calls are mounted for the whole signed-in page, not per chat: an incoming
   // ring must reach a user who is reading a different conversation.
@@ -345,6 +345,27 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
       .catch(() => {});
   }
 
+  // Delete a whole 1-to-1 chat. The row is keyed by the person, so that id is
+  // what the server takes; it wipes the conversation for both sides.
+  const handleDeleteConversation = useCallback(async (user) => {
+    try {
+      await apiCall(`messages/conversations/${user.id}`, { method: 'DELETE' });
+      if (activeUser?.id === user.id) handleBackToList();
+      showToast('گفتگو حذف شد');
+      loadChats();
+    } catch (err) {
+      showToast(err.message || 'حذف گفتگو ناموفق بود');
+    }
+  }, [activeUser?.id, loadChats, showToast]);
+
+  // The other side deleted the chat: the list refresh is already on its way via
+  // onIncoming, so this only has to close a window that is showing it.
+  function handleConversationDeleted({ memberIds, byId }) {
+    if (byId === currentUser.id) return;
+    if (activeUser && memberIds.includes(activeUser.id)) handleBackToList();
+    showToast('طرف مقابل این گفتگو را حذف کرد');
+  }
+
   // The sheet's own way out of a group: writing to somebody starts the direct
   // chat you would have to search for otherwise. Starting it again while it is
   // already on screen would only clear a transcript nobody asked to reload.
@@ -372,6 +393,7 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
         loading={chatsLoading}
         error={chatsError}
         onRetry={loadChats}
+        onDeleteConversation={handleDeleteConversation}
       />
 
       <div className="chat-main">

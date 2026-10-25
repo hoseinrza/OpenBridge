@@ -134,6 +134,9 @@
   background: transparent;
   text-align: start;
   color: var(--text-1);
+  /* A held row opens the delete menu instead of starting a text selection. */
+  user-select: none;
+  -webkit-touch-callout: none;
   transition: background var(--dur-fast) var(--ease);
 }
 
@@ -276,6 +279,37 @@
 }
 
 .sidebar-note-retry:hover { text-decoration: underline; }
+
+/* ── Row context menu ────────────────────────────────────────── */
+.row-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  border-radius: var(--r-md);
+  background: var(--sidebar-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.row-menu-btn {
+  width: 100%;
+  padding: 10px var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: start;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.row-menu-btn:hover { background: var(--surface-2); }
+.row-menu-btn.danger { color: var(--danger); }
+.row-menu-btn.danger:hover { background: var(--danger-soft); color: var(--danger-text); }
 
 /* ── Loading skeleton ────────────────────────────────────────── */
 .sidebar-skeleton {

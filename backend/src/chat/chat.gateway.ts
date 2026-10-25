@@ -50,6 +50,11 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     this.events.onGroupUpdated(({ memberIds, group }) => {
       this.server.to(memberIds).emit('group:updated', group);
     });
+    // A chat deleted on one device takes the same row out of the other person's
+    // list, and out of an open window, without waiting for a refresh.
+    this.events.onConversationDeleted(({ conversationId, memberIds, byId }) => {
+      this.server.to(memberIds).emit('conversation:deleted', { conversationId, memberIds, byId });
+    });
   }
 
   private parseUser(socket: Socket): { sub: string; sid: string } | null {

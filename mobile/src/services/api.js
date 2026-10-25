@@ -228,6 +228,10 @@ export function updateGroup(conversationId, patch) {
   return request('PATCH', `/messages/groups/${conversationId}`, patch);
 }
 
+export function deleteConversation(target) {
+  return request('DELETE', `/messages/conversations/${target}`);
+}
+
 // A chat profile's shared content. `target` is a group's conversation id or a
 // peer's user id — the two ways a chat is already named here.
 export function fetchShared(target, kind, before) {

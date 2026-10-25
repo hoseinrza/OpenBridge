@@ -553,6 +553,35 @@ export class MessagesService {
     });
   }
 
+  // Deleting a 1-to-1 chat. `target` is either the conversation id or the peer's
+  // user id, because a client's chat list is keyed by the person, not by a
+  // conversation id it never sees. The row is removed outright: messages,
+  // envelopes, blobs, reads and hides cascade with it, so the history is gone
+  // for both sides — the only meaning "delete this chat" can have here. A later
+  // message between the same two people starts a fresh conversation.
+  async deleteConversation(target: string, myId: string) {
+    const select = { id: true, isGroup: true, participants: { select: { userId: true } } };
+    let conversation = await this.prisma.conversation.findUnique({ where: { id: target }, select });
+    if (!conversation) {
+      const direct = await this.findDirectConversation(myId, target);
+      if (direct) {
+        conversation = await this.prisma.conversation.findUnique({ where: { id: direct.id }, select });
+      }
+    }
+    if (!conversation || conversation.isGroup) throw new NotFoundException('گفتگو پیدا نشد');
+
+    const memberIds = conversation.participants.map(p => p.userId);
+    if (!memberIds.includes(myId)) throw new ForbiddenException('عضو این گفتگو نیستید');
+
+    await this.prisma.conversation.delete({ where: { id: conversation.id } });
+    this.events.publishConversationDeleted({
+      conversationId: conversation.id,
+      memberIds,
+      byId:           myId,
+    });
+    return { conversationId: conversation.id };
+  }
+
   async getConversationMessages(conversationId: string, userId: string, take = 50, skip = 0) {
     await this.assertMember(conversationId, userId);
     const messages = await this.prisma.message.findMany({
