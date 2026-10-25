@@ -380,6 +380,52 @@ not available in this environment.
 says "absent at the API level"); the API now has participant add/remove, but
 neither client has UI for it.
 
+### 5.8 Calling verification (Phase 1 Task 8)
+
+The lifecycle suite (`backend/test/calls.e2e.cjs`, 11 cases, part of the
+110-case `npm run test:e2e` run) exercises the server side of calling without
+a media server: `LIVEKIT_API_URL` is deliberately unset, so no room is created
+and nothing leaves the process. It establishes:
+
+- **Authorization.** A stranger cannot obtain a room token (403), the caller
+  cannot join before an answer (409), both participants can, and no token is
+  issued once the call has ended (409). The token’s `sub` is the authenticated
+  account, its room is `ob_<callId>`, it carries no admin grant and no
+  `canPublishData`, and the LiveKit API secret never appears in the response.
+- **Token lifetime and reconnect.** `expiresIn` equals
+  `CALL_TOKEN_TTL_SECONDS` (default 600) and the JWT expiry matches it. Asking
+  again during an active call mints another token for the same room instead of
+  starting a second call; tokens generated within the same second are
+  byte-identical, which is expected for deterministic JWTs.
+- **Ring timeout.** With `CALL_RING_TIMEOUT_SECONDS=2`, an unanswered ring ends
+  as `MISSED` / `timeout` with `durationMs: 0`, no token can be minted, and
+  both accounts are free to ring again immediately.
+- **Webhook-authenticated cleanup.** An unsigned body, a forged signature, and a
+  signature over a different body are all rejected with 401. A correctly signed
+  `participant_left` ends a direct call with reason `participant-left`, and a
+  signed `room_finished` ends a call whose clients vanished and blocks further
+  tokens.
+- **Encrypted media.** A new encrypted call holds one server-issued 32-byte key
+  for the whole call (same key for both sides, not sent with the ring) and
+  refuses a mobile token with 403. This matches the documented model: the key is
+  server-held, not end-to-end.
+- **Lifecycle edges.** Reject and cancel end the ring for both sides; duplicate
+  accept/reject are idempotent; an offline callee is not rung and creates no
+  record; a group call checks membership and ends when the last member leaves;
+  a revoked session cannot mint a room token.
+
+One behaviour surfaced while writing the suite and is worth knowing: invites are
+rate-limited per socket (6 in 10 seconds), so a client that rings repeatedly is
+refused before the call service runs.
+
+**Not verified here.** No live call was performed. LiveKit room creation, media
+flow, reconnection after a real network drop, the webhook subscription configured
+in LiveKit, and joining from a device all remain unproven in this environment
+(no media server, no emulator — §5.5). Call state is also held in process
+memory, so a restart drops active calls and a second API instance would not see
+them; Phase 1 Task 9 (§7) carries that into the backend-reliability work rather
+than treating it as a calling defect.
+
 ---
 
 ## 6. Beta acceptance criteria
@@ -449,9 +495,9 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Phase 1.3 auth cases | `node --test test/security.e2e.cjs` → 41/41; new cases named in §3. README documents the SMS integration point. |
 | 2026-10-25 | Phase 1.4 messaging cases | Offline→reconnect catch-up and an authentic-but-expired file URL; `npm run test:e2e` → 107/107. |
 | 2026-10-25 | Phase 1.5 headers | `nginx.conf` (nosniff, frame deny, referrer policy, `server_tokens off`), CI assertion, `docs/SECURITY.md` rationale for the missing CSP/HSTS. Web lint and build still pass. |
-
 | 2026-10-25 | Phase 1.6 encryption claims | Client encryption strings matched to the server-held model; chat-list fallback changed to an encrypted-history label; no end-to-end claim on any surface; legacy hand-back already covered. `npm run lint` and `npm run build` exit 0. §5.6 |
 | 2026-10-25 | Phase 1.7 parity | Mobile now applies `message:edited`, renders quotes and edited marks, and replies/edits/deletes from the long-press tray; parity matrix and remaining gaps in §5.7. Mobile Jest 96/96; `expo export --platform android` PASS; web `npm run lint`/`npm run build` PASS. |
+| 2026-10-25 | Phase 1.8 calling cases | Signed-webhook cleanup, ring timeout, token TTL/reconnect and signature rejection added to `backend/test/calls.e2e.cjs`; `node --test test/calls.e2e.cjs` → 11/11; `npm run test:e2e` → 110/110. No live media server used; limits stated in §5.8. |
 Next update: after a CI run exercises the Maestro instrumentation (CI watches
 PRs to `main` and pushes to `main`; a push to `beta/phase-1` does not trigger
 it).

@@ -6,7 +6,8 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
+const { SignJWT } = require('jose');
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'openbridge-test-secret-at-least-32-characters-long';
@@ -22,6 +23,9 @@ process.env.AUTH_OTP_REQUEST_LIMIT = '80';
 process.env.AUTH_OTP_REQUEST_PHONE_LIMIT = '10';
 process.env.AUTH_OTP_VERIFY_LIMIT = '80';
 process.env.AUTH_SIGNUP_LIMIT = '80';
+// A ring that nobody answers should become MISSED quickly, but not so quickly
+// that an accept in the tests below races the timer.
+process.env.CALL_RING_TIMEOUT_SECONDS = '2';
 
 const { NestFactory } = require('@nestjs/core');
 const { ValidationPipe } = require('@nestjs/common');
@@ -139,6 +143,35 @@ function decodeJwt(token) {
   return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
 }
 
+// The server verifies LiveKit webhooks with the same API secret it signs room
+// tokens with, so a test can produce what the media server would send: a JWT
+// whose `sha256` claim is the checksum of the exact body.
+async function signWebhook(body) {
+  const hash = createHash('sha256').update(body).digest('base64');
+  return new SignJWT({ sha256: hash })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuer(process.env.LIVEKIT_API_KEY)
+    .setExpirationTime('5m')
+    .sign(new TextEncoder().encode(process.env.LIVEKIT_API_SECRET));
+}
+
+async function postWebhook(body, authorization) {
+  const res = await fetch(`${origin}${API_PREFIX}/calls/webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authorization ? { Authorization: authorization } : {}),
+    },
+    body,
+  });
+  return { status: res.status, data: await res.json().catch(() => ({})) };
+}
+
+async function signedWebhook(event) {
+  const body = JSON.stringify(event);
+  return postWebhook(body, await signWebhook(body));
+}
+
 function callToken(callId, token, body = { client: 'web' }) {
   return api(`/calls/${callId}/token`, { method: 'POST', token, body });
 }
@@ -176,6 +209,15 @@ before(async () => {
     text: 'call test seed',
   });
   assert.equal(sent.ok, true, 'direct conversation seed');
+
+  // The invite rate limit is per socket, so a test that needs several invites of
+  // its own rings from its own account rather than exhausting alice's budget.
+  const seeded = await emitAck(sockets.eve, 'message:send', {
+    toId: bob.user.id,
+    type: 'text',
+    text: 'call test seed eve',
+  });
+  assert.equal(seeded.ok, true, 'second direct conversation seed');
 });
 
 after(async () => {
@@ -197,7 +239,7 @@ test('direct call: ring, authorization, token grants, end', async () => {
     toId: bob.user.id,
     type: 'video',
   });
-  assert.equal(ack.ok, true, 'invite accepted');
+  assert.equal(ack.ok, true, `invite accepted: ${JSON.stringify(ack)}`);
   assert.equal(ack.callId, callId);
   assert.equal(ack.e2ee, false, 'seed conversation is plaintext');
 
@@ -232,10 +274,22 @@ test('direct call: ring, authorization, token grants, end', async () => {
   assert.equal(claims.video.canPublishData, false);
   assert.equal(claims.video.roomAdmin, undefined, 'no admin grant');
   assert.ok(!JSON.stringify(bobToken.data).includes('test-api-secret'), 'API secret never reaches the client');
+  // The room token is only for establishing the session, so its life is the
+  // configured one and not the session's.
+  assert.equal(bobToken.data.expiresIn, Number(process.env.CALL_TOKEN_TTL_SECONDS || 600));
+  assert.ok(claims.exp * 1000 > Date.now(), 'the token has not expired yet');
+  assert.ok(claims.exp * 1000 - Date.now() <= bobToken.data.expiresIn * 1000);
 
   const aliceToken = await callToken(callId, alice.token);
   assert.equal(aliceToken.status, 201);
   assert.equal(decodeJwt(aliceToken.data.token).sub, alice.user.id);
+
+  // A reconnect is another token for the same room, not a second call. The
+  // token can be byte-identical when both requests land in the same second;
+  // what matters is that the door is still open and points at the same room.
+  const rejoined = await callToken(callId, bob.token);
+  assert.equal(rejoined.status, 201, 'an active call can hand out a fresh token');
+  assert.equal(decodeJwt(rejoined.data.token).video.room, `ob_${callId}`);
 
   const intruder = await callToken(callId, eve.token);
   assert.equal(intruder.status, 403, 'an unrelated user cannot get a room token');
@@ -435,6 +489,83 @@ test('webhook rejects an unsigned body and a forged signature', async () => {
     body,
   });
   assert.equal(forged.status, 401);
+
+  // A valid signature over a different body is still a forgery: the checksum
+  // is what proves the media server sent these exact bytes.
+  const signedFor = JSON.stringify({ event: 'room_finished', room: { name: 'ob_one' } });
+  const sent = JSON.stringify({ event: 'room_finished', room: { name: 'ob_two' } });
+  const mismatched = await postWebhook(sent, await signWebhook(signedFor));
+  assert.equal(mismatched.status, 401);
+});
+
+test('a signed participant_left webhook ends a direct call', async () => {
+  const callId = randomUUID();
+  const incoming = waitEvent(sockets.bob, 'call:incoming');
+  const ack = await emitAck(sockets.alice, 'call:invite', {
+    callId, toId: bob.user.id, type: 'audio',
+  });
+  assert.equal(ack.ok, true);
+  assert.ok(await incoming);
+  assert.equal((await emitAck(sockets.bob, 'call:accept', { callId })).ok, true);
+
+  const ended = waitEvent(sockets.alice, 'call:ended');
+  const webhook = await signedWebhook({
+    event: 'participant_left',
+    room: { name: `ob_${callId}` },
+    participant: { identity: bob.user.id },
+  });
+  assert.equal(webhook.status, 200);
+
+  const event = await ended;
+  assert.equal(event?.reason, 'participant-left');
+  assert.equal(event?.status, 'ENDED');
+  assert.equal(event?.by, bob.user.id);
+});
+
+test('a signed room_finished webhook cleans up a call whose clients vanished', async () => {
+  const callId = randomUUID();
+  const incoming = waitEvent(sockets.bob, 'call:incoming');
+  const ack = await emitAck(sockets.alice, 'call:invite', {
+    callId, toId: bob.user.id, type: 'video',
+  });
+  assert.equal(ack.ok, true);
+  assert.ok(await incoming);
+  assert.equal((await emitAck(sockets.bob, 'call:accept', { callId })).ok, true);
+  assert.equal((await callToken(callId, bob.token)).status, 201);
+
+  const ended = waitEvent(sockets.alice, 'call:ended');
+  const webhook = await signedWebhook({ event: 'room_finished', room: { name: `ob_${callId}` } });
+  assert.equal(webhook.status, 200);
+
+  const event = await ended;
+  assert.equal(event?.reason, 'room-finished');
+  assert.equal(event?.status, 'ENDED');
+  assert.equal((await callToken(callId, bob.token)).status, 409, 'a finished call hands out no token');
+});
+
+test('an unanswered ring becomes MISSED and frees both people', async () => {
+  const callId = randomUUID();
+  const incoming = waitEvent(sockets.bob, 'call:incoming');
+  const ack = await emitAck(sockets.eve, 'call:invite', {
+    callId, toId: bob.user.id, type: 'audio',
+  });
+  assert.equal(ack.ok, true, `invite accepted: ${JSON.stringify(ack)}`);
+  assert.ok(await incoming);
+
+  const ended = waitEvent(sockets.eve, 'call:ended', 6000);
+  const event = await ended;
+  assert.ok(event, 'the ring timeout is announced');
+  assert.equal(event.status, 'MISSED');
+  assert.equal(event.reason, 'timeout');
+  assert.equal(event.durationMs, 0, 'a call that never connected has no duration');
+  assert.equal((await callToken(callId, bob.token)).status, 409);
+
+  // The reservation is gone, so the caller may ring again immediately.
+  const again = await emitAck(sockets.eve, 'call:invite', {
+    callId: randomUUID(), toId: bob.user.id, type: 'audio',
+  });
+  assert.equal(again.ok, true, 'a missed ring does not lock the pair');
+  await emitAck(sockets.eve, 'call:cancel', { callId: again.callId });
 });
 
 test('session revocation blocks a new room token', async () => {
