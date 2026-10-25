@@ -294,6 +294,48 @@ a maintenance query should drop participant-less conversations.
 - Production database is only reachable on the VPS (not from this machine);
   no production data was touched.
 
+### 5.6 Encryption claims verification (Phase 1 Task 6)
+
+The implemented model is server-held at-rest sealing, not end-to-end encryption
+(§1). Every client-visible encryption string was read against that model:
+
+- **Web call badge** (`CallLayer.jsx`): the verified state says media is
+  encrypted before it leaves the device and that the call key is held on the
+  OpenBridge server; the unencrypted state says the media is only protected by
+  the transport layer. Both match the call backend and `useCall`.
+- **Web message notice** (`MessageList.jsx`, `e2eeNotice`): states that the
+  conversation is sealed on the server and readable by signed-in devices of the
+  account, and reports how many legacy messages are still waiting for a
+  key-holding device, with singular and plural forms. Consistent with the
+  legacy-import behaviour and with the mobile banner.
+- **Chat-list fallback label** (`Sidebar.jsx`): a conversation with no preview
+  used to be labelled simply «رمزنگاری‌شده», which read as a
+  property of the current state rather than of the old history. It now says the
+  history is encrypted («تاریخچهٔ رمزنگاری‌شده»), matching the mobile chat-list
+  accessibility label.
+- **Mobile**: the call overlay says encrypted/unencrypted, and the call and send
+  paths state in words that the key is server-held, that mobile cannot join
+  encrypted calls, and that legacy history is unreadable on this version. No
+  string claims more than the code does.
+- **No end-to-end claim**: a repo-wide search for "end-to-end"/"end to end"
+  finds only honest negatives (`README.md`, `docs/SECURITY.md`), the historical
+  design and progress documents, an internal comment in `src/services/e2ee.js`,
+  and the design rule that forbids the Persian word for end-to-end on any
+  surface. No UI surface uses it.
+- **Legacy hand-back edges**: covered by `backend/test/legacy-import.e2e.cjs`
+  (author and time preserved, replay is idempotent, control and unknown
+  sequences rejected, quote linkage, outsider refused) and
+  `backend/test/legacy-import.test.cjs` (sealed storage, attachment descriptor
+  validation, membership).
+- **Logs and responses**: backend logging was reviewed. It emits user ids,
+  socket ids, counts and error messages, never message text, file bytes, tokens
+  or OTP codes. The production-OTP test asserts no code is returned, and refresh
+  tokens are hashed before storage.
+
+Verification: `npm run lint` and `npm run build` pass with the label change. No
+backend file changed in this task, so the 107/107 e2e run from Phase 1.4 still
+applies.
+
 ---
 
 ## 6. Beta acceptance criteria
@@ -364,6 +406,7 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Phase 1.4 messaging cases | Offline→reconnect catch-up and an authentic-but-expired file URL; `npm run test:e2e` → 107/107. |
 | 2026-10-25 | Phase 1.5 headers | `nginx.conf` (nosniff, frame deny, referrer policy, `server_tokens off`), CI assertion, `docs/SECURITY.md` rationale for the missing CSP/HSTS. Web lint and build still pass. |
 
+| 2026-10-25 | Phase 1.6 encryption claims | Client encryption strings matched to the server-held model; chat-list fallback changed to an encrypted-history label; no end-to-end claim on any surface; legacy hand-back already covered. `npm run lint` and `npm run build` exit 0. §5.6 |
 Next update: after a CI run exercises the Maestro instrumentation (CI watches
 PRs to `main` and pushes to `main`; a push to `beta/phase-1` does not trigger
 it).

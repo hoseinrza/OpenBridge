@@ -4,6 +4,16 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.10.6] - 2026-10-25
+
+### Docs
+- برچسب گفتگویی که پیش‌نمایش ندارد و تاریخچه‌اش با کلید قبلی مهر شده بود، از
+  «رمزنگاری‌شده» به «تاریخچهٔ رمزنگاری‌شده» تغییر کرد تا دربارهٔ وضعیت فعلی
+  گمراه‌کننده نباشد و با برچسب دسترس‌پذیری فهرست گفتگوها در موبایل یکی باشد.
+- بازبینی همهٔ عبارت‌های رمزنگاری در وب و موبایل ثبت شد: هیچ سطحی ادعای
+  سرتاسری بودن ندارد و همهٔ عبارت‌ها با مدل «مهرشده روی سرور» می‌خوانند؛
+  مسیرهای تاریخچهٔ قدیمی هم با آزمون‌های `legacy-import` پوشش دارند.
+
 ## [1.10.5] - 2026-10-25
 
 ### Security
