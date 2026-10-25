@@ -206,7 +206,7 @@ export class UploadsController {
     }
     if (!membership.conversation.e2ee) {
       await unlink(file.path).catch(() => {});
-      throw new BadRequestException('این گفتگو رمزنگاری سرتاسری ندارد؛ پیوست رمزنگاری‌شده نمی‌پذیرد');
+      throw new BadRequestException('این گفتگو رمزنگاری‌شده نیست؛ پیوست رمزنگاری‌شده نمی‌پذیرد');
     }
 
     const blob = await this.prisma.encryptedBlob.create({

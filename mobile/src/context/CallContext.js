@@ -51,10 +51,11 @@ function reasonText(payload, info) {
 /**
  * Mobile call lifecycle.
  *
- * Mobile has no MLS client state, so it cannot derive the media key an encrypted
- * web call uses. Rather than join such a call without encryption, this provider
- * rejects it and says why. Plaintext chats can call, and the UI labels those
- * calls as lacking end-to-end encryption.
+ * The media key of an encrypted call is issued and held by the server, but this
+ * Expo build ships without LiveKit E2EE, so it cannot decrypt that media. Rather
+ * than join such a call as plain media behind the other side's back, this
+ * provider refuses it and says the same thing out loud. A chat without the flag
+ * can call, and the UI labels those calls as not encrypted.
  */
 export function CallProvider({ children }) {
   const { currentUser } = useAuth();
@@ -135,7 +136,7 @@ export function CallProvider({ children }) {
   const join = useCallback(async (info) => {
     const issued = await fetchCallToken(info.callId, { client: 'mobile' });
     if (issued?.e2ee) {
-      throw new Error('این تماس رمزنگاری‌شده است و نسخهٔ موبایل کلید آن را ندارد');
+      throw new Error('این تماس رمزنگاری‌شده است و نسخهٔ موبایل فعلاً رسانهٔ رمزنگاری‌شده را پشتیبانی نمی‌کند');
     }
     apply({ phase: 'active', token: issued.token, url: issued.url, error: '', notice: '' });
   }, [apply]);
@@ -148,13 +149,13 @@ export function CallProvider({ children }) {
     const onIncoming = (payload) => {
       if (!payload?.callId) return;
       if (payload.e2ee === true) {
-        // Fail closed: no MLS key exists on this build, so this call must not
-        // become a plaintext one behind the caller's back.
+        // Fail closed: this build cannot decrypt server-keyed media, so the call
+        // must not quietly continue as unencrypted media behind the caller's back.
         socket.emit('call:reject', { callId: payload.callId });
         if (ACTIVE_PHASES.has(stateRef.current.phase)) return;
         Alert.alert(
           'تماس رمزنگاری‌شده',
-          'این تماس سرتاسری رمزنگاری شده است، اما نسخهٔ موبایل هنوز کلید آن را ندارد. برای حفظ امنیت، تماس رد شد. از نسخهٔ وب پاسخ دهید.',
+          'این تماس با کلیدی که سرور نگه می‌دارد رمز می‌شود، اما نسخهٔ موبایل هنوز رسانهٔ رمزنگاری‌شده را پشتیبانی نمی‌کند. برای حفظ امنیت، تماس رد شد؛ از نسخهٔ وب پاسخ بده.',
         );
         return;
       }
@@ -262,7 +263,7 @@ export function CallProvider({ children }) {
     if (chat.encrypted === true) {
       Alert.alert(
         'تماس رمزنگاری‌شده',
-        'این گفتگو سرتاسری رمزنگاری شده است و نسخهٔ موبایل هنوز کلید تماس را ندارد. برای حفظ امنیت، تماس از موبایل آغاز نمی‌شود؛ از نسخهٔ وب تماس بگیرید.',
+        'این گفتگو رمزنگاری‌شده است و تماسش با کلیدِ سرور رمز می‌شود؛ نسخهٔ موبایل هنوز رسانهٔ رمزنگاری‌شده را پشتیبانی نمی‌کند. تماس از موبایل آغاز نمی‌شود؛ از نسخهٔ وب تماس بگیر.',
       );
       return;
     }
@@ -301,7 +302,7 @@ export function CallProvider({ children }) {
         : { callId, toId: chat.id, type };
       const ack = await emitAck(socket, kind === 'group' ? 'call:group-start' : 'call:invite', payload, 15000);
       if (ack.e2ee === true) {
-        throw new Error('این گفتگو روی سرور رمزنگاری‌شده است؛ تماس موبایل ممکن نیست');
+        throw new Error('این گفتگو رمزنگاری‌شده است؛ تماس موبایل با رسانهٔ رمزنگاری‌شده پشتیبانی نمی‌شود');
       }
       apply({ info: { ...info, conversationId: ack.conversationId ?? info.conversationId } });
     } catch (error) {

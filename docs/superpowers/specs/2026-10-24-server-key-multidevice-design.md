@@ -1,11 +1,11 @@
 # Server-key content encryption for multi-device access
 
-Status: accepted 2026-10-24. Phases 1 (sessions), 2 (content) and 3 (legacy
-history) implemented in `feat/session-devices`; phase 4 pending.
+Status: accepted 2026-10-24. Phases 1 (sessions), 2 (content), 3 (legacy
+history) and 4 (calls) implemented in `feat/session-devices`.
 
 This supersedes the “no escrow, no server-side recovery” rule in
-`docs/engineering/E2EE_DESIGN.md` §4. That document still describes the MLS
-design that is currently deployed and must be updated when phase 2 ships.
+`docs/engineering/E2EE_DESIGN.md` §4. That document keeps the MLS design as a
+historical record; its top note and §12 describe what replaced it.
 
 ## The requirement
 
@@ -114,6 +114,44 @@ Implemented in `feat/session-devices`.
 - Rows imported with an attachment expose `attachment` (descriptor) on the wire
   and keep `legacySeq`; both are `null` for every row written after the switch.
 
+## Calls (phase 4)
+
+Implemented in `feat/session-devices`.
+
+- At call creation the API reads the conversation's `e2ee` flag; when it is set,
+  it generates one key with `randomBytes(32)` and stores it on the in-memory
+  `CallRecord` as `mediaKey`. The key is never persisted, logged or included in
+  a call view.
+- The key is returned only by `POST /api/calls/:callId/token`, in the response
+  body as `mediaKey`, and only when the request says `client: 'web'`. Every web
+  participant of one call receives the same bytes. Socket events and call views
+  carry no key material.
+- `keyFingerprint` is gone: removed from the invite/accept/token requests, the
+  call record and view, socket events, the DTO and the tests. There is no
+  fingerprint comparison and no MLS epoch check.
+- The web client hands `mediaKey` to LiveKit's `ExternalE2EEKeyProvider`; LiveKit
+  derives frame keys locally, so the media server only sees ciphertext RTP.
+- The API holds the key and can therefore decrypt call media. This is the same
+  deliberate trade as messages: the database, backups and the media server
+  cannot read the media, the application can.
+- Calls are in-process, so the key disappears when the call ends or the process
+  restarts; a restart ends the call anyway. There is no key escrow and no
+  recovery path.
+- Mobile is refused a token for an encrypted call because the Expo build has no
+  encrypted-media support (no LiveKit E2EE). The refusal is about missing
+  encrypted media, not a missing MLS key; the `locked` behavior for legacy chats
+  is unchanged.
+- Copy rule: no surface may say «سرتاسری» or claim end-to-end secrecy. Web call
+  labels are «بدون رمزنگاری رسانه», «در حال فعال‌شدن رمزنگاری رسانه»,
+  «رمزنگاری رسانه» (title: media is encrypted before sending; the key is held
+  by the OpenBridge server) and «رمزنگاری رسانه فعال نشد».
+- Mobile call copy says the OpenBridge server holds the key and this build does
+  not support encrypted media yet. Mobile chat copy for legacy `e2ee` chats says
+  old messages use the previous encryption and this build cannot read them, new
+  content is stored encrypted on the server, and the web client is needed once
+  for old history.
+- The wire field `e2ee` keeps its name; only what it means for calls changed.
+
 ## Phases
 
 2. Encrypt/decrypt messages and uploads with the server key; accept normal
@@ -123,5 +161,6 @@ Implemented in `feat/session-devices`.
    client upload of decrypted rows, then mark them migrated. Rows that no
    device can decrypt remain unreadable and are reported, not silently dropped.
    — done.
-4. Calls: issue a per-call key from the server instead of MLS; remove the
-   remaining MLS key dependency; clean up copy on web and mobile.
+4. Calls: issue a per-call random key from the server instead of MLS; deliver it
+   only with the web room token; remove the fingerprint and MLS key dependency;
+   clean up copy on web and mobile. — done.

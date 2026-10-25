@@ -322,29 +322,6 @@ test('two clients open an encrypted chat and the server stores only ciphertext',
   assert.deepEqual(Object.keys(entry).sort(), ['e2ee', 'unread', 'updatedAt', 'user'], 'and its entry carries no field that could hold text');
 });
 
-test('call keys derive identically from MLS and are bound to the call id', async () => {
-  const aliceKey = await alice.client.exportCallKey(conversationId, '11111111-1111-4111-8111-111111111111');
-  const bobKey = await bob.client.exportCallKey(conversationId, '11111111-1111-4111-8111-111111111111');
-
-  assert.equal(aliceKey.key, bobKey.key, 'both members derive the same media key');
-  assert.equal(aliceKey.fingerprint, bobKey.fingerprint, 'the server sees the same fingerprint');
-  assert.equal(aliceKey.epoch, bobKey.epoch, 'the keys belong to one MLS epoch');
-  assert.match(aliceKey.fingerprint, /^[A-Za-z0-9_-]{43}$/, '32 bytes of SHA-256 in base64url');
-  assert.notEqual(aliceKey.key, aliceKey.fingerprint, 'the fingerprint is not the key');
-
-  const otherCall = await alice.client.exportCallKey(conversationId, '22222222-2222-4222-8222-222222222222');
-  assert.notEqual(otherCall.key, aliceKey.key, 'a different call gets a different key');
-  assert.notEqual(otherCall.fingerprint, aliceKey.fingerprint);
-
-  // The peer-facing path uses the same conversation resolution a call does.
-  const viaPeer = await bob.client.exportCallKeyForPeer(
-    alice.session.user.id,
-    '11111111-1111-4111-8111-111111111111',
-  );
-  assert.equal(viaPeer.key, aliceKey.key);
-  assert.equal(viaPeer.fingerprint, aliceKey.fingerprint);
-});
-
 test('a reloaded device keeps the conversation: state survives storage', async () => {
   // A browser refresh: the same device store, a new socket, a new client object.
   alice.client.close();
@@ -758,19 +735,6 @@ test('an encrypted group opens for every invited device and only carries ciphert
   }
   assert.equal(await prisma.message.count({ where: { conversationId: chat.id } }), 0,
     'a group message never becomes a plaintext row');
-
-  // Every web device of the group derives the same media key for one group call,
-  // and a different call gets a different key. Mobile has no group state and is
-  // refused by the call service instead of joining without encryption.
-  const groupCallId = '33333333-3333-4333-8333-333333333333';
-  const ownerCallKey = await owner.client.exportCallKey(chat.id, groupCallId);
-  const firstCallKey = await first.client.exportCallKey(chat.id, groupCallId);
-  const phoneCallKey = await secondPhone.client.exportCallKey(chat.id, groupCallId);
-  assert.equal(ownerCallKey.key, firstCallKey.key, 'group members derive one media key');
-  assert.equal(ownerCallKey.key, phoneCallKey.key, 'a second device of a member derives it too');
-  assert.equal(ownerCallKey.fingerprint, firstCallKey.fingerprint);
-  const otherGroupCall = await owner.client.exportCallKey(chat.id, '44444444-4444-4444-8444-444444444444');
-  assert.notEqual(otherGroupCall.key, ownerCallKey.key, 'the call id binds the key');
 
   // The unread badge of an encrypted group counts envelopes above the member's
   // own high-water mark. The Welcome is consumed at the moment of joining, so

@@ -190,10 +190,11 @@ export function useChat(peer, currentUser, onIncoming) {
       setMessages(prev => prev.filter(m => m.id !== messageId));
     };
 
-    // A chat can become encrypted while it is open on this screen: the web peer
-    // sends its first envelope and the server flips the conversation. The phone
-    // cannot decrypt it, so it must stop offering a composer that would send
-    // plaintext into a conversation the server now refuses.
+    // A chat can gain its legacy flag while it is open on this screen: the web
+    // peer sends another MLS envelope and the server flips the conversation.
+    // Only a device holding the old keys opens those envelopes, so this build
+    // closes its composer instead of offering a chat whose history it cannot
+    // show. Rows written from now on are sealed server-side and stay readable.
     const onEnvelope = () => {
       const p = peerRef.current;
       if (!p) return;
@@ -225,9 +226,11 @@ export function useChat(peer, currentUser, onIncoming) {
     };
   }, [socket]);
 
-  // An encrypted chat has no plaintext rows for this build to read, and a
-  // plaintext read mark cannot clear its unread counter, so the probe decides
-  // whether the screen and composer may act at all.
+  // The e2ee flag marks a chat holding the old MLS history: only a web client
+  // with the old keys opens those envelopes, while rows sealed server-side are
+  // readable here like any other chat. A plaintext read mark also cannot clear
+  // that legacy unread counter, so this build keeps the composer closed and the
+  // probe decides whether the screen and composer may act at all.
   useEffect(() => {
     let cancelled = false;
     setLocked(peer?.encrypted === true);
@@ -258,7 +261,7 @@ export function useChat(peer, currentUser, onIncoming) {
     const trimmed = text?.trim();
     if (!trimmed) return { ok: false, error: 'متن پیام خالی است' };
     if (locked) {
-      return { ok: false, error: 'این گفتگو سرتاسری رمزنگاری شده؛ نوشتن در آن فقط از نسخهٔ وب ممکن است' };
+      return { ok: false, error: 'این گفتگو پیام‌های قدیمیِ رمزنگاری‌شده دارد؛ نوشتن در آن از این نسخه فعلاً ممکن نیست' };
     }
     if (!socket || !connected || !peer) {
       return { ok: false, error: 'اتصال به سرور برقرار نیست؛ دوباره تلاش کن' };
@@ -285,7 +288,7 @@ export function useChat(peer, currentUser, onIncoming) {
   // file has no trustworthy length of its own until it is read to the end.
   const sendVoice = useCallback(async (recording) => {
     if (locked) {
-      return { ok: false, error: 'این گفتگو سرتاسری رمزنگاری شده؛ نوشتن در آن فقط از نسخهٔ وب ممکن است' };
+      return { ok: false, error: 'این گفتگو پیام‌های قدیمیِ رمزنگاری‌شده دارد؛ نوشتن در آن از این نسخه فعلاً ممکن نیست' };
     }
     if (!socket || !connected || !peer) {
       return { ok: false, error: 'اتصال به سرور برقرار نیست؛ دوباره تلاش کن' };

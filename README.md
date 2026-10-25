@@ -23,18 +23,21 @@
   hides a row for one account only. The phone has no such menu yet.
 - 📎 Private file & image uploads behind signed, expiring URLs (optional ClamAV scan)
 - 🎙️ **Voice messages** on web and mobile — record, send with the length the
-  device measured, and play from a rail; in an MLS chat the recording travels as
-  an encrypted attachment, and the server validates the declared duration.
+  device measured, and play from a rail. The recording travels as an attachment,
+  and the server validates the declared duration.
 - 📹 **Audio and video calls over a self-hosted LiveKit SFU** — 1:1 and group,
   with ringing, busy/missed/timeout states, mute/camera/screen-share controls and
-  LiveKit room tokens minted only by the API. In an MLS conversation the web
-  client derives the media key locally from the conversation's MLS exporter; the
-  server sees only a SHA-256 fingerprint. Plaintext chats can call too, and are
-  labeled as not end-to-end encrypted. Mobile calls exist but cannot join an E2EE
-  room because the phone holds no MLS state.
-- 🔐 **End-to-end encrypted web direct chats and web-created groups** (MLS): text,
-  images and files are sealed on the device; the server stores opaque envelopes
-  and blobs. Mobile holds no keys yet and shows those chats as locked.
+  LiveKit room tokens minted only by the API. For a call in an encrypted chat the
+  server generates one random media key for that call, keeps it in memory for the
+  call's lifetime and hands it to the web clients with the room token; every media
+  frame is encrypted before it leaves the browser, so the SFU only relays
+  ciphertext. Plaintext chats can call too, and their call UI says they carry no
+  media encryption. Mobile calls exist but cannot join an encrypted room,
+  because the Expo build has no LiveKit E2EE support.
+- 🔐 **Content sealed at rest with a server-held key**: message text and
+  attachment bytes are encrypted by the API with a per-conversation key derived
+  from `CONTENT_KEY`, so the database and the disk hold no readable content.
+  Every signed-in device of the account can read the whole history.
 - 🔎 User search by name/username, plus an in-conversation message filter
 - 📇 **Contact matching**: check which of your phone's contacts already have an
   account — device address book on mobile, Contact Picker or pasted numbers on web
@@ -51,17 +54,18 @@
   `NODE_ENV=production` it answers `503` («ارسال پیامک هنوز فعال نشده است») and
   creates no code. Sign-up therefore works only in development until a gateway
   is integrated.
-- 🔓 **Not every conversation is end-to-end encrypted.** Web direct chats and
-  groups created with the encryption option are; plaintext chats, groups
-  created without it, pre-encryption history and all mobile clients are not.
-  See [docs/SECURITY.md](docs/SECURITY.md) for the exact boundary and
-  [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md) for the
-  design.
-- 📵 **Calls are not equally encrypted everywhere.** Web calls in an MLS chat
-  derive the media key from MLS and are end-to-end encrypted; plaintext chats and
-  all mobile calls are not, and say so in the call UI. Mobile cannot join an E2EE
-  call because it has no MLS state. Active call state is in-process: an API
-  restart ends calls, and call history is not stored. See
+- 🔓 **Content is not end-to-end encrypted.** Sealing happens on the server, with
+  a key the server holds, so an operator with `CONTENT_KEY` and the database can
+  read every message and file. The trade is deliberate: it buys encryption at rest
+  plus a history that any signed-in device can open. See
+  [docs/SECURITY.md](docs/SECURITY.md) for the exact boundary and
+  [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md) §12 for the
+  design that replaced MLS.
+- 📵 **Calls are not equally encrypted either.** A call in an encrypted chat gets
+  a per-call key from the server, which also keeps a copy; a call in a plaintext
+  chat has no media encryption, and mobile refuses an encrypted room entirely.
+  Active call state is in-process: an API restart ends calls, and call history is
+  not stored. See
   [docs/engineering/CALLING_ARCHITECTURE.md](docs/engineering/CALLING_ARCHITECTURE.md).
 
 ## 🔐 Sign-in & sign-up
@@ -141,23 +145,32 @@ numbers already has an account?* — without turning the server into a phone boo
 
 ## 🔒 Security
 
-Web direct chats and groups created with the web encryption option are
-**end-to-end encrypted with MLS**: the server stores ciphertext envelopes and
-opaque attachments, never a private key, and there is no escrow or recovery.
-Everything else is still plaintext on the server — plaintext direct chats,
-groups created without the option, pre-encryption history and all mobile
-clients. Mobile shows encrypted conversations as locked instead of sending
-plaintext into them. See [docs/SECURITY.md](docs/SECURITY.md) for the
+Message text and attachment bytes are **sealed at rest by the API itself**: a
+per-conversation key derived with HKDF-SHA256 from the single `CONTENT_KEY`
+secret, AES-256-GCM, stored as `obx1.<iv>.<tag>.<ciphertext>` on the row and with
+an `OBX1` header on the file. The server holds the key, so it can read content by
+design — that is what lets every signed-in device of an account open the whole
+history. History written under the earlier end-to-end scheme is a separate tail:
+those envelopes stay ciphertext until a web device that still holds the MLS keys
+opens the chat and hands them back to the server, which re-seals them. Mobile
+shows such a chat as holding unreadable older messages and refuses to write into
+it. See [docs/SECURITY.md](docs/SECURITY.md) for the
 confidentiality model, implemented controls, threat model, and known
 limitations; [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md)
-§11 is the authoritative statement of what is and is not encrypted today.
-Calls follow the same line: web calls in an MLS chat derive the media key from
-MLS, plaintext and mobile calls are labeled as not E2EE, and the server never
-receives a call key (only a SHA-256 fingerprint). See
+§11 and §12 are the authoritative statement of what is and is not encrypted
+today.
+Calls follow the same line: an encrypted call's media key is generated by the
+server and handed to the web clients with the room token, plaintext and mobile
+calls carry no media encryption, and no call key is ever persisted or logged. See
 [docs/engineering/CALLING_ARCHITECTURE.md](docs/engineering/CALLING_ARCHITECTURE.md).
 
 The API requires `JWT_SECRET` and refuses to start without it. In production it
-must be at least 32 characters. Cross-origin browser access is deny-by-default
+must be at least 32 characters. `CONTENT_KEY` is required in every environment: a
+base64 string decoding to exactly 32 bytes, checked at startup, because a fallback
+key would make every deployment share a secret the code can guess.
+Set it once before the first deploy and never change it — a new value leaves every
+sealed message and file unreadable.
+Cross-origin browser access is deny-by-default
 in production; set `CORS_ORIGINS` to a comma-separated allowlist when the web
 app and API are on different origins. Native apps send no `Origin` header and are
 always allowed.
@@ -170,7 +183,7 @@ no numbers. `users.phone` remains excluded from every other user response.
 ## 🧪 Tests & checks
 
 ```bash
-cd backend && npm run test:e2e     # 62 tests: OTP signup, sessions, uploads, CORS, socket, contacts, E2EE, message actions, calling
+cd backend && npm run test:e2e     # unit crypto checks plus the database suites: OTP signup, sessions, uploads, CORS, socket, contacts, content sealing, legacy import, message actions, calling
 npm run test:e2ee                  # MLS library gate, including the no-WebCrypto (Hermes) run
 npm run lint                       # web ESLint
 npm run build                      # web production build

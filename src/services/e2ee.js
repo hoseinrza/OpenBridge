@@ -3,7 +3,12 @@ import { indexedDbStore } from '../../shared/e2ee/stores.js';
 import { apiCall } from './api.js';
 import { connectSocket, emitWithAck } from './socket.js';
 
-// The web half of end-to-end encryption.
+// The web half of the OLD MLS end-to-end encryption scheme.
+//
+// New messages never go through MLS any more; the server holds the content
+// keys. What remains here is legacy only: opening the conversations this device
+// still holds MLS state for and handing their plaintext back to the server once,
+// so every device can read that history.
 //
 // Everything protocol-shaped lives in shared/e2ee so the phone can run the same
 // code; this file supplies the two things only a browser has — a persistent
@@ -74,19 +79,6 @@ export function initE2ee(me) {
 /** The live client, or null while nobody is signed in. */
 export function getE2ee() {
   return state?.client ?? null;
-}
-
-/**
- * Derives the media key for one call, or null when the conversation is not
- * end-to-end encrypted. The key stays on this device; only the fingerprint is
- * sent, and the server compares fingerprints rather than keys.
- */
-export async function exportCallKey(me, chat, callId) {
-  const client = await initE2ee(me);
-  if (chat?.kind === 'group') {
-    return client.exportCallKeyForGroup(chat.conversationId ?? chat.id, callId);
-  }
-  return client.exportCallKeyForPeer(chat.id, callId);
 }
 
 // ── Legacy history backfill ──────────────────────────────────────────────

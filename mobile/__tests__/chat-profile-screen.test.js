@@ -202,7 +202,7 @@ test('a call starts from the profile and video is its own tile', async () => {
 test('an encrypted group explains itself but still lists members', async () => {
   fetchE2eeState.mockResolvedValue({ e2ee: true });
   const view = renderProfile({ ...groupPeer, encrypted: true });
-  expect(await view.findByText(/این گفتگو سرتاسری رمزنگاری شده/)).toBeTruthy();
+  expect(await view.findByText(/پیام‌های قدیمیِ این گفتگو/)).toBeTruthy();
   expect(fetchShared).not.toHaveBeenCalled();
   expect(view.getByTestId('profile-tab-media')).toBeTruthy();
 
@@ -214,7 +214,7 @@ test('an encrypted group explains itself but still lists members', async () => {
 test('an encrypted direct chat shows the explanation and no tabs', async () => {
   fetchE2eeState.mockResolvedValue({ e2ee: true });
   const view = renderProfile({ ...contact, encrypted: true });
-  expect(await view.findByText(/این گفتگو سرتاسری رمزنگاری شده/)).toBeTruthy();
+  expect(await view.findByText(/پیام‌های قدیمیِ این گفتگو/)).toBeTruthy();
   expect(view.queryByTestId('profile-tab-media')).toBeNull();
   expect(view.queryByTestId('profile-tab-members')).toBeNull();
   expect(fetchShared).not.toHaveBeenCalled();

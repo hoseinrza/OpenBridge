@@ -5,13 +5,17 @@
 > the “the server cannot read” model for everything written from now on:
 > message text and uploaded bytes are encrypted at rest under a server-held
 > `CONTENT_KEY`, and any signed-in device of the account can read them. This
-> document stays as the design record for the MLS history already deployed;
-> phase 3 covers its backfill and phase 4 covers calls.
+> document stays as the design record for the MLS history already deployed.
+> Phase 4 landed on 2026-10-25: calls now use a server-issued per-call key, and
+> MLS remains only as the way a keyed device opens and hands back legacy
+> history.
 
-Status: **Phase 3 landed on web — direct chats and groups explicitly created as
-encrypted are E2EE there; mobile holds no keys and locks those chats instead of
-sending plaintext into them**
-Last updated: 2026-10-21
+Status: **historical.** MLS phases 1–3 landed on web; direct chats and groups
+explicitly created as encrypted were E2EE there, and mobile held no keys and
+locked those chats instead of sending plaintext into them. Phase 4 (2026-10-25)
+moved calls to a server-issued key and left MLS with one job: a keyed device
+opens legacy history and hands it back (§12).
+Last updated: 2026-10-25
 
 OpenBridge stores plaintext for every conversation that is not marked encrypted
 (see `docs/SECURITY.md`). A direct chat opened from the web app, and a group
@@ -844,3 +848,45 @@ conversation until it ships an MLS client.
 - Envelope retention is undefined: the server keeps ciphertext forever and there
   is no pruning or export policy yet.
 - Losing every device loses the history. Recovery is deliberately absent (§4).
+
+## 12. What replaced this (2026-10-25)
+
+The MLS model above is the historical record. Everything below is what is true
+now; where the two disagree, this section wins.
+
+- **Messages and uploads are encrypted at rest, not end to end.** Text and file
+  bytes are sealed with keys derived from the server-held `CONTENT_KEY`, and any
+  signed-in session of the account can read them. The server can decrypt by
+  design. This supersedes §4's “no escrow, no server-side recovery” rule.
+- **Legacy MLS history is imported back into that model.** A device that still
+  holds the old keys opens the envelopes and posts the plaintext once; the
+  server seals it into ordinary rows. Envelopes nobody has backfilled stay
+  pending and are reported as pending, never silently dropped.
+- **MLS remains only for that hand-back.** A keyed device uses `shared/e2ee` to
+  open an old envelope and import it. No new message, file or call key is
+  derived from MLS.
+- **Call media uses one random server-issued key per call.** The API generates
+  32 random bytes at call creation when the conversation is flagged `e2ee`,
+  keeps them on the in-memory call record, and returns them only in the
+  room-token response to web clients. There is no MLS exporter and no
+  fingerprint comparison. Web clients hand the key to LiveKit's E2EE provider,
+  which derives frame keys locally; the SFU sees only ciphertext. The API holds
+  the same key and can decrypt media — the same deliberate trade as messages.
+- **Mobile reads server rows but cannot write legacy chats or join encrypted
+  calls.** Its composer stays closed for chats flagged `e2ee` (the `locked`
+  behavior is unchanged), and it is refused a token for an encrypted call
+  because the Expo build has no LiveKit E2EE support, not because a key is
+  missing.
+- **Copy rule.** No surface may claim end-to-end secrecy or that the server
+  cannot read content. Say “encrypted at rest” and name who holds the key:
+  messages are sealed with a server-held key, and call media is encrypted
+  between clients with a key the OpenBridge server also holds.
+
+Still owed and not claimed:
+
+- No on-device verification of this flow; the checks are code and test
+  assertions, not a device run.
+- No device test of mobile encrypted media, because mobile encrypted media does
+  not exist in this build.
+- No external security review of the server-key design, the legacy import or the
+  call-key delivery.

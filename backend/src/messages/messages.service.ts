@@ -1098,7 +1098,7 @@ export class MessagesService {
       where:  { id: conversationId },
       select: { e2ee: true },
     });
-    if (!conversation.e2ee) throw new BadRequestException('این گفتگو رمزنگاری سرتاسری ندارد');
+    if (!conversation.e2ee) throw new BadRequestException('این گفتگو رمزنگاری‌شده نیست');
 
     const [envelope] = await this.prisma.$transaction(async tx => {
       // Transaction-scoped advisory lock: sequence assignment stays gapless
