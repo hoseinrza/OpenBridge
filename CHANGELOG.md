@@ -4,6 +4,12 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.10.11] - 2026-10-25
+
+### Docs
+- نتیجهٔ اجرای پذیرش فاز یک و تصمیم دروازهٔ بتا در `docs/engineering/BETA_READINESS.md` §9 ثبت شد: بررسی‌های قابل‌اجرا سبزند (وب، بک‌اند، موبایل، باندل اندروید)، اما دروازه بسته می‌ماند چون Maestro روی main قرمز است، CI برای این شاخه اجرا نشده، ارسال پیوست و ویرایش پروفایل در موبایل هنوز پیاده نشده و تماس واقعی آزمایش نشده است.
+- راهنمای بهره‌برداری بتا در فهرست مستندات README لینک شد.
+
 ## [1.10.10] - 2026-10-25
 
 ### Docs

@@ -549,6 +549,8 @@ The Beta gate is met only when all of the following are true and evidenced:
 9. The Beta is deployed only to a controlled test environment and is not
    presented as a production-ready public service.
 
+The current status against these criteria is recorded in §9.
+
 ---
 
 ## 7. Work required before Beta (Phase 1 plan)
@@ -598,6 +600,74 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Phase 1.8 calling cases | Signed-webhook cleanup, ring timeout, token TTL/reconnect and signature rejection added to `backend/test/calls.e2e.cjs`; `node --test test/calls.e2e.cjs` → 11/11; `npm run test:e2e` → 110/110. No live media server used; limits stated in §5.8. |
 | 2026-10-25 | Phase 1.9 reliability | `/api/health/ready` DB probe (503 without driver detail) wired into compose, CI and Render; shutdown hooks plus `exec` and 20s grace; indexes on conversations and sessions; hourly pruning of expired OTPs and dead sessions; atomic message+recency write; calls suite deletes its conversations. `npm run test:e2e` → 113/113; `prisma validate` PASS; a calls run afterwards left 0 orphan conversations. Shutdown path is source-reviewed only (no Docker here). §5.9 |
 | 2026-10-25 | Phase 1.10 operations | New `docs/engineering/BETA_OPERATIONS.md` (environments, env table, schema/seed/reset, tests, backup/restore, release checklist, rollback); Render and `deploy.sh` now use the readiness route; stale counts/CI status fixed in `README.md`/`DEPLOY.md`. Backup, restore and rollback are documented and source-reviewed, not executed. §5.10 |
+| 2026-10-25 | Phase 1 acceptance run | Web lint/build PASS; E2EE gate 17/17; backend e2e 113/113; mobile Jest 96/96; Android export PASS; readiness 200 direct and through the Vite proxy. Audit blocked by registry `ECONNRESET`; compose smoke and Maestro unavailable here; CI not triggered for this branch. Gate remains closed: §9. |
 Next update: after a CI run exercises the Maestro instrumentation (CI watches
 PRs to `main` and pushes to `main`; a push to `beta/phase-1` does not trigger
 it).
+
+---
+
+## 9. Phase 1 acceptance run and gate decision (2026-10-25)
+
+Every command below was run on commit `cde3087` (`beta/phase-1`, product version
+1.10.10) on this machine, against the local PostgreSQL. Only this report and the
+version/changelog changed afterwards.
+
+| Check | Command | Result |
+|-------|---------|--------|
+| Web lint | `npm run lint` | PASS (ESLint, no findings) |
+| Web build | `npm run build` | PASS (Vite, chunk-size warning only) |
+| MLS library gate | `npm run test:e2ee` | 17/17 |
+| Backend schema | `npx prisma validate` | valid |
+| Backend types/build | `npm run build` (inside `test:e2e`) | PASS |
+| Backend e2e | `npm run test:e2e` | 113/113 across 12 files, including production-mode OTP, cross-user access, calling, health and maintenance |
+| Mobile unit/component | `cd mobile && npm test -- --ci` | 96/96, 12 suites |
+| Mobile bundle | `npx expo export --platform android` | PASS (Hermes `.hbc`, 4.8 MB) |
+| Local API | `GET /api/health/ready` direct and through the Vite proxy | 200 `{status:'ok',db:'up'}` |
+| Web dev shell | `GET http://127.0.0.1:5173/` | 200 with `<div id="root">` |
+| Dependency audit | `npm audit --omit=dev --audit-level=high` (root) | **blocked**: `ECONNRESET` from the npm registry; no dependency changed since the clean 1.10.2 audit |
+| Docker compose smoke | — | **not run**: no Docker on this machine |
+| Android Maestro | — | **not run**: no emulator/SDK; job is red on `main` (§5.2) |
+| CI for this branch | — | **not run**: a push to `beta/phase-1` does not trigger CI; it needs a PR or `main` merge, which is not authorized here |
+
+### Gate decision
+
+**The Beta gate is not met.** The engineering work for Phase 1 is complete and
+every locally runnable check is green, but four criteria remain open, and none of
+them can be closed by writing more code in this environment:
+
+1. **Criterion 1 (core journeys on both clients)** — the mobile client still
+   cannot send attachments and cannot edit the profile (§5.7). These are real
+   journey gaps, not cosmetics. Supported calls have never been exercised end to
+   end: only token minting, lifecycle and webhook paths are proven (§5.8).
+2. **Criterion 2 (all checks in CI)** — the local equivalents pass, but the
+   compose smoke and the CI run for this branch do not exist. Triggering CI
+   requires a pull request or a merge to `main`; the user has authorized pushes
+   to the working branch only.
+3. **Criterion 3 (Maestro or a reviewed replacement)** — Maestro has failed on
+   every recent `main` run and cannot be reproduced here. `beta/phase-1` carries
+   diagnostics for the next CI run, not a fix.
+4. **Criterion 4 (no unresolved high/critical finding)** — the last clean audit
+   (1.10.2) has no dependency changes after it, but the current audit could not
+   reach the registry, so it is not freshly evidenced.
+
+Criteria 5–9 are met: development OTP works without SMS and production refuses
+to issue codes; encryption claims match the server-held model; limitations,
+setup, backup/restore and rollback are documented; a release checklist exists;
+and no Beta or production deployment has been presented as ready.
+
+What would close the gate, in order:
+
+1. Open a PR from `beta/phase-1` to `main` (or authorize the merge), let CI run,
+   and read the Maestro diagnostics artifact. Fix or replace that flow with
+   equivalent evidence.
+2. Re-run the dependency audit from a network that reaches the registry.
+3. Implement mobile attachment sending and mobile profile editing, then verify
+   them on a device or emulator.
+4. Perform one real two-party call on a staging stack with LiveKit ports open,
+   and record the result.
+5. Then, and only then, run the Beta acceptance journeys on the deployed Beta
+   environment and perform the smoke checks in `BETA_OPERATIONS.md` §7.
+
+Stop point: this is the end of Phase 1. No Phase 2 work, no public deployment,
+and no production database action was performed.

@@ -387,3 +387,4 @@ cross-origin calls in production. Remember that production OTP requests return
 - [docs/engineering/E2EE_DESIGN.md](docs/engineering/E2EE_DESIGN.md) — protocol evaluation and rollout design
 - [docs/engineering/UI_UX_REDESIGN.md](docs/engineering/UI_UX_REDESIGN.md) — design tokens, screens, verified QA
 - [docs/engineering/OVERNIGHT_PROGRESS.md](docs/engineering/OVERNIGHT_PROGRESS.md) — what shipped, batch by batch, with the verification actually performed
+- [docs/engineering/BETA_OPERATIONS.md](docs/engineering/BETA_OPERATIONS.md) — environments, configuration, backup/restore, release checklist and rollback
