@@ -89,7 +89,7 @@ per-call key generated and held by the API, delivered only to web clients.
 | `npm run test:e2e` (backend) | **PASS 103/103** (8.7 s) | Against local PostgreSQL. Includes crypto unit tests, content sealing/opening, legacy import, upload encryption/range serving, and the security, message-action, calls, content-key and client-level E2EE suites. |
 | `npm run test:ci` (mobile) | **PASS 11 suites / 81 tests** | Jest + RNTL. |
 | `npx expo export --platform android` (mobile) | **PASS** | Hermes bundle `index-f1388b6c8ec19ef4b17675b00a8087e7.hbc` (4.8 MB) plus assets in `dist-ci`. |
-| `npm audit --omit=dev --audit-level=high` (backend) | **FAIL** | 11 production findings: 1 critical, 4 high, 6 moderate. Details in §5.1. |
+| `npm audit --omit=dev --audit-level=high` (backend) | **PASS** after upgrade | Baseline was 11 findings (1 critical, 4 high, 6 moderate). After `bcrypt@6`, `multer@2.5.0` and the `body-parser`/`qs` overrides the high/critical count is 0; 6 moderate advisories remain on paths this app does not use (§5.1). |
 | Docker compose smoke | **NOT RUN** | No Docker on this machine. Last CI run's `4 · Docker images + compose smoke test` job passed. |
 | Maestro Android E2E | **NOT RUN** | No Java/emulator locally; latest CI run failed. Details in §5.2. |
 
@@ -100,7 +100,9 @@ Latest run `40198966502` for `5ed3ca1` (2026-10-25T13:44Z):
 - Green: change detection, web lint, backend schema/typecheck, backend e2e,
   E2EE gate, mobile unit tests, web build, mobile bundle, Docker compose smoke.
 - **Red (blocking): `2e · Mobile E2E (Android emulator)`** → `CI gate` fails.
-- **Red (informational): `2c · Dependency audit (backend)`**.
+- **Red (informational): `2c · Dependency audit (backend)`** — true for this run,
+  which predates the upgrade; at `--audit-level=high` it now has nothing to
+  report (§5.1).
 - `Deploy` skipped (`DEPLOY_ENABLED` is not `true`).
 
 The previous four `main` runs (`e148fee`, `feef366`, `dc0ce22`, `ce9e30e`) all
@@ -174,21 +176,49 @@ failed the same way, so this is not a one-off flake.
 
 ## 5. Defects, risks, blockers
 
-### 5.1 Backend production dependency audit (blocking Phase 1 Task 2)
+### 5.1 Backend production dependency audit — high/critical resolved
 
-`npm audit --omit=dev --audit-level=high` reports 11 findings:
+Baseline (before any change): 11 production findings — 1 critical, 4 high,
+6 moderate.
 
-- **critical** — `tar <= 7.5.20` (multiple path traversal/DoS advisories),
-  reached through `@mapbox/node-pre-gyp` ← `bcrypt@5`.
-- **high** — `multer` (1.x line) and transitives, `@nestjs/platform-express`
+- **critical** — `tar <= 7.5.20`, reached through `@mapbox/node-pre-gyp` ←
+  `bcrypt@5`.
+- **high** — `multer` (1.x line) and transitives; `@nestjs/platform-express`
   bundles `multer@1.4.5-lts.1`.
-- **moderate** — `qs` (DoS advisories), through Express.
-- Other findings: 6 moderate in total.
+- **moderate** — `qs` (DoS), through Express, plus five others.
 
-`npm audit fix --force` proposes `multer@2.5.0` (breaking) and `bcrypt@6`.
-Both need a reviewed upgrade and full regression run; no upgrade was applied in
-this baseline. The `2c` job is `continue-on-error`, so this does not block CI
-today, but the roadmap requires resolving or assessing it.
+Applied, all in `backend/package.json`:
+
+| Change | Reason |
+|--------|--------|
+| `bcrypt` `^5.1.1` → `^6.0.0` | Drops `node-pre-gyp`/`tar`; the native build is the same API this code uses. |
+| `multer` `^1.4.5-lts.1` → `^2.5.0` | The 1.x line is the high finding. |
+| `overrides`: `body-parser ^1.20.9`, `qs ^6.16.1`, `multer ^2.5.0` | Pins the transitive copies Nest's Express platform would otherwise resolve. |
+
+Verified after the upgrade:
+
+- `npm audit --omit=dev --audit-level=high` exits 0 (no critical/high).
+- Resolved installed versions: `bcrypt@6.0.0`, `multer@2.5.0`,
+  `body-parser@1.20.9`, `qs@6.16.1`.
+- `npm run build` PASS; `npm run test:e2e` **103/103** PASS; a direct
+  `bcrypt.hash`/`compare` round-trip PASS.
+
+**The 6 remaining moderate advisories are accepted as unreachable for Beta:**
+
+- `@nestjs/core@10.4.22` — SSE response injection (CVE-2026-35515), fixed in
+  `11.1.18`. This API mounts no `@Sse()` route and returns no
+  `text/event-stream` response; fixing it means a Nest 10 → 11 major upgrade.
+- `file-type@20.4.1` (via `@nestjs/common`) — ASF/ZIP parse DoS
+  (CVE-2026-32630), fixed in `21.3.2`. Nothing in this repo imports `file-type`
+  and no route uses `ParseFilePipe`/`FileTypeValidator`; uploads are validated
+  by the app's own extension allowlist, magic-byte check and optional ClamAV
+  scan.
+- The remaining four are the transitive copies that these two roots pull in.
+
+Re-check both when Nest 11 is adopted. The registry audit endpoint answered
+`ECONNRESET` on the last two attempts of this session (2026-10-25T15:22Z and
+15:23Z), so the "after" numbers above are from the verified run earlier the same
+day; the installed versions in the lockfile back them up.
 
 ### 5.2 Android Maestro E2E (blocking Phase 1 Task 2)
 
@@ -206,16 +236,29 @@ today, but the roadmap requires resolving or assessing it.
   `login-*`, `composer-*`, `chat-header-profile`, `profile-screen`,
   `reaction-chip-N` and the dynamic `profile-tab-*` ids exist. No obviously
   stale selector was found in this pass.
-- Because no Java/emulator exists locally, the next step is CI-side
-  instrumentation (explicit `adb wait-for-device`, install output, device list,
-  and a summary line per phase) and a re-run, not a blind selector change.
+- Because no Java/emulator exists locally, the fix is CI-side instrumentation
+  rather than a blind selector change. **Landed on `beta/phase-1`** (unverified
+  until a run exists):
+  - the step now reports SDK level, Maestro version, `boot_completed` and
+    `adb devices` to the step summary;
+  - a missing APK is an explicit error that lists the output directory;
+  - `adb install` is run explicitly, its full output is echoed, and a non-zero
+    exit annotates `APK install failed` and captures logcat;
+  - a launch smoke test (`am start -n com.openbridge.mobile/.MainActivity`,
+    `pidof`, screenshot, logcat) runs before Maestro, so an install-ok /
+    app-crash case is distinguishable from a flow failure;
+  - `maestro test` now writes `--debug-output` for both attempts;
+  - the artifact upload includes launch screenshot/log, install log, debug
+    output and launch logcat.
 
-### 5.3 Documentation/claims drift
+### 5.3 Documentation/claims drift — corrected
 
-- `docs/SECURITY.md` states CI covers the emulator run; it currently does not
-  pass. The document should not imply a green gate until `2e` is fixed.
-- `README.md` claims a green CI observation dated 2026-10-21; that is stale.
-- The roadmap's Phase 1 Task 2 acceptance is not met while `2e` is red.
+- `docs/SECURITY.md` no longer implies the emulator run passes; it states the
+  job is red and links here.
+- `README.md`'s "CI is green" observation (2026-10-21) is replaced with the
+  2026-10-25 state: everything green except `2e`/`CI gate`.
+- The roadmap's Phase 1 Task 2 acceptance is still not met while `2e` is red;
+  the instrumentation needs one CI run on a branch that CI watches.
 
 ### 5.4 Security findings carried forward (assessed, not new)
 
@@ -301,5 +344,10 @@ Ordered by the roadmap, with the baseline's findings attached:
 |------|----------------|----------|
 | 2026-10-25 | Baseline audit | This document; commands in §3. |
 | 2026-10-25 | Web lint ignore for `graphify-out` | `npm run lint` → exit 0. |
+| 2026-10-25 | Dependency upgrade (`bcrypt@6`, `multer@2.5.0`, `body-parser`/`qs` overrides) | `npm run build` PASS; `npm run test:e2e` 103/103; `npm audit --omit=dev --audit-level=high` exit 0; `npm ls` shows the pinned versions. §5.1 |
+| 2026-10-25 | Maestro step instrumentation | `.github/workflows/ci.yml` (`Run Maestro on the emulator`, artifact paths). No CI run yet. §5.2 |
+| 2026-10-25 | Stale CI claims corrected | `README.md`, `docs/SECURITY.md`. §5.3 |
 
-Next update: after the CI reliability batch.
+Next update: after a CI run exercises the Maestro instrumentation (CI watches
+PRs to `main` and pushes to `main`; a push to `beta/phase-1` does not trigger
+it).

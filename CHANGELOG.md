@@ -4,6 +4,29 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.10.2] - 2026-10-25
+
+### Security
+- `bcrypt` از ۵ به ۶ و `multer` از ۱ به ۲٫۵ ارتقا یافت؛ `body-parser` و
+  `qs` هم با `overrides` روی نسخهٔ وصله‌شده پین شدند. یافتهٔ critical (زنجیرهٔ
+  `tar` زیر `bcrypt`) و هر چهار یافتهٔ high حذف شدند.
+- `npm audit --omit=dev --audit-level=high` برای بک‌اند دیگر یافته‌ای ندارد.
+  ۶ یافتهٔ moderate باقی‌مانده در مسیرهایی‌اند که این برنامه اجرا نمی‌کند (SSE در
+  Nest و `file-type`)؛ دلیل پذیرش در `docs/engineering/BETA_READINESS.md` §5.1
+  ثبت شده است.
+
+### Changed
+- مرحلهٔ Maestro در CI حالا هر فاز را جدا گزارش می‌کند: وضعیت دستگاه و بوت،
+  وجود APK، خروجی کامل `adb install`، یک آزمایش اجرای برنامه با `am start` و
+  `pidof` و اسکرین‌شات و logcat، و سپس خود جریان با `--debug-output`. فایل‌های
+  آرتیفکت هم شامل این خروجی‌های تازه شدند. این ابزارگذاری هنوز در CI اجرا نشده
+  است؛ نتیجه‌اش در سند خط پایه به‌روزرسانی می‌شود.
+
+### Docs
+- `README.md` و `docs/SECURITY.md` دیگر CI را سبز اعلام نمی‌کنند. وضعیت واقعی
+  ۲۰۲۶-۱۰-۲۵ ثبت شده است: همهٔ کارها سبز جز Maestro اندروید و به‌تبع آن
+  `CI gate`.
+
 ## [1.10.1] - 2026-10-25
 
 ### Added

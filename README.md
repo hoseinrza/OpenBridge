@@ -248,8 +248,12 @@ out the previous commit, rebuilds, and records the bad SHA in
 `.deploy-failed-sha` so the cron cannot crash-loop on it. Tune the wait with
 `HEALTH_DEADLINE` on very slow boxes.
 
-> Observed state (2026-10-21): CI runs on GitHub Actions and is green, including
-> the Docker compose smoke stage. `Deploy` is `skipped` because
+> Observed state (2026-10-25): every job is green except the Android Maestro
+> job (`2e · Mobile E2E`), which has failed on every recent `main` run; the
+> `CI gate` job therefore fails with it. Instrumentation for that step landed in
+> `beta/phase-1` and waits for a run to diagnose it — see
+> [docs/engineering/BETA_READINESS.md](docs/engineering/BETA_READINESS.md) §5.2.
+> The Docker compose smoke stage passes. `Deploy` is `skipped` because
 > `vars.DEPLOY_ENABLED` is not `true`; it stays inert until the SSH secrets
 > exist. No production deployment has been performed, and the redeploy/rollback
 > branch on a real VPS is still unverified.

@@ -331,7 +331,11 @@ authenticated user.
   PostgreSQL (`content-crypto`, `message-encryption`, `legacy-import`,
   `upload-encryption`, `security`, `message-actions`, `e2ee-client`, `calls`,
   `content-key`), the `shared/e2ee` library gate, mobile unit tests, an Android
-  emulator Maestro run, and a `docker compose` smoke test of the shipped images.
+  emulator Maestro job, and a `docker compose` smoke test of the shipped images.
+  **The Maestro job does not pass today** (every `main` run since at least
+  `e148fee` is red on `2e · Mobile E2E`, 2026-10-25), so it currently proves
+  nothing about on-device behavior; see
+  `docs/engineering/BETA_READINESS.md` §5.2.
   CI deploys nothing; a separate `deploy.yml` redeploys the VPS over SSH only
   when the `DEPLOY_ENABLED` repository variable is `true` and a CI run that
   started from a push to `main` finished green.
