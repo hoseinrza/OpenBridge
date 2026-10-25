@@ -336,6 +336,50 @@ Verification: `npm run lint` and `npm run build` pass with the label change. No
 backend file changed in this task, so the 107/107 e2e run from Phase 1.4 still
 applies.
 
+### 5.7 Web/mobile parity (Phase 1 Task 7)
+
+The two clients were compared surface by surface from their sources. This
+machine has no Android emulator (§5.5), so nothing below was exercised on a
+device; the Android statement is what the code and the Jest suite support, not
+an on-device observation.
+
+| Journey | Web | Android | Note |
+|---------|-----|---------|------|
+| OTP sign-in and sign-up | yes | yes | Same endpoints; the test code exists only outside production. |
+| Direct chat: send, receive, history | yes | yes | History is chronological and paged 50 rows at a time on both. |
+| Group chat: create, list, send, read | yes | yes | Neither client offers member add/remove UI, although the API has it. |
+| Receive and open attachments | yes | yes | Signed URLs; images render inline, files open through the OS. |
+| Send attachments | yes | **no** | Mobile uploads only voice recordings; no image/document picker is installed. |
+| Voice messages | yes | yes | Both record and play; mobile sends `VOICE` with the measured length. |
+| Reactions, read receipts, typing | yes | yes | Same socket events. |
+| Reply | yes | yes (added here) | New two-row action tray and quote rendering; the send carries `replyToId`. |
+| Edit | yes | yes (added here) | `message:edit` over the socket; the row shows the edited mark. |
+| Delete for me / for everyone | yes | yes (added here) | Confirmation sheet offers everyone only on an own message; scopes match the server. |
+| Forward | yes | **no** | Needs a target picker that does not exist on mobile. |
+| Search | conversation search | chat-list search only | No in-chat search field on mobile. |
+| Profile | view and edit | view only | Mobile shows name, handle and avatar; no edit form or avatar picker. |
+| Device/session management, security alerts | yes | **no** | No mobile screen calls `/auth/sessions` or `/auth/security-events`. |
+| Theme | light, dark | system, light, dark | Mobile adds "follow the system". |
+| Calls | audio and video, encrypted media for new calls | audio and video, refuses encrypted calls | The refusal is explicit and documented; the key is server-held. |
+| Contacts | user search | user search plus device contacts | Mobile can import the phone's address book. |
+
+Added in this phase: the mobile client now hears `message:edited`, so a message
+changed on the web no longer keeps its old text until the screen is reopened;
+it renders quotes and edited marks; and it can reply, edit and delete from the
+same long-press tray. Covered by `mobile/__tests__/use-chat-reply.test.js` and
+the new cases in `mobile/__tests__/chat-screen.test.js` (suite: 96/96). The
+Android JS bundle also exports successfully, and the web lint/build still pass.
+
+Remaining gaps that touch the Beta acceptance list are **sending attachments**
+and **editing the profile from Android**; the rest are conveniences or
+web-only administration. They are recorded here rather than implemented blind,
+because a picker or form cannot be verified without a device and an emulator is
+not available in this environment.
+
+`docs/engineering/UI_UX_REDESIGN.md` is stale about group administration (it
+says "absent at the API level"); the API now has participant add/remove, but
+neither client has UI for it.
+
 ---
 
 ## 6. Beta acceptance criteria
@@ -407,6 +451,7 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Phase 1.5 headers | `nginx.conf` (nosniff, frame deny, referrer policy, `server_tokens off`), CI assertion, `docs/SECURITY.md` rationale for the missing CSP/HSTS. Web lint and build still pass. |
 
 | 2026-10-25 | Phase 1.6 encryption claims | Client encryption strings matched to the server-held model; chat-list fallback changed to an encrypted-history label; no end-to-end claim on any surface; legacy hand-back already covered. `npm run lint` and `npm run build` exit 0. §5.6 |
+| 2026-10-25 | Phase 1.7 parity | Mobile now applies `message:edited`, renders quotes and edited marks, and replies/edits/deletes from the long-press tray; parity matrix and remaining gaps in §5.7. Mobile Jest 96/96; `expo export --platform android` PASS; web `npm run lint`/`npm run build` PASS. |
 Next update: after a CI run exercises the Maestro instrumentation (CI watches
 PRs to `main` and pushes to `main`; a push to `beta/phase-1` does not trigger
 it).
