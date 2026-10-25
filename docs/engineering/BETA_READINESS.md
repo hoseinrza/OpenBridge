@@ -93,6 +93,7 @@ per-call key generated and held by the API, delivered only to web clients.
 | `npx expo export --platform android` (mobile) | **PASS** | Hermes bundle `index-f1388b6c8ec19ef4b17675b00a8087e7.hbc` (4.8 MB) plus assets in `dist-ci`. |
 | `npm audit --omit=dev --audit-level=high` (backend) | **PASS** after upgrade | Baseline was 11 findings (1 critical, 4 high, 6 moderate). After `bcrypt@6`, `multer@2.5.0` and the `body-parser`/`qs` overrides the high/critical count is 0; 6 moderate advisories remain on paths this app does not use (§5.1). |
 | Docker compose smoke | **NOT RUN** | No Docker on this machine. Last CI run's `4 · Docker images + compose smoke test` job passed. |
+| nginx security headers | **NOT RUN locally** | Added in `nginx.conf` for Phase 1.5; the compose step now asserts `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and no version banner on `/` and `/api/health`. Needs a CI run. |
 | Maestro Android E2E | **NOT RUN** | No Java/emulator locally; latest CI run failed. Details in §5.2. |
 
 ### CI state on `main`
@@ -361,6 +362,7 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Lockfile root versions synced to 1.10.2; orphan test conversations removed | `package-lock.json`, `backend/package-lock.json`, `mobile/package-lock.json` (2 lines each); 24 participant-less conversations deleted locally. §5.4 |
 | 2026-10-25 | Phase 1.3 auth cases | `node --test test/security.e2e.cjs` → 41/41; new cases named in §3. README documents the SMS integration point. |
 | 2026-10-25 | Phase 1.4 messaging cases | Offline→reconnect catch-up and an authentic-but-expired file URL; `npm run test:e2e` → 107/107. |
+| 2026-10-25 | Phase 1.5 headers | `nginx.conf` (nosniff, frame deny, referrer policy, `server_tokens off`), CI assertion, `docs/SECURITY.md` rationale for the missing CSP/HSTS. Web lint and build still pass. |
 
 Next update: after a CI run exercises the Maestro instrumentation (CI watches
 PRs to `main` and pushes to `main`; a push to `beta/phase-1` does not trigger

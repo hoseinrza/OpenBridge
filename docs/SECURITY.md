@@ -257,6 +257,18 @@ authenticated user.
   configured. In development, localhost and private-LAN origins are allowed.
 - Production deployments must terminate TLS at the reverse proxy or hosting
   platform. The bundled nginx config listens on HTTP only.
+- `nginx.conf` sends `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`
+  and `Referrer-Policy: no-referrer` on the SPA, the proxied API and the socket
+  handshake, and turns off `server_tokens` so the version banner is not
+  advertised. The asset location repeats the three headers because an nginx
+  `add_header` at location level drops those inherited from `server`. CI's
+  compose smoke test asserts all three on `/` and `/api/health`.
+- **No CSP is set.** A policy strict enough to matter has to allow the LiveKit
+  WebSocket, `blob:` media and the inline style the SPA already uses; adding one
+  without exercising calls and uploads on a real browser would be a guess. It is
+  deferred to the Beta acceptance run with a reviewed policy.
+- **No HSTS is set here.** TLS ends at a proxy or platform, and HSTS is only
+  meaningful on the HTTPS response, so it belongs in that layer's configuration.
 
 ## Threat model
 

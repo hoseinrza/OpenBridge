@@ -4,6 +4,22 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.10.5] - 2026-10-25
+
+### Security
+- nginx حالا برای SPA، API و دست‌دادن سوکت سه هدر می‌فرستد:
+  `X-Content-Type-Options: nosniff`، `X-Frame-Options: DENY` و
+  `Referrer-Policy: no-referrer`؛ و `server_tokens off` نسخهٔ nginx را
+  اعلام نمی‌کند. لوکیشن فایل‌های ایستا هدرها را تکرار می‌کند، چون
+  `add_header` در سطح location هدرهای ارثی را حذف می‌کند.
+- مرحلهٔ `docker compose` در CI این هدرها را روی `/` و `/api/health` بررسی
+  می‌کند و اگر نسخهٔ nginx لو برود شکست می‌خورد.
+
+### Docs
+- `docs/SECURITY.md` توضیح می‌دهد چرا CSP و HSTS در این لایه نیستند: CSP نیاز
+  به سیاستی آزموده با LiveKit و فایل‌های آپلودی دارد و به آزمون پذیرش موکول شد؛
+  HSTS جای‌گاهش لایهٔ TLS است.
+
 ## [1.10.4] - 2026-10-25
 
 ### Added

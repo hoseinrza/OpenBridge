@@ -508,11 +508,25 @@ jobs:
           docker compose ps
           docker compose logs --no-color api | tail -60
           exit 1
-      - name: Check the SPA and the Socket.IO handshake
+      - name: Check the SPA, the security headers and the Socket.IO handshake
         run: |
           curl -fsS http://localhost:${WEB_PORT}/ | grep -qi '<div id="root">'
           curl -fsS "http://localhost:${WEB_PORT}/socket.io/?EIO=4&transport=polling" -o /tmp/handshake
           grep -q '"sid"' /tmp/handshake
+
+          # The headers are added in nginx.conf; this asserts they survive both
+          # the SPA location and the API proxy, and that the version banner is
+          # gone.
+          assert_headers() {
+            local url="$1" label="$2" headers
+            headers=$(curl -fsS -D - -o /dev/null "$url")
+            echo "$headers" | grep -qi '^x-content-type-options: nosniff' || { echo "missing nosniff on $label" >&2; exit 1; }
+            echo "$headers" | grep -qi '^x-frame-options: DENY' || { echo "missing frame deny on $label" >&2; exit 1; }
+            echo "$headers" | grep -qi '^referrer-policy: no-referrer' || { echo "missing referrer policy on $label" >&2; exit 1; }
+            if echo "$headers" | grep -qiE '^server: nginx/[0-9]'; then echo "nginx version leaked on $label" >&2; exit 1; fi
+          }
+          assert_headers "http://localhost:${WEB_PORT}/" SPA
+          assert_headers "http://localhost:${WEB_PORT}/api/health" API
       - name: Container health report
         run: docker compose ps
       - if: always()
