@@ -74,6 +74,11 @@ export const CONTACT_MATCH_WINDOW_SECONDS = positiveInt('CONTACT_MATCH_WINDOW_SE
 // this many days regardless of activity.
 export const REFRESH_TOKEN_TTL_DAYS = positiveInt('REFRESH_TOKEN_TTL_DAYS', 30);
 
+// A session must be this old before it may sign the account out of another
+// session. A fresh login therefore cannot evict the devices that were already
+// there, even if its phone number and OTP were stolen.
+export const SESSION_REVOKE_COOLDOWN_DAYS = positiveInt('SESSION_REVOKE_COOLDOWN_DAYS', 30);
+
 // E2EE device registration and the public KeyPackage pool. The server only ever
 // stores opaque public blobs, so the caps exist to bound storage and to keep
 // the bundle endpoint from being used as a free data store.

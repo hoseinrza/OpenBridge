@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChat } from '../../hooks/useChat.js';
 import {
   apiCall, fetchUser, fetchConversations, fetchGroups, normalizeUser, normalizeGroup,
+  listSecurityEvents, acknowledgeSecurityEvents,
 } from '../../services/api.js';
 import { initE2ee } from '../../services/e2ee.js';
 import Sidebar from '../Sidebar/Sidebar.jsx';
@@ -10,6 +11,7 @@ import MessageList from './MessageList.jsx';
 import TypingIndicator from './TypingIndicator.jsx';
 import InputArea from './InputArea.jsx';
 import ProfileModal from '../Profile/ProfileModal.jsx';
+import SessionsModal from '../Profile/SessionsModal.jsx';
 import ChatProfilePanel from '../Profile/ChatProfilePanel.jsx';
 import NewChatModal from '../NewChat/NewChatModal.jsx';
 import ForwardModal from './ForwardModal.jsx';
@@ -52,6 +54,12 @@ function previewFromEncrypted(message, chat, myId) {
   };
 }
 
+function alertWhen(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('fa-IR', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 async function directConversationId(peerId, cache) {
   if (cache.has(peerId)) return cache.get(peerId);
   try {
@@ -88,6 +96,9 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const [searchOpen, setSearchOpen]       = useState(false);
   const [profileTarget, setProfileTarget] = useState(null); // { user, isOwn } | null
   const [profileOpen, setProfileOpen]     = useState(false);
+  const [sessionsOpen, setSessionsOpen]   = useState(false);
+  // Sessions that signed in after this device last acknowledged the list.
+  const [securityAlerts, setSecurityAlerts] = useState([]);
   const [newChatOpen, setNewChatOpen]     = useState(false);
   const [chatsLoading, setChatsLoading]   = useState(true);
   const [chatsError, setChatsError]       = useState(false);
@@ -108,6 +119,44 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
   const directConversationIds = useRef(new Map());
 
   useEffect(() => { activeUserIdRef.current = activeUser?.id ?? null; }, [activeUser?.id]);
+
+  // Security alerts are polled rather than pushed: the chat socket is owned by
+  // the chat hook, and an alert that arrives a minute late is still an alert.
+  // Reconnecting or returning to the tab checks immediately.
+  const refreshSecurityAlerts = useCallback(async () => {
+    try {
+      setSecurityAlerts(await listSecurityEvents());
+    } catch {
+      // A failed check must never take the conversation down with it.
+    }
+  }, []);
+
+  useEffect(() => {
+    const kickoff = setTimeout(refreshSecurityAlerts, 0);
+    const timer = setInterval(refreshSecurityAlerts, 60_000);
+    const onFocus = () => refreshSecurityAlerts();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshSecurityAlerts();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearTimeout(kickoff);
+      clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshSecurityAlerts]);
+
+  async function dismissSecurityAlerts() {
+    setSecurityAlerts([]);
+    try {
+      await acknowledgeSecurityEvents();
+    } catch {
+      // If the acknowledgement did not reach the server, the next poll puts
+      // the alert back instead of letting it disappear silently.
+    }
+  }
 
   // New accounts start with an empty conversation list — people only show up
   // here once a message has actually been exchanged with them. Conversations
@@ -375,6 +424,35 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
       />
 
       <div className="chat-main">
+        {securityAlerts.length > 0 && (
+          <div className="conn-banner session-alert" role="alert">
+            <i className="fas fa-shield-halved" aria-hidden="true" />
+            <div className="session-alert-copy">
+              <strong>دستگاه جدیدی وارد حساب شد</strong>
+              <span>
+                {securityAlerts[0].ip ?? 'IP نامشخص'} — {alertWhen(securityAlerts[0].createdAt)}
+                {securityAlerts.length > 1
+                  && ` — و ${securityAlerts.length.toLocaleString('fa-IR')} مورد دیگر`}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="session-alert-action"
+              onClick={() => { dismissSecurityAlerts(); setSessionsOpen(true); }}
+            >
+              مدیریت دستگاه‌ها
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={dismissSecurityAlerts}
+              aria-label="بستن هشدار ورود"
+            >
+              <i className="fas fa-xmark" aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
         {activeUser ? (
           <>
             <ChatHeader
@@ -489,8 +567,18 @@ export default function ChatPage({ currentUser, onLogout, onProfileUpdate }) {
           user={profileTarget.isOwn ? currentUser : profileTarget.user}
           isOwn={profileTarget.isOwn}
           onMessage={handleMessageFromProfile}
+          onSessions={profileTarget.isOwn
+            ? () => { setProfileTarget(null); setSessionsOpen(true); }
+            : undefined}
           onClose={closeProfile}
           onSaved={handleProfileSaved}
+        />
+      )}
+
+      {sessionsOpen && (
+        <SessionsModal
+          onClose={() => setSessionsOpen(false)}
+          onRevoked={refreshSecurityAlerts}
         />
       )}
 

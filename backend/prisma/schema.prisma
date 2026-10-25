@@ -188,6 +188,9 @@ model Session {
   ip          String?
   createdAt   DateTime  @default(now())
   lastUsedAt  DateTime  @default(now())
+  // Which new sessions this session has already been shown, so the alert is
+  // per device: one device acknowledging it must not hide it on another.
+  securitySeenAt DateTime?
   expiresAt   DateTime
   revokedAt   DateTime?
 

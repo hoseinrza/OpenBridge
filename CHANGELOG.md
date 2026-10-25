@@ -4,6 +4,30 @@ All notable changes to OpenBridge are documented here. The three manifests
 (`package.json`, `backend/package.json`, `mobile/package.json` + `mobile/app.json`)
 carry one product version, so a release entry applies to every client.
 
+## [1.6.0] - 2026-10-25
+
+### Added
+- **دستگاه‌های فعال.** از پروفایلِ خودت «دستگاه‌های فعال» را باز کن: هر نشست با
+  مرورگر و سیستم‌عامل، IP، ساعتِ ورود، آخرین فعالیت و آنلاین/آفلاین می‌آید. هر
+  دستگاه می‌تواند خودش را خارج کند و دستگاه قدیمی‌تر بقیه را.
+- **هشدارِ ورودِ تازه.** وقتی دستگاهی وارد حساب می‌شود، نوارِ هشدار بالای
+  گفتگوها روی همهٔ دستگاه‌های دیگر ظاهر می‌شود و تا وقتی همان دستگاه تأییدش
+  نکند می‌ماند. تأیید هر دستگاه جداست (`Session.securitySeenAt`)، پس بستنِ
+  هشدار روی گوشی، هشدارِ لپ‌تاپ را پنهان نمی‌کند.
+- حضور در فهرستِ دستگاه‌ها از سوکتِ زندهٔ همان نشست خوانده می‌شود؛ خروجِ اجباری
+  سوکتِ همان دستگاه را قطع می‌کند و رویداد `session:revoked` را می‌فرستد.
+
+### Changed
+- **قاعدهٔ یک‌ماهه.** دستگاهی که کمتر از ۳۰ روز از ورودش گذشته باشد نمی‌تواند
+  دستگاه‌های دیگر را خارج کند؛ دستگاه قدیمی‌تر می‌تواند.
+  پاسخِ سرور (`canRevokeOthers`) مرجع است، پس دکمه و endpoint نمی‌توانند با هم
+  اختلاف پیدا کنند. مقدار با `SESSION_REVOKE_COOLDOWN_DAYS` تنظیم می‌شود.
+
+### Verified
+`npm run lint`, `npm run build` (root) and `nest build` (backend) pass. The
+live socket/cooldown run passed 17/17 before the working tree was restored; it
+was not re-run afterwards because local Postgres was not running.
+
 ## [1.5.2] - 2026-10-24
 
 ### Changed

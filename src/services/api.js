@@ -182,6 +182,24 @@ export function logout() {
   fetch(`${BASE}/auth/logout`, { method: 'POST', headers }).catch(() => {});
 }
 
+// ── Active sessions ──────────────────────────────────
+export function listSessions() {
+  return request('GET', '/auth/sessions');
+}
+
+export function revokeSession(id) {
+  return request('DELETE', `/auth/sessions/${id}`);
+}
+
+// Sessions that signed in after this device last acknowledged the list.
+export function listSecurityEvents() {
+  return request('GET', '/auth/security-events');
+}
+
+export function acknowledgeSecurityEvents() {
+  return request('POST', '/auth/security-events/ack');
+}
+
 // ── Users ─────────────────────────────────────────────
 export function fetchUsers() {
   return request('GET', '/users');

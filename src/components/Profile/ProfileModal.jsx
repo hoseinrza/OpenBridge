@@ -24,7 +24,7 @@ function joinedAt(dateStr) {
   return new Date(dateStr).toLocaleDateString('fa-IR', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-export default function ProfileModal({ user, isOwn, onMessage, onClose, onSaved }) {
+export default function ProfileModal({ user, isOwn, onMessage, onSessions, onClose, onSaved }) {
   const [editing,  setEditing]  = useState(false);
   const [firstName, setFirstName] = useState(() => nameParts(user).firstName);
   const [lastName,  setLastName]  = useState(() => nameParts(user).lastName);
@@ -265,6 +265,13 @@ export default function ProfileModal({ user, isOwn, onMessage, onClose, onSaved 
                 <i className="fas fa-triangle-exclamation" aria-hidden="true" />
                 {error}
               </div>
+            )}
+
+            {isOwn && onSessions && (
+              <button type="button" className="btn btn-secondary profile-edit-btn" onClick={onSessions}>
+                <i className="fas fa-shield-halved" aria-hidden="true" />
+                دستگاه‌های فعال
+              </button>
             )}
 
             {isOwn && (
