@@ -276,9 +276,9 @@ jobs:
       DATABASE_URL: postgresql://openbridge:openbridge@localhost:5432/openbridge
       JWT_SECRET: ci-only-secret-at-least-32-characters-long-0000
       CONTENT_KEY: Y2ktb25seS1jb250ZW50LWtleS0zMi1ieXRlcy0wMDA=
-      NODE_ENV: test
+      NODE_ENV: development
       PORT: '3000'
-      EXPO_PUBLIC_API_URL: http://10.0.2.2:3000/api
+      EXPO_PUBLIC_API_URL: http://127.0.0.1:3000/api
       EXPO_NO_TELEMETRY: '1'
       CI: true
     steps:
