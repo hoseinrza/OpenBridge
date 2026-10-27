@@ -389,6 +389,11 @@ jobs:
             ${{ runner.temp }}/maestro-debug
             ${{ runner.temp }}/emulator-failure.png
             ${{ runner.temp }}/hierarchy.xml
+            ${{ runner.temp }}/hierarchy-launch.xml
+            ${{ runner.temp }}/hierarchy-settled.xml
+            ${{ runner.temp }}/anr-dropbox.txt
+            ${{ runner.temp }}/anr-logcat.txt
+            ${{ runner.temp }}/relaunch.log
             ${{ runner.temp }}/launch.png
             ${{ runner.temp }}/launch.log
             ${{ runner.temp }}/adb-install.log

@@ -102,6 +102,7 @@ per-call key generated and held by the API, delivered only to web clients.
 | `npx jest --ci --runInBand` (mobile), after the profile editor + app root | **PASS 16 suites / 128 tests** | Was 11 suites / 96 tests at the baseline audit. New since: `edit-profile-screen.test.js` (11), `app-root.test.js` (1), `chat-attachment.test.js` (11), `use-chat-attachment.test.js` (6), and two cases in `login-screen.test.js` that pin each step's primary action outside the scrollable card. |
 | Attachment contract against a running API | **PASS** | Two throwaway accounts, a real JPEG and a real PDF uploaded through `POST /uploads` (server answered `IMAGE` 294 B / `FILE` 45 B), then `message:send` with mobile's exact payload for each: both acked `{ok:true,…}` and both rows came back with the name, size and signed URL stored. The accounts, their conversation, their messages and the two files were deleted afterwards. |
 | `npx expo export --platform android` (mobile), with the attachment pickers and the login footer | **PASS** | Hermes `index-2e4c824f0f0fd69c48901514c9781606.hbc` (4.8 MB) plus assets. Proves both pickers, the composer tray and the pinned actions reach the bundle, not that they render correctly on a device. `expo prebuild --platform android --no-install` also runs clean with the new `expo-image-picker` plugin entry. |
+| `npm audit --omit=dev --audit-level=high` (root **and** backend), re-run 2026-10-27 | **PASS** | The registry answers again, so the newest locally verified production audit is no longer the 1.10.2-era one. Root: `found 0 vulnerabilities`. Backend: exits 0 with **6 moderate** and nothing high or critical. The 4 high and 1 critical left by the 2026-10-25 upgrade have come off with no dependency change in this repository — `@nestjs/core` is still `^10.0.0` — which is why both `2c` legs report green on CI rather than merely being tolerated. Advisory counts are npm's data, not this repo's state, so they are re-measured rather than recalled. |
 
 ### CI state on `main`
 
@@ -118,7 +119,8 @@ installed on this machine, and the job log plus the artifact zip answer
   Caveat on the audit: `2c` is declared with `continue-on-error: true`
   (`.github/workflows/ci.yml:190`), so its `success` conclusion is not evidence
   that `npm audit --omit=dev --audit-level=high` exited 0 — a failing audit would
-  still show green here. It closes nothing by itself.
+  still show green here. It closes nothing by itself, which is why the same
+  command was re-run locally on 2026-10-27 (§3 table): both legs exit 0.
 - **Red (2, one cause):** `2e · Mobile E2E (Android emulator)` (check-run
   `122160079214`) fails at `Run Maestro on the emulator`; `CI gate` fails because
   it needs that job. The deploy job is `skipped`, as it must be while the gate is
@@ -273,9 +275,12 @@ Verified after the upgrade:
 - The remaining four are the transitive copies that these two roots pull in.
 
 Re-check both when Nest 11 is adopted. The registry audit endpoint answered
-`ECONNRESET` on the last two attempts of this session (2026-10-25T15:22Z and
-15:23Z), so the "after" numbers above are from the verified run earlier the same
-day; the installed versions in the lockfile back them up.
+`ECONNRESET` on the last two attempts of the 2026-10-25 session (15:22Z and
+15:23Z), so the "after" numbers above came from the verified run earlier that day.
+They were re-measured on 2026-10-27 with the registry reachable: `npm audit
+--omit=dev --audit-level=high` still exits 0 in `backend` with the same 6 moderate,
+and still 0 at the root — so the two accepted roots above are the whole remaining
+list, not a snapshot that has since gone stale.
 
 ### 5.2 Android Maestro E2E (four causes: three proven gone on the device, the fourth fixed in source)
 
@@ -328,7 +333,7 @@ The test was checked in both directions, not just green-once: with the wrapper
 removed from `App.js` it fails with the emulator's own message —
 `No safe area value available. Make sure you are rendering `<SafeAreaProvider>`
 at the top of your app.` — and with the fix in place the whole suite passes
-(14 suites, 109 tests at that commit; 16 suites / 126 tests as of 1.13.0). That
+(14 suites, 109 tests at that commit; 16 suites / 128 tests as of 1.13.0). That
 is as close to a device as this machine gets; it is still not a device.
 
 Claimed earlier in this document, and wrong: that cause 1 was *the* root cause
@@ -828,7 +833,7 @@ mobile rows are 1.13.0's; the CI rows are `c297ee9`'s run.
 | Mobile bundle | `npx expo export --platform android` | PASS (Hermes `index-2e4c824f0f0fd69c48901514c9781606.hbc`, 4.8 MB) |
 | Local API | `GET /api/health/ready` direct and through the Vite proxy | 200 `{status:'ok',db:'up'}` |
 | Web dev shell | `GET http://127.0.0.1:5173/` | 200 with `<div id="root">` |
-| Dependency audit | `npm audit --omit=dev --audit-level=high` (root) | **blocked**: `ECONNRESET` from the npm registry; no dependency changed since the clean 1.10.2 audit |
+| Dependency audit | `npm audit --omit=dev --audit-level=high` (root, then `backend`) | **PASS** on 2026-10-27, re-run from this machine now that the registry answers: root `found 0 vulnerabilities`, backend exits 0 with 6 moderate and nothing high or critical. Supersedes the `ECONNRESET` row this table carried since 1.12.1 |
 | Docker compose smoke | — | **not run**: no Docker on this machine |
 | Android Maestro | `bash .github/scripts/mobile-e2e-run.sh` in CI | **STILL RED** on `main`: the seeder and install steps pass, and the launch crash it reported (`No safe area value available`) is now fixed in source with a regression test. Not re-run yet - this machine has no emulator (§5.2) |
 | CI on `main` | `check-runs` API | `40490417370` on `7ffd0a4`: 11 green, `2e` + `CI gate` red, deploy `skipped` |
@@ -836,7 +841,7 @@ mobile rows are 1.13.0's; the CI rows are `c297ee9`'s run.
 ### Gate decision
 
 **The Beta gate is not met.** The engineering work for Phase 1 is complete and
-every locally runnable check is green, but four criteria remain open, and none of
+every locally runnable check is green, but three criteria remain open, and none of
 them can be closed by writing more code in this environment:
 
 1. **Criterion 1 (core journeys on both clients)** — mobile now sends
@@ -861,16 +866,16 @@ them can be closed by writing more code in this environment:
    card below the fold. A reachability flaw for a real finger as well as for
    Maestro, so the action is now pinned outside the scroller, by two tests that
    were red first. One green run still closes the criterion (§5.2).
-4. **Criterion 4 (no unresolved high/critical finding)** — CI's `2c` shows green
-   on `main`, but it is a `continue-on-error` job, so that conclusion is not
-   evidence (§3). The last locally verified production audit is the clean
-   1.10.2-era one in §5.1; the registry was unreachable from here on later
-   attempts.
 
-Criteria 5–9 are met: development OTP works without SMS and production refuses
-to issue codes; encryption claims match the server-held model; limitations,
-setup, backup/restore and rollback are documented; a release checklist exists;
-and no Beta or production deployment has been presented as ready.
+Criteria 4–9 are met: there is no unresolved high or critical production finding,
+and this one is now measured rather than assumed — `npm audit --omit=dev
+--audit-level=high` exits 0 both at the root (0 vulnerabilities) and in `backend`
+(6 moderate, on paths this app does not reach), so the green `2c` conclusion is no
+longer the only thing supporting the claim (§3, §5.1). Development OTP works
+without SMS and production refuses to issue codes; encryption claims match the
+server-held model; limitations, setup, backup/restore and rollback are documented;
+a release checklist exists; and no Beta or production deployment has been presented
+as ready.
 
 What would close the gate, in order:
 
@@ -879,13 +884,12 @@ What would close the gate, in order:
    reached on a device — the reaction tray, the profile tabs, and a composer that
    now carries a paperclip. Whatever it reports next arrives as an annotation with
    the device's own bounds, so a fifth cause would be named rather than inferred.
-2. Re-run the dependency audit from a network that reaches the registry.
-3. Give the profile avatar its picker. `expo-image-picker` arrived with
+2. Give the profile avatar its picker. `expo-image-picker` arrived with
    attachments, so this is UI work only; then look at the profile editor, the
    attachment tray and the reply/edit/delete tray on a device or emulator.
-4. Perform one real two-party call on a staging stack with LiveKit ports open,
+3. Perform one real two-party call on a staging stack with LiveKit ports open,
    and record the result.
-5. Then, and only then, run the Beta acceptance journeys on the deployed Beta
+4. Then, and only then, run the Beta acceptance journeys on the deployed Beta
    environment and perform the smoke checks in `BETA_OPERATIONS.md` §7.
 
 Stop point: this is the end of Phase 1. No Phase 2 work, no public deployment,

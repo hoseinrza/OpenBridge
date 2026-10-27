@@ -243,7 +243,7 @@ the stage before it, so the slow jobs never start on code the fast jobs reject:
 | 2 · tests | `backend-e2e` | The 41 security cases plus the wider e2e suite (125 cases) pass against real PostgreSQL |
 | 2 · tests | `mobile-tests` | Jest + RNTL mobile behavior suite |
 | 2 · tests | `mobile-e2e` | Maestro on an API-34 emulator against a real PostgreSQL + NestJS backend (main, mobile PRs, nightly) |
-| 2b | `dependencies` | `npm audit` findings (reports, never blocks) |
+| 2c | `dependencies` | `npm audit` findings (reports, never blocks) |
 | 3 · artefacts | `web-build`, `mobile-bundle` | The Vite bundle builds · the Expo Hermes bundle builds |
 | 4 · ship path | `deploy-dry-run` | Both Docker images build, `docker compose up` serves the SPA, `/api/health/ready` answers **through nginx** (database included), and Socket.IO handshakes |
 | — | `ci-gate` | One required check for branch protection |
@@ -281,7 +281,9 @@ out the previous commit, rebuilds, and records the bad SHA in
 > the device's own hierarchy (testIDs, bounds, `mInputShown`) so the next cause,
 > if any, is named rather than inferred. Read `2c · Dependency audit`
 > with care: it is declared `continue-on-error`, so its green conclusion is not
-> evidence. See [docs/engineering/BETA_READINESS.md](docs/engineering/BETA_READINESS.md)
+> evidence by itself — the same command was re-run locally on 2026-10-27 and both
+> the root and `backend` audit exited 0 (6 moderate findings in the backend, none
+> high or critical). See [docs/engineering/BETA_READINESS.md](docs/engineering/BETA_READINESS.md)
 > §3 and §5.2.
 > The Docker compose smoke stage passes. `Deploy` is `skipped` because
 > `vars.DEPLOY_ENABLED` is not `true`; it stays inert until the SSH secrets
