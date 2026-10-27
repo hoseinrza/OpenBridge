@@ -520,6 +520,35 @@ Operational limits that remain, with the reason:
 - No Beta environment is deployed. The roadmap's Beta gate is assessed in §6 and
   the acceptance run; this section only makes the procedure repeatable.
 
+### 5.11 `CONTENT_KEY` setup state (2026-10-27)
+
+The at-rest key is now configured in every environment this machine can reach,
+and one claim in `README.md` was checked against the code rather than repeated:
+
+| Environment | Key | Verified how |
+|-------------|-----|--------------|
+| Local dev API (`backend/.env`) | already present, base64 → 32 bytes, canonical | `loadContentKey` accepts it; a live `ContentCrypto` round-trip sealed text to an `obx1.<iv>.<tag>.<ct>` envelope containing no plaintext, reopened it, threw on the wrong conversation id, and round-tripped a file with the `OBX1` magic |
+| Local compose stack (root `.env`) | created, set to the **same** value as `backend/.env` | written from `.env.example` with every `change-this` placeholder replaced; gitignored (`git check-ignore` → `.gitignore:24`). The stack itself was **not** started: no Docker on this machine |
+| CI | fixed CI-only value in `.github/workflows/ci.yml` | unchanged from 1.10.9; the job database is disposable |
+| VPS / Beta | not set | `deploy.sh` `ensure_env` generates `openssl rand -base64 32` on a fresh install, and on an existing `.env` appends one only when the line is absent — it never rotates. Reaching the server needs SSH secrets this machine does not have, so this remains open |
+
+`npm run test` on `backend/test/content-crypto.test.cjs` → 8/8, including the
+case that a 32-byte base64 key is the only accepted form.
+
+Claim correction: `README.md` says the decoded length is "checked at startup".
+That is true of `loadContentKey` (`backend/src/common/content-crypto.ts`), which
+`ContentCrypto` calls during module construction, and which also rejects
+non-canonical base64 — not of `env.ts`, which only requires the variable to be
+non-empty. A placeholder value therefore fails at boot instead of sealing rows
+under a key derived from garbage. `BETA_OPERATIONS.md` §2.1 records the
+key-per-environment table and the backup rule: a `pg_dump` restored without its
+matching `CONTENT_KEY` boots and answers, and shows every sealed message as
+undecryptable.
+
+What is **not** closed by this: production `prisma db push`, the legacy envelope
+hand-back that waits on a key-holding web device, and any on-device check. Key
+rotation and recovery remain deliberately absent (§4).
+
 ---
 
 ## 6. Beta acceptance criteria
@@ -599,6 +628,7 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Phase 1 acceptance run | Web lint/build PASS; E2EE gate 17/17; backend e2e 113/113; mobile Jest 96/96; Android export PASS; readiness 200 direct and through the Vite proxy. Audit blocked by registry `ECONNRESET`; compose smoke and Maestro unavailable here; CI not triggered for this branch. Gate remains closed: §9. |
 | 2026-10-26 | Merge `beta/phase-1` to `main` | Commit `40224f6`, product version 1.10.11; all checks pass locally; CI pending. §9 |
 | 2026-10-26 | Fix Maestro E2E `NODE_ENV` | Set `NODE_ENV=development` in `.github/workflows/ci.yml`; seeder now works. Expect green on next run. §5.2 |
+| 2026-10-27 | `CONTENT_KEY` setup | Local `backend/.env` key verified by a live seal/open round-trip; root `.env` created for the compose stack with the same value; `deploy.sh` generation and the never-rotate rule confirmed from source; `content-crypto.test.cjs` 8/8. README's "checked at startup" claim traced to `loadContentKey`, not `env.ts`. VPS key and compose run still unverified. §5.11 |
 Next update: after a CI run exercises the Maestro instrumentation with the fix
 (new commit after `d496992`).
 
