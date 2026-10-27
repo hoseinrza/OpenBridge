@@ -45,7 +45,9 @@
 - 🔤 Initials avatar whenever a user has no photo — the colour is derived from their name
 - 🌗 Light and dark themes, RTL Persian UI, layouts checked down to 320 px
 - 🔄 Revocable login sessions with rotating refresh tokens
-- 📱 Expo React Native app: login, chat list, chat, contacts, new group
+- 📱 Expo React Native app: login, chat list, chat, contacts, new group, voice
+  messages, calls and profile editing — it does not send image or file
+  attachments yet, so a profile avatar stays web-set
 
 ### What is deliberately not here
 

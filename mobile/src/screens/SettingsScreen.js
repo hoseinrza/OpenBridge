@@ -12,7 +12,7 @@ const THEME_OPTIONS = [
   { value: 'dark', label: 'تیره' },
 ];
 
-export default function SettingsScreen() {
+export default function SettingsScreen({ navigation }) {
   const { currentUser, logout } = useAuth();
   const { themeMode, setThemeMode } = useSettings();
   const { colors } = useAppTheme();
@@ -64,15 +64,28 @@ export default function SettingsScreen() {
       </View>
 
       <Text style={styles.sectionTitle}>حساب</Text>
-      <Pressable
-        onPress={confirmLogout}
-        accessibilityRole="button"
-        accessibilityLabel="خروج از حساب"
-        style={({ pressed }) => [styles.group, styles.logout, pressed && styles.rowPressed]}
-      >
-        <FontAwesome6 name="right-from-bracket" size={16} color={colors.danger} />
-        <Text style={styles.logoutText}>خروج از حساب</Text>
-      </Pressable>
+      <View style={styles.group}>
+        <Pressable
+          onPress={() => navigation?.navigate?.('EditProfile')}
+          accessibilityRole="button"
+          accessibilityLabel="ویرایش پروفایل"
+          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+        >
+          <FontAwesome6 name="pen-to-square" size={16} color={colors.text2} />
+          <Text style={styles.rowLabel}>ویرایش پروفایل</Text>
+          <FontAwesome6 name="chevron-left" size={13} color={colors.text3} />
+        </Pressable>
+
+        <Pressable
+          onPress={confirmLogout}
+          accessibilityRole="button"
+          accessibilityLabel="خروج از حساب"
+          style={({ pressed }) => [styles.row, styles.rowDivider, pressed && styles.rowPressed]}
+        >
+          <FontAwesome6 name="right-from-bracket" size={16} color={colors.danger} />
+          <Text style={[styles.rowLabel, styles.logoutText]}>خروج از حساب</Text>
+        </Pressable>
+      </View>
     </ScrollView>
   );
 }
@@ -118,13 +131,6 @@ function makeStyles(colors) {
     rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
     rowPressed: { opacity: 0.7 },
     rowLabel: { ...navFonts.medium, fontSize: type.base, color: colors.text1, flex: 1, textAlign: 'right' },
-    logout: {
-      flexDirection: 'row-reverse',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: spacing.sm,
-      paddingVertical: spacing.md,
-    },
     logoutText: { ...navFonts.medium, fontSize: type.base, color: colors.danger },
   });
 }

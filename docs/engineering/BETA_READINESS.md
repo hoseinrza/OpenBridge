@@ -1,8 +1,9 @@
 # OpenBridge — Beta Readiness Baseline
 
 Date: 2026-10-27
-Commit: `8be1651` (`main`, product version 1.10.12) — this batch adds Kavenegar
-OTP delivery (1.11.0) and corrects §5.2 from the CI run that followed it
+Commit: `7ffd0a4` (`main`, product version 1.11.0) — this batch adds the mobile
+profile editor (1.12.0), fixes the launch crash the `2e` annotations revealed
+(1.12.1), and records the run after Kavenegar
 Author: engineering audit for the Phase 1 roadmap
 
 This document is the Phase 1 Task 1 deliverable. It records what exists,
@@ -96,26 +97,41 @@ per-call key generated and held by the API, delivered only to web clients.
 | `npm audit --omit=dev --audit-level=high` (backend) | **PASS** after upgrade | Baseline was 11 findings (1 critical, 4 high, 6 moderate). After `bcrypt@6`, `multer@2.5.0` and the `body-parser`/`qs` overrides the high/critical count is 0; 6 moderate advisories remain on paths this app does not use (§5.1). |
 | Docker compose smoke | **NOT RUN** | No Docker on this machine. Last CI run's `4 · Docker images + compose smoke test` job passed. |
 | nginx security headers | **NOT RUN locally** | Added in `nginx.conf` for Phase 1.5; the compose step now asserts `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and no version banner on `/` and `/api/health`. Needs a CI run. |
-| Maestro Android E2E | **STILL RED** | Causes 1 and 2 are fixed (`NODE_ENV=development`, then the line-by-line `script:` problem). Run `40480886644` fails at `Run Maestro on the emulator`: the app process is not alive 5 s after launch and the flow never sees the login screen. See §5.2. |
+| Maestro Android E2E | **STILL RED** (next run decides) | All three causes are now identified and fixed in source: `NODE_ENV=development` (`d496992`), the line-by-line `script:` problem (`4601b93`), and the launch crash itself — `App.js` rendered no `SafeAreaProvider`, so `CallOverlay` threw on the first frame (`7ffd0a4` run annotations, fixed in 1.12.1). The fix is proven only by a unit test that reproduces the library's throw rule, not by a device: no emulator here. See §5.2. |
 | `npm run test:e2e` (backend), after the SMS provider | **PASS 125/125** (25.4 s) | Was 113/113. The 12 new cases are `backend/test/sms-provider.test.cjs`: receptor normalization, masking, `verify/lookup` vs `sms/send`, gateway-failure handling with no leaked number/key/body, the three `AuthService` delivery rules and the three boot rules. `SMS_PROVIDER` defaults to `none`, so no existing case changed meaning. |
+| `npx jest --ci --runInBand` (mobile), after the profile editor + app root | **PASS 14 suites / 109 tests** (8.1 s) | Was 11 suites / 96 tests at the baseline audit. New since: the settings/profile/attachment-era suites, `edit-profile-screen.test.js` (11 cases) and `app-root.test.js` (1). |
+| `npx expo export --platform android` (mobile), with the profile editor and the root fix | **PASS** | Hermes `index-06755c8001bce131920a7c335baf2bae.hbc` (4.79 MB) plus assets. Proves the new screen and the `SafeAreaProvider` wrapper reach the bundle, not that they render correctly on a device. |
 
 ### CI state on `main`
 
-Latest run read here: `40480886644` on `8be1651` (2026-10-27), via the public
-`commits/<sha>/check-runs` and `actions/jobs/<id>` APIs. `gh` is not installed on
-this machine, and the job log plus the artifact zip answer `403`/`401` without a
-token, so check conclusions, step conclusions and **annotations** are the evidence
-available to an unauthenticated agent.
+Latest run read here: `40490417370` on `7ffd0a4` (2026-10-27), via the public
+`commits/<sha>/check-runs` and `check-runs/<id>/annotations` APIs. `gh` is not
+installed on this machine, and the job log plus the artifact zip answer
+`403`/`401` without a token, so check conclusions, step conclusions and
+**annotations** are the evidence available to an unauthenticated agent.
 
 - Green (11): change detection, web lint, backend schema/typecheck, backend e2e,
   E2EE gate, dependency audit (root and backend), mobile unit tests, web build,
   mobile bundle, Docker compose smoke.
-- **Red (2, one cause):** `2e · Mobile E2E (Android emulator)` fails at step 18,
+  Caveat on the audit: `2c` is declared with `continue-on-error: true`
+  (`.github/workflows/ci.yml:190`), so its `success` conclusion is not evidence
+  that `npm audit --omit=dev --audit-level=high` exited 0 — a failing audit would
+  still show green here. It closes nothing by itself.
+- **Red (2, one cause):** `2e · Mobile E2E (Android emulator)` fails at
   `Run Maestro on the emulator`; `CI gate` fails because it needs that job. The
   deploy job is `skipped`, as it must be while the gate is red.
-- Inside job `2e`, steps 6-9 now pass: the backend builds, boots, answers
-  `health/ready` and the seeder creates the E2E users. The failure is the app on
-  the emulator, not the pipeline around it (§5.2).
+- Inside job `2e`, the backend builds, boots, answers `health/ready`, the seeder
+  creates the E2E users and the APK installs. The failure is the app on the
+  emulator, not the pipeline around it (§5.2).
+- The annotations for that run carry the crash this batch fixes, verbatim:
+  `app process not running five seconds after launch` with
+  `E ReactNativeJS: { [Error: No safe area value available. Make sure you are
+  rendering `<SafeAreaProvider>` at the top of your app.` and a `componentStack`
+  that names `CallOverlay` inside `CallProvider` → `SocketProvider` →
+  `AuthProvider` → `AppShell` → `SettingsProvider` → `App`, then
+  `Attempt 1: [Failed] auth-and-chat (24s) (Assertion is false: <the login
+  screen title> is visible)`. The instrumentation added last batch did exactly
+  what it was designed to do: the reason reached this machine without a token.
 
 ---
 
@@ -138,13 +154,16 @@ available to an unauthenticated agent.
 - Web client: login wizard, chat list, chat, groups, profile, settings, theme,
   contacts paste flow, attachments, voice messages, calling.
 - Mobile client: login wizard, chat list, chat, groups, contacts import,
-  settings/theme, locked state for legacy-encrypted chats, calling UI (mobile
-  cannot join encrypted calls).
+  settings/theme, profile editing (name, handle, bio), locked state for
+  legacy-encrypted chats, calling UI (mobile cannot join encrypted calls).
 
 ### Implemented, but not verified in this audit
 
-- Android bundle and on-device behavior: bundle is green in CI; Maestro is
-  expected to pass after fixing `NODE_ENV`.
+- Android bundle and on-device behavior: the bundle is green in CI; Maestro is
+  still red on `main`, but no longer unexplained — the launch crash it reported
+  is a missing `SafeAreaProvider` at the app root, fixed in this batch and
+  covered by `mobile/__tests__/app-root.test.js`. Whether that was the *last*
+  cause is only knowable from the next run (§5.2).
 - LiveKit calls end to end: no live call was placed in this session; the
   calling architecture document records prior structural verification.
 - Push notifications: not implemented / not in scope of the current tests.
@@ -235,23 +254,47 @@ Re-check both when Nest 11 is adopted. The registry audit endpoint answered
 15:23Z), so the "after" numbers above are from the verified run earlier the same
 day; the installed versions in the lockfile back them up.
 
-### 5.2 Android Maestro E2E (still red: three causes, two fixed)
+### 5.2 Android Maestro E2E (three causes, all three now fixed in source)
 
 The job has failed for three independent reasons, found one at a time because
-each one hid the next. Run `40480886644` on `8be1651` is the evidence.
+each one hid the next. Run `40490417370` on `7ffd0a4` is the evidence for the
+third.
 
 1. **`NODE_ENV` disabled test mode** (fixed in `d496992`). With `test`/`production`
    the seeder got no `testCode`, created no users, and Maestro had nothing to
-   drive. Step 9 (`Seed the E2E users and group`) now passes.
+   drive. The seed step now passes.
 2. **The emulator runner executes `script:` line by line** (fixed in `4601b93`).
    The multi-line summary block died with `Syntax error: end of file unexpected
    (expecting "}")` before Maestro started; the flow now lives in
    `.github/scripts/mobile-e2e-run.sh` and is invoked as one command.
-3. **The app never reaches the login screen** — the current blocker. The job
-   annotations for that run read: `app process not running five seconds after
-   launch` and `Attempt 1: [Failed] auth-and-chat (28s) (Assertion is false:
-   <the login screen title> is visible)`. `CI gate` fails only because it needs
-   this job, so a red run shows two failures, not two problems.
+3. **The app crashed on its first frame** (found in the `7ffd0a4` annotations,
+   fixed in this batch). `mobile/App.js` rendered `SettingsProvider` at the root
+   and no `SafeAreaProvider` anywhere above it, while `CallOverlay` — mounted
+   permanently by `AppShell`, next to the navigator, not behind any screen —
+   calls `useSafeAreaInsets()` unconditionally. In
+   `react-native-safe-area-context` v5 that hook throws when no provider is
+   above it, so the React Native JS thread died before the login screen could
+   paint. That is precisely the pair of symptoms the annotations reported: the
+   process gone within five seconds of `am start`, and the flow's title
+   assertion false. The same crash also made the unauthenticated screen
+   unreachable for a real user, so this was an app bug that CI happened to be
+   the only witness to.
+
+Why no test caught it: `mobile/jest.setup.js` mocks
+`react-native-safe-area-context` with a `useSafeAreaInsets` that returns zeros
+whether or not a provider exists, so every screen test in the repo was blind to
+this class of bug by construction. `mobile/__tests__/app-root.test.js` closes
+that hole by overriding the setup mock with the library's real rule — reading
+the insets with no provider mounted throws — and then rendering the actual
+`App`. It also asserts the login screen is reachable, so a root that paints
+nothing but a provider would not pass either.
+
+The test was checked in both directions, not just green-once: with the wrapper
+removed from `App.js` it fails with the emulator's own message —
+`No safe area value available. Make sure you are rendering `<SafeAreaProvider>`
+at the top of your app.` — and with the fix in place the whole suite passes
+(14 suites, 109 tests). That is as close to a device as this machine gets; it is
+still not a device.
 
 Claimed earlier in this document, and wrong: that cause 1 was *the* root cause
 and that the job was "expected to pass" after `d496992`; and that the emulator
@@ -272,12 +315,14 @@ On this batch the crash reason also leaves the log: the launch smoke and the
 failed flow now emit the `AndroidRuntime`/`ReactNativeJS`/`ActivityTaskManager`
 lines as **annotations**, which - unlike the job log and the artifact zip, both
 of which answer `401`/`403` without a token - are readable through the public
-`check-runs/<id>/annotations` API. That is how cause 3 was found, and it is the
-route to whatever cause 3 turns out to be.
+`check-runs/<id>/annotations` API. That is how cause 3 was found.
 
-Status: **red, and the next run is self-diagnosing.** Locally reproducible? No:
-this machine has no Java, Android SDK or emulator, so the app-under-test cannot
-be started here (see §8).
+Status: **the fix is unproven on a device until the next run.** This machine has
+no Java, Android SDK or emulator, so the app-under-test cannot be started here
+(see §8); what is evidenced is the annotation, the source-level cause, and the
+unit test that reproduces the throw. Other causes may still sit behind this one
+— the same way causes 1 and 2 hid each other — so the next `2e` result is read
+before any claim that the journey passes.
 
 ### 5.3 Documentation/claims drift — corrected
 
@@ -285,8 +330,9 @@ be started here (see §8).
   job is red and links here.
 - `README.md`'s "CI is green" observation (2026-10-21) is replaced with the
   2026-10-25 state: everything green except `2e`/`CI gate`.
-- The roadmap's Phase 1 Task 2 acceptance is still not met while `2e` is red;
-  the instrumentation needs one CI run on a branch that CI watches.
+- The roadmap's Phase 1 Task 2 acceptance is still not met while `2e` is red.
+  The instrumentation claim is now evidence rather than a hope: it ran on
+  `main`, and its annotations are what named the launch crash (§5.2).
 
 ### 5.4 Test and account cleanup (resolved in Phase 1.9)
 
@@ -383,7 +429,7 @@ an on-device observation.
 | Delete for me / for everyone | yes | yes (added here) | Confirmation sheet offers everyone only on an own message; scopes match the server. |
 | Forward | yes | **no** | Needs a target picker that does not exist on mobile. |
 | Search | conversation search | chat-list search only | No in-chat search field on mobile. |
-| Profile | view and edit | view only | Mobile shows name, handle and avatar; no edit form or avatar picker. |
+| Profile | view and edit | view and edit | Mobile now has the editor for name, handle and bio (`mobile/src/screens/EditProfileScreen.js`); avatar picking still needs the attachment picker mobile lacks. |
 | Device/session management, security alerts | yes | **no** | No mobile screen calls `/auth/sessions` or `/auth/security-events`. |
 | Theme | light, dark | system, light, dark | Mobile adds "follow the system". |
 | Calls | audio and video, encrypted media for new calls | audio and video, refuses encrypted calls | The refusal is explicit and documented; the key is server-held. |
@@ -396,11 +442,18 @@ long-press tray. Covered by `mobile/__tests__/use-chat-reply.test.js` and
 the new cases in `mobile/__tests__/chat-screen.test.js` (suite: 96/96). The
 Android JS bundle also exports successfully, and the web lint/build still pass.
 
-Remaining gaps that touch the Beta acceptance list are **sending attachments**
-and **editing the profile from Android**; the rest are conveniences or
-web-only administration. They are recorded here rather than implemented blind,
-because a picker or form cannot be verified without a device and an emulator is
-not available in this environment.
+Editing the profile closed since: `mobile/src/screens/EditProfileScreen.js`
+PATCHes `/users/me` with the fields and the validation rules the web modal
+applies, and the server's reply is stored through `AuthContext.saveProfile`.
+Covered by `mobile/__tests__/edit-profile-screen.test.js` (mobile Jest 108/108),
+with the request and reply shape checked against a running API.
+
+Remaining gaps that touch the Beta acceptance list are **sending attachments on
+Android** — image, file and avatar alike, since all three need the picker that
+is not installed — and that **no mobile screen has been looked at on a device**;
+the rest are conveniences or web-only administration. A picker is a native
+module and no emulator exists in this environment, so both stay recorded rather
+than implemented blind.
 
 `docs/engineering/UI_UX_REDESIGN.md` is stale about group administration (it
 says "absent at the API level"); the API now has participant add/remove, but
@@ -663,18 +716,25 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-27 | CI read without a token | `commits/8be1651/check-runs` → 11 green, `2e` + `CI gate` red; `actions/jobs/122110899448` → step 18 `Run Maestro on the emulator` is the only failing step; its annotations report `app process not running five seconds after launch` and `Attempt 1: [Failed] auth-and-chat (28s)`. Job logs and artifact zips need a token (`403`/`401`). §5.2 |
 | 2026-10-27 | Crash reason made readable from outside the log | `.github/scripts/mobile-e2e-run.sh`: an `annotate` helper emits single-line workflow commands; the launch smoke now carries the `am start` output plus `AndroidRuntime`/`ReactNativeJS`/`ActivityTaskManager` lines, and a failed flow adds the last ten JS/native crash lines. `bash -n` clean. |
 | 2026-10-27 | Kavenegar OTP delivery | `SMS_PROVIDER` + `KAVENEGAR_*` in `env.ts` with three boot rules; `SmsProvider` interface, `KavenegarSmsProvider` (`verify/lookup` or `sms/send`, 15 s timeout, masked logs), `SmsModule` under `AuthModule`, delivery inside `AuthService.requestOtp` with consume-on-failure and a 502. `npm run test:e2e` → 125/125 (12 new cases). Compose, both `.env.example` files, `README.md` and `BETA_OPERATIONS.md` §3 document it. No real gateway call has been made. |
-Next update: after the next `main` run, read the `2e` annotations for the launch
-crash reason; and once real Kavenegar credentials exist, one signed-in OTP round
-trip on a device.
+| 2026-10-27 | Mobile profile editor | `mobile/src/screens/EditProfileScreen.js` — name, handle and bio, with the phone number shown as identity rather than an input; reached from Settings → ویرایش پروفایل. `AuthContext.saveProfile` stores the server's reply instead of merging locally. Mobile Jest 108/108; `PATCH /users/me` exercised against a running API (200 with a recomputed `displayName`, empty `lastName` clears it, 400 for a name holding a digit). Never rendered on a device. §5.7 |
+| 2026-10-27 | Launch crash found in the annotations | `commits/7ffd0a4/check-runs` → 11 green, `2e` + `CI gate` red (run `40490417370`, job `122142965122`). `check-runs/122142965122/annotations` → `app process not running five seconds after launch` carrying `E ReactNativeJS: { [Error: No safe area value available...` with a `componentStack` naming `CallOverlay` inside `CallProvider` → `SocketProvider` → `AuthProvider` → `AppShell` → `SettingsProvider` → `App`, plus `Attempt 1: [Failed] auth-and-chat (24s)`. Log and artifact still `403`/`401`. §5.2 |
+| 2026-10-27 | SafeAreaProvider added at the app root | `mobile/App.js` wraps `SettingsProvider` in `SafeAreaProvider`; `mobile/__tests__/app-root.test.js` overrides the `jest.setup.js` mock with the library's real throw rule and renders the actual `App`. Checked in both directions: removing the wrapper makes that test fail with the emulator's own message, restoring it gives 14 suites / 109 tests green and a `expo export --platform android` PASS. The device run is still pending. §5.2 |
+Next update: read the `2e` annotations of the run after this batch lands — the
+crash cause is fixed in source but the next run decides whether a fourth cause
+was hiding behind it. Then mobile attachment sending: `uploadFile` already posts
+to `POST /uploads` and voice messages already use it, so the missing piece is a
+picker (`expo-image-picker` is not in `mobile/package.json`), which also unblocks
+the avatar.
 
 ---
 
-## 9. Phase 1 acceptance run and gate decision (updated 2026-10-26)
+## 9. Phase 1 acceptance run and gate decision (updated 2026-10-27)
 
-Every command below was run on commits `cde3087` (initial run, version 1.10.10)
+The commands below were run on commits `cde3087` (initial run, version 1.10.10)
 and `d496992` (merged `beta/phase-1`, version 1.10.11) on this machine, against
-the local PostgreSQL. Only this report and the version/changelog changed
-afterwards.
+the local PostgreSQL. The mobile, Maestro and CI rows have since been refreshed
+with this batch's runs (version 1.12.x); every other row is still the
+`d496992` observation, and §3 carries the newest number for each check.
 
 | Check | Command | Result |
 |-------|---------|--------|
@@ -684,14 +744,14 @@ afterwards.
 | Backend schema | `npx prisma validate` | valid |
 | Backend types/build | `npm run build` (inside `test:e2e`) | PASS |
 | Backend e2e | `npm run test:e2e` | 125/125 across 13 files, including production-mode OTP, cross-user access, calling, health, maintenance and the SMS provider rules (113/113 before the gateway was wired) |
-| Mobile unit/component | `cd mobile && npm test -- --ci` | 96/96, 12 suites |
-| Mobile bundle | `npx expo export --platform android` | PASS (Hermes `.hbc`, 4.8 MB) |
+| Mobile unit/component | `cd mobile && npm test -- --ci` | 109/109, 14 suites (was 96/96, 12 suites) |
+| Mobile bundle | `npx expo export --platform android` | PASS (Hermes `index-06755c8001bce131920a7c335baf2bae.hbc`, 4.79 MB) |
 | Local API | `GET /api/health/ready` direct and through the Vite proxy | 200 `{status:'ok',db:'up'}` |
 | Web dev shell | `GET http://127.0.0.1:5173/` | 200 with `<div id="root">` |
 | Dependency audit | `npm audit --omit=dev --audit-level=high` (root) | **blocked**: `ECONNRESET` from the npm registry; no dependency changed since the clean 1.10.2 audit |
 | Docker compose smoke | — | **not run**: no Docker on this machine |
-| Android Maestro | `bash .github/scripts/mobile-e2e-run.sh` in CI | **STILL RED** on `main`: the seeder and the install steps pass now, the app is not alive 5 s after launch (§5.2) |
-| CI for this branch | `check-runs` API | `40480886644` on `8be1651`: 11 green, `2e` + `CI gate` red |
+| Android Maestro | `bash .github/scripts/mobile-e2e-run.sh` in CI | **STILL RED** on `main`: the seeder and install steps pass, and the launch crash it reported (`No safe area value available`) is now fixed in source with a regression test. Not re-run yet - this machine has no emulator (§5.2) |
+| CI on `main` | `check-runs` API | `40490417370` on `7ffd0a4`: 11 green, `2e` + `CI gate` red, deploy `skipped` |
 
 ### Gate decision
 
@@ -700,21 +760,26 @@ every locally runnable check is green, but four criteria remain open, and none o
 them can be closed by writing more code in this environment:
 
 1. **Criterion 1 (core journeys on both clients)** — the mobile client still
-   cannot send attachments and cannot edit the profile (§5.7). These are real
-   journey gaps, not cosmetics. Supported calls have never been exercised end to
-   end: only token minting, lifecycle and webhook paths are proven (§5.8).
-2. **Criterion 2 (all checks in CI)** — the local equivalents pass, but the
-   compose smoke and the CI run for this branch do not exist. Triggering CI
-   requires a pull request or a merge to `main`; the user has authorized pushes
-   to the working branch only.
-3. **Criterion 3 (Maestro or a reviewed replacement)** — still red on `main`.
-   Two of its three causes are fixed and the seeder step passes; what remains is
-   that the app is not alive on the emulator five seconds after launch, which
-   cannot be reproduced here (no Java, Android SDK or emulator). The next run is
-   self-diagnosing: the crash lines now travel as annotations (§5.2).
-4. **Criterion 4 (no unresolved high/critical finding)** — the last clean audit
-   (1.10.2) has no dependency changes after it, but the current audit could not
-   reach the registry, so it is not freshly evidenced.
+   cannot send attachments, and the profile editor that landed has never been
+   seen on a device (§5.7). Both are real journey gaps, not cosmetics. Supported
+   calls have never been exercised end to end: only token minting, lifecycle and
+   webhook paths are proven (§5.8).
+2. **Criterion 2 (all checks in CI)** — no longer about CI existing: pushes to
+   `main` run the full workflow and 11 of 13 checks are green there, including
+   the Docker/compose smoke that cannot run on this machine. It is open only
+   because `2e` is red and `CI gate` therefore fails (§3, §5.2).
+3. **Criterion 3 (Maestro or a reviewed replacement)** — still red on `main`,
+   but no longer blind: all three of its causes are fixed in source, and the
+   launch crash is now named (`No safe area value available` from `CallOverlay`,
+   because `App.js` rendered no `SafeAreaProvider`). The fix is proven by the
+   annotation, by a test that fails without it, and by the bundle - not by a
+   device, which this machine does not have. One green run is what closes this
+   criterion, and it may still uncover a fourth cause (§5.2).
+4. **Criterion 4 (no unresolved high/critical finding)** — CI's `2c` shows green
+   on `main`, but it is a `continue-on-error` job, so that conclusion is not
+   evidence (§3). The last locally verified production audit is the clean
+   1.10.2-era one in §5.1; the registry was unreachable from here on later
+   attempts.
 
 Criteria 5–9 are met: development OTP works without SMS and production refuses
 to issue codes; encryption claims match the server-held model; limitations,
@@ -726,8 +791,8 @@ What would close the gate, in order:
 1. Confirm CI runs on `main` with the Maestro fix and read the results; if the
    job turns green, criterion 3 moves to evidence-in-review.
 2. Re-run the dependency audit from a network that reaches the registry.
-3. Implement mobile attachment sending and mobile profile editing, then verify
-   them on a device or emulator.
+3. Implement mobile attachment sending, which also gives the avatar its picker,
+   then look at the profile editor and the attachments on a device or emulator.
 4. Perform one real two-party call on a staging stack with LiveKit ports open,
    and record the result.
 5. Then, and only then, run the Beta acceptance journeys on the deployed Beta

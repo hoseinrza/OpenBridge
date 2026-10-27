@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import { storage } from '../services/storage';
 import {
   logout as apiLogout, requestOtp as apiRequestOtp,
-  verifyOtp as apiVerifyOtp, completeSignup as apiCompleteSignup, resolveUrl, setUnauthorizedHandler,
+  verifyOtp as apiVerifyOtp, completeSignup as apiCompleteSignup,
+  updateProfile as apiUpdateProfile, resolveUrl, setUnauthorizedHandler,
 } from '../services/api';
 
 const AuthContext = createContext(null);
@@ -52,16 +53,17 @@ export function AuthProvider({ children }) {
     setCurrentUser(null);
   }, []);
 
-  const updateProfile = useCallback((patch) => {
-    setCurrentUser(prev => {
-      const next = { ...prev, ...patch };
-      storage.setUser(next);
-      return next;
-    });
-  }, []);
+  // The server's answer is the only trustworthy profile: it recomputes the
+  // display name from the two name parts and re-signs the avatar URL, so the
+  // stored user is rebuilt the same way a sign-in rebuilds it.
+  const saveProfile = useCallback(async (patch) => {
+    const user = await apiUpdateProfile(patch);
+    await persistUser(user);
+    return user;
+  }, [persistUser]);
 
   return (
-    <AuthContext.Provider value={{ currentUser, loading, requestOtp, verifyOtp, completeSignup, logout, updateProfile }}>
+    <AuthContext.Provider value={{ currentUser, loading, requestOtp, verifyOtp, completeSignup, logout, saveProfile }}>
       {children}
     </AuthContext.Provider>
   );

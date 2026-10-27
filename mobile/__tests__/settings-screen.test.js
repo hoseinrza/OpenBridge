@@ -5,6 +5,7 @@ import SettingsScreen from '../src/screens/SettingsScreen';
 import { SettingsProvider } from '../src/context/SettingsContext';
 
 const mockLogout = jest.fn();
+const mockNavigate = jest.fn();
 const mockAccount = { id: 'me', name: 'من', username: 'me', avatar: null };
 let mockCurrentUser = mockAccount;
 
@@ -24,13 +25,20 @@ beforeEach(async () => {
 async function renderScreen() {
   const view = render(
     <SettingsProvider>
-      <SettingsScreen />
+      <SettingsScreen navigation={{ navigate: mockNavigate }} />
     </SettingsProvider>,
   );
   // The provider reads the stored mode on mount; settle it inside act.
   await act(async () => { await Promise.resolve(); });
   return view;
 }
+
+test('the account section opens the profile editor', async () => {
+  const view = await renderScreen();
+
+  fireEvent.press(view.getByLabelText('ویرایش پروفایل'));
+  expect(mockNavigate).toHaveBeenCalledWith('EditProfile');
+});
 
 test('shows the account facts and the three theme choices', async () => {
   const view = await renderScreen();

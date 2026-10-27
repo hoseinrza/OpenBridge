@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
@@ -20,6 +21,7 @@ import ChatHeaderTitle from './src/components/ChatHeaderTitle';
 import NewGroupScreen from './src/screens/NewGroupScreen';
 import ContactsScreen from './src/screens/ContactsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import EditProfileScreen from './src/screens/EditProfileScreen';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -74,6 +76,7 @@ function RootNavigator() {
           <Stack.Screen name="NewGroup" component={NewGroupScreen} options={{ title: 'گروه جدید' }} />
           <Stack.Screen name="Contacts" component={ContactsScreen} options={{ title: 'مخاطبین' }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'تنظیمات' }} />
+          <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'ویرایش پروفایل' }} />
         </>
       )}
     </Stack.Navigator>
@@ -124,9 +127,16 @@ function AppShell() {
 }
 
 export default function App() {
+  // `useSafeAreaInsets` throws when nothing above it renders a provider, and the
+  // login screen and the always-mounted call overlay both read the insets — so
+  // without this wrapper the app died on its first frame, before any screen
+  // could paint. Jest hides it by mocking this module with a hook that never
+  // throws; the emulator does not.
   return (
-    <SettingsProvider>
-      <AppShell />
-    </SettingsProvider>
+    <SafeAreaProvider>
+      <SettingsProvider>
+        <AppShell />
+      </SettingsProvider>
+    </SafeAreaProvider>
   );
 }
