@@ -1,6 +1,7 @@
 import {
   Injectable, UnauthorizedException, ConflictException,
   NotFoundException, ForbiddenException, ServiceUnavailableException,
+  BadGatewayException, Inject, Logger, Optional,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -13,6 +14,7 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { SignupDto } from './dto/signup.dto';
 import { displayNameOf } from '../common/names';
 import { SessionSockets } from '../common/session-sockets';
+import { SMS_PROVIDER, SmsProvider, maskPhone } from '../common/sms-provider.interface';
 import { signedFileUrl } from '../uploads/file-urls';
 import {
   IS_PRODUCTION, JWT_SECRET, OTP_MAX_ATTEMPTS, OTP_TEST_MODE, OTP_TTL_SECONDS,
@@ -62,10 +64,13 @@ function faDigits(value: number | string) {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
     private sessionSockets: SessionSockets,
+    @Inject(SMS_PROVIDER) @Optional() private sms: SmsProvider | null = null,
   ) {}
 
   async refresh(rawRefreshToken: string, meta: SessionMeta = {}) {
@@ -107,7 +112,11 @@ export class AuthService {
   }
 
   async requestOtp(dto: RequestOtpDto) {
-    if (!OTP_TEST_MODE) {
+    // With no gateway configured there is no way to deliver a code, and
+    // inventing one must never look like a real sign-in path: outside
+    // production the code comes back for testing, in production the endpoint
+    // refuses. Which of the two applies is a deployment choice, not a client one.
+    if (!this.sms && !OTP_TEST_MODE) {
       throw new ServiceUnavailableException('ارسال پیامک هنوز فعال نشده است');
     }
 
@@ -134,6 +143,29 @@ export class AuthService {
         },
       }),
     ]);
+
+    // A gateway that refuses the send is an upstream failure: the row written
+    // above is consumed again, so the number never holds a code nobody received,
+    // and the client is told to retry rather than shown a raw provider error.
+    // A configured gateway and test mode are mutually exclusive by definition
+    // (`OTP_TEST_MODE` requires `SMS_PROVIDER=none`), so a bound provider always
+    // sends for real and the code never travels back to the caller.
+    if (this.sms) {
+      try {
+        await this.sms.sendOtp(phone, code);
+      } catch (error) {
+        await this.prisma.otpCode.updateMany({
+          where: { phone, consumedAt: null },
+          data:  { consumedAt: new Date() },
+        });
+        // Only the failure reason travels to the log: the provider message can
+        // echo the receptor, and a full number never belongs in a log line.
+        this.logger.warn(
+          `OTP delivery failed via ${this.sms.name} for ${maskPhone(phone)}: ${(error as Error)?.message ?? 'error'}`,
+        );
+        throw new BadGatewayException('ارسال پیامک ناموفق بود؛ دوباره تلاش کنید');
+      }
+    }
 
     return {
       ok:               true,

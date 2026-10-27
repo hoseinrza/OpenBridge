@@ -49,20 +49,26 @@
 
 ### What is deliberately not here
 
-- 📵 **No SMS provider is wired in.** Outside production, `POST /auth/otp/request`
-  returns the generated code in its response so you can finish the flow; with
-  `NODE_ENV=production` it answers `503` («ارسال پیامک هنوز فعال نشده است») and
-  creates no code. Sign-up therefore works only in development until a gateway
-  is integrated.
-  The integration point is `AuthService.requestOtp`
-  (`backend/src/auth/auth.service.ts`): the `if (!OTP_TEST_MODE)` branch that
-  currently answers `503` is where the provider call belongs. `OTP_TEST_MODE` is
-  derived only from `NODE_ENV` (`backend/src/config/env.ts`), so no deployment
-  variable can switch the test code back on. When adding a provider: send after
-  the code row is stored, delete or expire that row if delivery fails, and remove
-  `testCode` from the response in the same change. `backend/test/security.e2e.cjs`
-  boots the API with `NODE_ENV=production` and fails if the response ever carries
-  a test code again.
+- 📵 **No SMS gateway is configured in this repository.** Sign-in is OTP-only, and
+  `SMS_PROVIDER` decides what `POST /auth/otp/request` does:
+  - `none` (the default) sends nothing. Outside production the generated code
+    comes back as `testCode` so the flow can be finished by hand; with
+    `NODE_ENV=production` the endpoint answers `503` and stores no code.
+  - `kavenegar` delivers the code through that gateway
+    (`backend/src/common/kavenegar-sms.provider.ts`) and `testCode` never
+    appears in the response, in any environment. `KAVENEGAR_OTP_TEMPLATE`
+    sends through `verify/lookup`, which needs no sender line; without a
+    template the provider uses `sms/send` with `KAVENEGAR_SENDER`.
+  Booting with `kavenegar` and no key, or with neither a template nor a
+  sender, fails at startup instead of at the first sign-in attempt. Test mode
+  comes from `SMS_PROVIDER` as well as from `NODE_ENV`
+  (`backend/src/config/env.ts`), so a development box pointed at a live
+  account never leaks codes to the client. A refused delivery consumes the
+  stored code and answers `502`, and neither the phone number nor the account
+  key reaches a log line or an error message.
+  `backend/test/sms-provider.test.cjs` covers the delivery, masking and boot
+  rules; `backend/test/security.e2e.cjs` still boots the API with
+  `NODE_ENV=production` and fails if a response ever carries a test code again.
 - 🔓 **Content is not end-to-end encrypted.** Sealing happens on the server, with
   a key the server holds, so an operator with `CONTENT_KEY` and the database can
   read every message and file. The trade is deliberate: it buys encryption at rest
@@ -228,7 +234,7 @@ the stage before it, so the slow jobs never start on code the fast jobs reject:
 |-------|-----|----------------|
 | 0 · detect | `changes` | Path detection for PRs; main/schedule/manual always run the mobile E2E |
 | 1 · static | `web-lint`, `backend-check` | ESLint clean · Prisma schema valid · TypeScript compiles |
-| 2 · tests | `backend-e2e` | The 41 security cases plus the wider e2e suite (113 cases) pass against real PostgreSQL |
+| 2 · tests | `backend-e2e` | The 41 security cases plus the wider e2e suite (125 cases) pass against real PostgreSQL |
 | 2 · tests | `mobile-tests` | Jest + RNTL mobile behavior suite |
 | 2 · tests | `mobile-e2e` | Maestro on an API-34 emulator against a real PostgreSQL + NestJS backend (main, mobile PRs, nightly) |
 | 2b | `dependencies` | `npm audit` findings (reports, never blocks) |
@@ -284,8 +290,12 @@ npx prisma db push              # create tables
 npm run start:dev               # → http://localhost:3000/api
 ```
 
-No SMS provider is configured, so in development the OTP response carries the
+`SMS_PROVIDER` defaults to `none`, so in development the OTP response carries the
 code as `testCode` and both clients show it in a «کد تست (فقط محیط توسعه)» box.
+
+With `SMS_PROVIDER=kavenegar` and real credentials the code is sent for real
+and `testCode` disappears from the response - see
+[`backend/.env.example`](backend/.env.example).
 
 #### Calls in local development
 
@@ -358,7 +368,7 @@ open in the provider firewall in addition to the web port.
 split-hosting setup. Point `VITE_API_URL` at the deployed API and set
 `CORS_ORIGINS` on the backend to the frontend origin, otherwise browsers reject
 cross-origin calls in production. Remember that production OTP requests return
-`503` until an SMS gateway is added.
+`503` until `SMS_PROVIDER=kavenegar` is configured with real credentials.
 
 ## 📁 Structure
 

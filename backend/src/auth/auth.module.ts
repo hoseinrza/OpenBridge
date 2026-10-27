@@ -7,10 +7,12 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { JWT_SECRET, JWT_EXPIRES_IN } from '../config/env';
 import { RateLimitGuard } from '../common/rate-limit.guard';
 import { SessionSockets } from '../common/session-sockets';
+import { SmsModule } from '../sms/sms.module';
 
 @Module({
   imports: [
     PassportModule,
+    SmsModule,
     JwtModule.register({
       secret:       JWT_SECRET,
       signOptions: { expiresIn: JWT_EXPIRES_IN },

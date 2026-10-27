@@ -11,7 +11,7 @@ been verified on this machine and what has not.
 | Local development | `backend/docker-compose.yml` (Postgres 16 on :5432, Redis on :6379, not used by code) or any local Postgres | `npm run start:dev` in `backend/` on :3000 | `npm run dev` at the repo root on :5173, proxy `/api` + `/socket.io` | optional LiveKit dev container on :7880–7882 | OTP test codes are returned in the response (§3) |
 | CI | Disposable Postgres service container | Built from `backend/dist`, booted per suite | Vite build (not served except in the compose smoke) | not started | GitHub Actions only |
 | VPS (Docker Compose) | `postgres` container with a volume | `api` container, runs `prisma db push` before boot | `web` (nginx) serves the SPA and proxies API/socket/LiveKit | `livekit` container | Deployed by `deploy.sh`, gated on CI |
-| Render + Vercel (alternative) | Render PostgreSQL | Render web service (`render.yaml`) | Vercel | not included | Production OTP returns 503 until an SMS gateway exists |
+| Render + Vercel (alternative) | Render PostgreSQL | Render web service (`render.yaml`) | Vercel | not included | Production OTP returns 503 until `SMS_PROVIDER=kavenegar` is configured (§3) |
 
 Startup order on the VPS is enforced by compose: Postgres becomes healthy
 (`pg_isready`), then the API starts, runs schema sync and listens on 3000, and
@@ -68,14 +68,43 @@ damage is silent. Store the key outside the database backup (a password manager)
 and confirm before any release that `.env` still holds the value the rows were
 sealed with (§7 checklist item 6).
 
-## 3. Test-mode OTP (no SMS spend)
+## 3. OTP delivery: `SMS_PROVIDER`, and why test mode is not a switch
 
-Outside production, `POST /api/auth/otp/request` returns `testCode` and both
-clients display it. `OTP_TEST_MODE` is derived only from `NODE_ENV`, so no
-deployment variable can switch it on. With `NODE_ENV=production` the endpoint
-answers 503 and creates no code; `backend/test/security.e2e.cjs` boots the app in
-production mode and asserts that. This is the documented integration point for a
-future SMS provider (README, "What is deliberately not here").
+`POST /api/auth/otp/request` behaves differently under two settings, and the
+combination is decided at boot, not per request:
+
+| `SMS_PROVIDER` | outside production | in production |
+|---|---|---|
+| `none` (default) | the code is returned as `testCode`, both clients display it, nothing is sent | 503, and no code row is created |
+| `kavenegar` | delivered through the gateway | delivered through the gateway |
+
+`OTP_TEST_MODE` is `!IS_PRODUCTION && SMS_PROVIDER === 'none'`
+(`backend/src/config/env.ts`). That conjunction is the point: a development box
+pointed at a live Kavenegar account no longer hands codes to the client, while CI
+and local work keep their free test code without spending SMS credit.
+`backend/test/security.e2e.cjs` boots in production mode and still fails if a
+response ever carries `testCode`.
+
+Kavenegar needs three values, and the API refuses to start if they do not add up
+(`backend/test/sms-provider.test.cjs` asserts all three boot rules):
+
+- `KAVENEGAR_API_KEY` — the account key, a secret. It goes in the deployment
+  environment only; like `CONTENT_KEY`, it never belongs in the repository.
+- `KAVENEGAR_OTP_TEMPLATE` — preferred. Sends through `verify/lookup`, needs no
+  sender line, and is the path the telecom content filters leave alone.
+- `KAVENEGAR_SENDER` — only used when no template is set, i.e. the `sms/send`
+  path, which needs a dedicated number to deliver reliably.
+
+Set them in the same `.env` as `CONTENT_KEY` (§2.1); compose passes all four to
+the `api` container. A template registered under a different name than
+`KAVENEGAR_OTP_TEMPLATE` fails at the gateway, and a failed send is handled: the
+stored code is consumed immediately and the endpoint answers 502, so no
+undelivered code stays usable, and the number appears only masked
+(`0912****4567`) in the warning line. The key travels inside the request URL, so
+neither a gateway error nor a fetch error is ever re-thrown with its body.
+
+**No real OTP has been sent from this repository.** The gateway is wired and
+tested against a stub; it has not been pointed at a live account.
 
 ## 4. Schema changes, seeding, reset
 
@@ -105,7 +134,7 @@ Backend e2e runs against a real PostgreSQL and builds first:
 
 ```bash
 cd backend
-npm run test:e2e        # build + 113 cases across 12 files
+npm run test:e2e        # build + 125 cases across 13 files
 ```
 
 The suites set their own `JWT_SECRET`, `CONTENT_KEY` and LiveKit test keys;
@@ -164,7 +193,7 @@ the local volume is disposable by design.
 Pre-release:
 
 1. `npm run lint` and `npm run build` at the root; `npm run test:e2ee`.
-2. `cd backend && npm run test:e2e` (113 cases, includes production-mode OTP,
+2. `cd backend && npm run test:e2e` (125 cases, includes production-mode OTP,
    calling, health and maintenance).
 3. `cd mobile && npm test` and `npx expo export --platform android`.
 4. `npm audit --omit=dev --audit-level=high` at the root and in `backend/`;
@@ -214,6 +243,8 @@ Rollback:
   in CI's `deploy-dry-run` (which has not run for `beta/phase-1`).
 - No emulator or Android device: the mobile flow is CI-only (Maestro has been
   red on `main`; see `BETA_READINESS.md` §5.2).
-- No production deployment, no production database access, and no SMS provider.
+- No production deployment, no production database access, and no live SMS
+  credentials: the Kavenegar path is wired and stub-tested but has never sent a
+  real message (§3).
 - The VPS `deploy.sh` rollback branch has never been run on a real VPS; the
   script is reviewed, not proven.

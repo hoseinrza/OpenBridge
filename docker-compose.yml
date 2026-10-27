@@ -53,6 +53,14 @@ services:
       CLAMAV_PORT: ${CLAMAV_PORT:-3310}
       FILE_URL_SECRET: ${FILE_URL_SECRET:-}
       FILE_URL_TTL_SECONDS: ${FILE_URL_TTL_SECONDS:-604800}
+      # Phone OTP delivery. `none` (the default) issues no SMS: outside
+      # production the code comes back in the response for local testing, and
+      # production answers 503. `kavenegar` needs KAVENEGAR_API_KEY plus either
+      # a template or a sender, and the API refuses to start without them.
+      SMS_PROVIDER: ${SMS_PROVIDER:-none}
+      KAVENEGAR_API_KEY: ${KAVENEGAR_API_KEY:-}
+      KAVENEGAR_SENDER: ${KAVENEGAR_SENDER:-}
+      KAVENEGAR_OTP_TEMPLATE: ${KAVENEGAR_OTP_TEMPLATE:-}
       # LiveKit is optional at boot: leaving these empty answers 503 on call
       # endpoints while chat keeps working. The compose `livekit` service below
       # requires real values, so a production boot cannot silently run without

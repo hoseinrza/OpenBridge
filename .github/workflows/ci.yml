@@ -278,7 +278,10 @@ jobs:
       CONTENT_KEY: Y2ktb25seS1jb250ZW50LWtleS0zMi1ieXRlcy0wMDA=
       NODE_ENV: development
       PORT: '3000'
-      EXPO_PUBLIC_API_URL: http://127.0.0.1:3000/api
+      # 10.0.2.2 is the emulator's alias for the runner host, where the API is
+      # started above. Inside the emulator 127.0.0.1 is the emulated device
+      # itself, so the app baked with this URL can never reach the API.
+      EXPO_PUBLIC_API_URL: http://10.0.2.2:3000/api
       EXPO_NO_TELEMETRY: '1'
       CI: true
     steps:

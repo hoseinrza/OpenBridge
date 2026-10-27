@@ -1,7 +1,8 @@
 # OpenBridge — Beta Readiness Baseline
 
-Date: 2026-10-26
-Commit: `d496992` (`main`, product version 1.10.11)
+Date: 2026-10-27
+Commit: `8be1651` (`main`, product version 1.10.12) — this batch adds Kavenegar
+OTP delivery (1.11.0) and corrects §5.2 from the CI run that followed it
 Author: engineering audit for the Phase 1 roadmap
 
 This document is the Phase 1 Task 1 deliverable. It records what exists,
@@ -26,8 +27,9 @@ It must be updated after every Phase 1 batch with new evidence.
 | Delivery | `.github/workflows/`, `deploy.sh` | GitHub Actions CI, optional SSH CD, compose on a VPS |
 
 Backend modules (`backend/src/app.module.ts`): `auth`, `users`, `messages`,
-`chat` (Socket.IO gateway), `uploads`, `e2ee`, `calls`, plus `common`,
-`config`, `prisma`, `maintenance`.
+`chat` (Socket.IO gateway), `uploads`, `e2ee`, `calls`, plus `common`, `config`,
+`prisma`, `redis` (an in-process map, not a Redis client), `maintenance`.
+`sms` (OTP delivery) is mounted under `auth`, which is its only consumer.
 
 HTTP surface (prefix `/api`):
 
@@ -94,23 +96,26 @@ per-call key generated and held by the API, delivered only to web clients.
 | `npm audit --omit=dev --audit-level=high` (backend) | **PASS** after upgrade | Baseline was 11 findings (1 critical, 4 high, 6 moderate). After `bcrypt@6`, `multer@2.5.0` and the `body-parser`/`qs` overrides the high/critical count is 0; 6 moderate advisories remain on paths this app does not use (§5.1). |
 | Docker compose smoke | **NOT RUN** | No Docker on this machine. Last CI run's `4 · Docker images + compose smoke test` job passed. |
 | nginx security headers | **NOT RUN locally** | Added in `nginx.conf` for Phase 1.5; the compose step now asserts `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and no version banner on `/` and `/api/health`. Needs a CI run. |
-| Maestro Android E2E | **FIXED** | Changed `NODE_ENV=development` in CI for OTP test mode; instrumented step to report SDK/Maestro/APK/install logs before running flows. See §5.2. Latest CI run pending verification. |
+| Maestro Android E2E | **STILL RED** | Causes 1 and 2 are fixed (`NODE_ENV=development`, then the line-by-line `script:` problem). Run `40480886644` fails at `Run Maestro on the emulator`: the app process is not alive 5 s after launch and the flow never sees the login screen. See §5.2. |
+| `npm run test:e2e` (backend), after the SMS provider | **PASS 125/125** (25.4 s) | Was 113/113. The 12 new cases are `backend/test/sms-provider.test.cjs`: receptor normalization, masking, `verify/lookup` vs `sms/send`, gateway-failure handling with no leaked number/key/body, the three `AuthService` delivery rules and the three boot rules. `SMS_PROVIDER` defaults to `none`, so no existing case changed meaning. |
 
 ### CI state on `main`
 
-Latest run `d496992` (2026-10-26):
+Latest run read here: `40480886644` on `8be1651` (2026-10-27), via the public
+`commits/<sha>/check-runs` and `actions/jobs/<id>` APIs. `gh` is not installed on
+this machine, and the job log plus the artifact zip answer `403`/`401` without a
+token, so check conclusions, step conclusions and **annotations** are the evidence
+available to an unauthenticated agent.
 
-- Green: change detection, web lint, backend schema/typecheck, backend e2e,
-  E2EE gate, mobile unit tests, web build, mobile bundle, Docker compose smoke.
-- **Green expected:** `2e · Mobile E2E (Android emulator)` — fixed by setting
-  `NODE_ENV=development` so the OTP seed works; instrumentation now reports
-  install/launch diagnostics before running flows.
-- Previous four `main` runs (on commits like `88be689`) failed because `NODE_ENV`
-  defaulted to `production`, which disabled test mode in the seeder; the script
-  could not create users and Maestro had nothing to drive.
-
-The `2e · Mobile E2E` job is expected to pass on this merge because the root
-cause has been identified and fixed. A fresh CI run will confirm.
+- Green (11): change detection, web lint, backend schema/typecheck, backend e2e,
+  E2EE gate, dependency audit (root and backend), mobile unit tests, web build,
+  mobile bundle, Docker compose smoke.
+- **Red (2, one cause):** `2e · Mobile E2E (Android emulator)` fails at step 18,
+  `Run Maestro on the emulator`; `CI gate` fails because it needs that job. The
+  deploy job is `skipped`, as it must be while the gate is red.
+- Inside job `2e`, steps 6-9 now pass: the backend builds, boots, answers
+  `health/ready` and the seeder creates the E2E users. The failure is the app on
+  the emulator, not the pipeline around it (§5.2).
 
 ---
 
@@ -160,8 +165,10 @@ cause has been identified and fixed. A fresh CI run will confirm.
   both clients; encrypted/legacy-flagged groups are frozen server-side.
 - Contacts matching is an enumeration oracle for any signed-in user, throttled
   but not eliminated.
-- No SMS provider: development OTP is returned as `testCode`; production
-  returns 503. Real-user phone verification is deferred.
+- No SMS credentials: the Kavenegar gateway is implemented and stub-tested, but
+  no account is configured anywhere, so with the default `SMS_PROVIDER=none`
+  development OTP is returned as `testCode` and production returns 503. No real
+  code has ever been delivered to a phone from this codebase.
 - Signed attachment URLs are bearer capabilities until expiry.
 - Redis is declared in compose but unused; `RedisService` is an in-process map.
 - Web stores access and refresh tokens in `localStorage`.
@@ -170,7 +177,10 @@ cause has been identified and fixed. A fresh CI run will confirm.
 
 ### Deferred (documented, not planned for Beta)
 
-- Paid SMS provider integration and real OTP delivery.
+- A paid SMS account and the first real OTP delivery. The provider itself is no
+  longer the missing piece - `SMS_PROVIDER=kavenegar` plus credentials is - but
+  Phase 1 forbids paid services, so nothing has been sent for real and the
+  gateway path has only ever met a stub.
 - A new end-to-end encryption protocol, key verification, multi-device E2EE.
 - Mobile encrypted calls.
 - Multi-instance realtime scaling (shared presence/rate-limit store).
@@ -225,30 +235,49 @@ Re-check both when Nest 11 is adopted. The registry audit endpoint answered
 15:23Z), so the "after" numbers above are from the verified run earlier the same
 day; the installed versions in the lockfile back them up.
 
-### 5.2 Android Maestro E2E (fixed for Beta acceptance)
+### 5.2 Android Maestro E2E (still red: three causes, two fixed)
 
-- Job `2e` was failing on every `main` run. The root cause was `NODE_ENV`
-  defaulting to `production`, which disables OTP test mode. When test mode is off,
-  the seeder cannot create users and Maestro fails immediately.
-- **Fix landed:** changed the mobile E2E env block in `.github/workflows/ci.yml`
-  to set `NODE_ENV=development` instead of `test`, and updated the API URL to
-  `http://127.0.0.1:3000/api`. The seeder now receives `testCode` responses and
-  creates the E2E users.
-- Instrumentation improvements (already landed on `beta/phase-1`):
-  - the step now reports SDK level, Maestro version, `boot_completed` and
-    `adb devices` to the step summary;
-  - a missing APK is an explicit error that lists the output directory;
-  - `adb install` is run explicitly, its full output is echoed, and a non-zero
-    exit annotates `APK install failed` and captures logcat;
-  - a launch smoke test (`am start -n com.openbridge.mobile/.MainActivity`,
-    `pidof`, screenshot, logcat) runs before Maestro, so an install-ok /
-    app-crash case is distinguishable from a flow failure;
-  - `maestro test` now writes `--debug-output` for both attempts;
-  - the artifact upload includes launch screenshot/log, install log, debug
-    output and launch logcat.
-- Status: **expected to pass** on the first run after `d496992`. A CI run will
-  confirm; the old red streak is due to the seeder blocking before Maestro even
-  starts.
+The job has failed for three independent reasons, found one at a time because
+each one hid the next. Run `40480886644` on `8be1651` is the evidence.
+
+1. **`NODE_ENV` disabled test mode** (fixed in `d496992`). With `test`/`production`
+   the seeder got no `testCode`, created no users, and Maestro had nothing to
+   drive. Step 9 (`Seed the E2E users and group`) now passes.
+2. **The emulator runner executes `script:` line by line** (fixed in `4601b93`).
+   The multi-line summary block died with `Syntax error: end of file unexpected
+   (expecting "}")` before Maestro started; the flow now lives in
+   `.github/scripts/mobile-e2e-run.sh` and is invoked as one command.
+3. **The app never reaches the login screen** — the current blocker. The job
+   annotations for that run read: `app process not running five seconds after
+   launch` and `Attempt 1: [Failed] auth-and-chat (28s) (Assertion is false:
+   <the login screen title> is visible)`. `CI gate` fails only because it needs
+   this job, so a red run shows two failures, not two problems.
+
+Claimed earlier in this document, and wrong: that cause 1 was *the* root cause
+and that the job was "expected to pass" after `d496992`; and that the emulator
+API URL should be `http://127.0.0.1:3000/api`. Inside the emulator that address
+is the device itself, so no request could ever reach the API on the runner host —
+it is back to `http://10.0.2.2:3000/api`, the emulator alias for the host.
+
+Instrumentation landed so far (`mobile-e2e-run.sh`, all phases reported
+separately): SDK level, Maestro version, `boot_completed`, `adb devices -l`; a
+missing APK is an explicit error listing the output directory; `adb install`
+output is echoed and a non-zero exit annotates the failure with logcat; a launch
+smoke (`am start -n com.openbridge.mobile/.MainActivity`, `pidof`, screenshot,
+logcat) distinguishes "install ok, app crashes" from "the flow is wrong";
+`maestro test` writes `--debug-output` for both attempts; the artifact includes
+the launch screenshot/log, install log, debug output and launch logcat.
+
+On this batch the crash reason also leaves the log: the launch smoke and the
+failed flow now emit the `AndroidRuntime`/`ReactNativeJS`/`ActivityTaskManager`
+lines as **annotations**, which - unlike the job log and the artifact zip, both
+of which answer `401`/`403` without a token - are readable through the public
+`check-runs/<id>/annotations` API. That is how cause 3 was found, and it is the
+route to whatever cause 3 turns out to be.
+
+Status: **red, and the next run is self-diagnosing.** Locally reproducible? No:
+this machine has no Java, Android SDK or emulator, so the app-under-test cannot
+be started here (see §8).
 
 ### 5.3 Documentation/claims drift — corrected
 
@@ -565,7 +594,8 @@ The Beta gate is met only when all of the following are true and evidenced:
 4. No unresolved critical/high security defect affecting the Beta environment.
    Dependency findings are fixed or explicitly assessed and accepted.
 5. Development OTP works with no SMS spend, and production cannot expose test
-   codes or fall back to test mode.
+   codes or fall back to test mode - including with a gateway configured, since
+   test mode requires `SMS_PROVIDER=none` as well as a non-production `NODE_ENV`.
 6. Encryption claims match implementation: at-rest sealing is stated as such,
    and nothing is labeled E2EE unless it is.
 7. Known limitations, local setup, test configuration, backup/restore and
@@ -627,10 +657,15 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-25 | Phase 1.10 operations | New `docs/engineering/BETA_OPERATIONS.md` (environments, env table, schema/seed/reset, tests, backup/restore, release checklist, rollback); Render and `deploy.sh` now use the readiness route; stale counts/CI status fixed in `README.md`/`DEPLOY.md`. Backup, restore and rollback are documented and source-reviewed, not executed. §5.10 |
 | 2026-10-25 | Phase 1 acceptance run | Web lint/build PASS; E2EE gate 17/17; backend e2e 113/113; mobile Jest 96/96; Android export PASS; readiness 200 direct and through the Vite proxy. Audit blocked by registry `ECONNRESET`; compose smoke and Maestro unavailable here; CI not triggered for this branch. Gate remains closed: §9. |
 | 2026-10-26 | Merge `beta/phase-1` to `main` | Commit `40224f6`, product version 1.10.11; all checks pass locally; CI pending. §9 |
-| 2026-10-26 | Fix Maestro E2E `NODE_ENV` | Set `NODE_ENV=development` in `.github/workflows/ci.yml`; seeder now works. Expect green on next run. §5.2 |
+| 2026-10-26 | Fix Maestro E2E `NODE_ENV` | Set `NODE_ENV=development` in `.github/workflows/ci.yml`; the seeder step does pass now. The "expect green" half of this entry was wrong - see the two 2026-10-27 rows. §5.2 |
 | 2026-10-27 | `CONTENT_KEY` setup | Local `backend/.env` key verified by a live seal/open round-trip; root `.env` created for the compose stack with the same value; `deploy.sh` generation and the never-rotate rule confirmed from source; `content-crypto.test.cjs` 8/8. README's "checked at startup" claim traced to `loadContentKey`, not `env.ts`. VPS key and compose run still unverified. §5.11 |
-Next update: after a CI run exercises the Maestro instrumentation with the fix
-(new commit after `d496992`).
+| 2026-10-27 | Maestro script moved out of `ci.yml` | Commit `4601b93`: `android-emulator-runner@v2` runs each `script:` line in its own `sh`, so the multi-line block died with a syntax error before Maestro started. The flow is `.github/scripts/mobile-e2e-run.sh`, invoked as one command. Also reverts the `127.0.0.1` API URL this document had recommended, back to `10.0.2.2`. |
+| 2026-10-27 | CI read without a token | `commits/8be1651/check-runs` → 11 green, `2e` + `CI gate` red; `actions/jobs/122110899448` → step 18 `Run Maestro on the emulator` is the only failing step; its annotations report `app process not running five seconds after launch` and `Attempt 1: [Failed] auth-and-chat (28s)`. Job logs and artifact zips need a token (`403`/`401`). §5.2 |
+| 2026-10-27 | Crash reason made readable from outside the log | `.github/scripts/mobile-e2e-run.sh`: an `annotate` helper emits single-line workflow commands; the launch smoke now carries the `am start` output plus `AndroidRuntime`/`ReactNativeJS`/`ActivityTaskManager` lines, and a failed flow adds the last ten JS/native crash lines. `bash -n` clean. |
+| 2026-10-27 | Kavenegar OTP delivery | `SMS_PROVIDER` + `KAVENEGAR_*` in `env.ts` with three boot rules; `SmsProvider` interface, `KavenegarSmsProvider` (`verify/lookup` or `sms/send`, 15 s timeout, masked logs), `SmsModule` under `AuthModule`, delivery inside `AuthService.requestOtp` with consume-on-failure and a 502. `npm run test:e2e` → 125/125 (12 new cases). Compose, both `.env.example` files, `README.md` and `BETA_OPERATIONS.md` §3 document it. No real gateway call has been made. |
+Next update: after the next `main` run, read the `2e` annotations for the launch
+crash reason; and once real Kavenegar credentials exist, one signed-in OTP round
+trip on a device.
 
 ---
 
@@ -648,15 +683,15 @@ afterwards.
 | MLS library gate | `npm run test:e2ee` | 17/17 |
 | Backend schema | `npx prisma validate` | valid |
 | Backend types/build | `npm run build` (inside `test:e2e`) | PASS |
-| Backend e2e | `npm run test:e2e` | 113/113 across 12 files, including production-mode OTP, cross-user access, calling, health and maintenance |
+| Backend e2e | `npm run test:e2e` | 125/125 across 13 files, including production-mode OTP, cross-user access, calling, health, maintenance and the SMS provider rules (113/113 before the gateway was wired) |
 | Mobile unit/component | `cd mobile && npm test -- --ci` | 96/96, 12 suites |
 | Mobile bundle | `npx expo export --platform android` | PASS (Hermes `.hbc`, 4.8 MB) |
 | Local API | `GET /api/health/ready` direct and through the Vite proxy | 200 `{status:'ok',db:'up'}` |
 | Web dev shell | `GET http://127.0.0.1:5173/` | 200 with `<div id="root">` |
 | Dependency audit | `npm audit --omit=dev --audit-level=high` (root) | **blocked**: `ECONNRESET` from the npm registry; no dependency changed since the clean 1.10.2 audit |
 | Docker compose smoke | — | **not run**: no Docker on this machine |
-| Android Maestro | — | **fixed**: `NODE_ENV=development` enables test mode; CI run pending |
-| CI for this branch | — | **running**: merged to `main` (commit `d496992`) |
+| Android Maestro | `bash .github/scripts/mobile-e2e-run.sh` in CI | **STILL RED** on `main`: the seeder and the install steps pass now, the app is not alive 5 s after launch (§5.2) |
+| CI for this branch | `check-runs` API | `40480886644` on `8be1651`: 11 green, `2e` + `CI gate` red |
 
 ### Gate decision
 
@@ -672,10 +707,11 @@ them can be closed by writing more code in this environment:
    compose smoke and the CI run for this branch do not exist. Triggering CI
    requires a pull request or a merge to `main`; the user has authorized pushes
    to the working branch only.
-3. **Criterion 3 (Maestro or a reviewed replacement)** — Maestro has failed on
-   every recent `main` run and cannot be reproduced here. `beta/phase-1` carries
-   diagnostics for the next CI run, **now with the `NODE_ENV=development` fix
-   applied**; awaiting confirmation from CI.
+3. **Criterion 3 (Maestro or a reviewed replacement)** — still red on `main`.
+   Two of its three causes are fixed and the seeder step passes; what remains is
+   that the app is not alive on the emulator five seconds after launch, which
+   cannot be reproduced here (no Java, Android SDK or emulator). The next run is
+   self-diagnosing: the crash lines now travel as annotations (§5.2).
 4. **Criterion 4 (no unresolved high/critical finding)** — the last clean audit
    (1.10.2) has no dependency changes after it, but the current audit could not
    reach the registry, so it is not freshly evidenced.

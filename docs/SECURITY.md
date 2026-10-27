@@ -150,10 +150,18 @@ authenticated user.
 ## Authentication
 
 - There are no passwords. Sign-in is a phone number plus a 6-digit one-time
-  code, returned in the response only outside production (`OTP_TEST_MODE`)
-  until an SMS provider is integrated. Codes are stored only as an HMAC-SHA256
-  digest keyed with `JWT_SECRET`, compared in constant time, single-use, expire
-  after `OTP_TTL_SECONDS`, and are locked after `OTP_MAX_ATTEMPTS` wrong tries.
+  code. With the default `SMS_PROVIDER=none` the code is returned in the
+  response only outside production (`OTP_TEST_MODE`, which also requires that
+  provider); with `SMS_PROVIDER=kavenegar` the code is delivered by SMS and is
+  never in the response, in any environment, and a code whose delivery the
+  gateway refused is consumed before the endpoint answers `502`. Codes are
+  stored only as an HMAC-SHA256 digest keyed with `JWT_SECRET`, compared in
+  constant time, single-use, expire after `OTP_TTL_SECONDS`, and are locked
+  after `OTP_MAX_ATTEMPTS` wrong tries.
+- Outbound SMS is the one place a phone number leaves the server. The number is
+  written to logs only masked (`0912****4567`), the gateway's response body is
+  never repeated in an error (it echoes the receptor), and a transport error is
+  re-thrown without the request URL, which carries `KAVENEGAR_API_KEY`.
 - A new number receives a short-lived HS256 signup token (`pur: 'signup'`) and
   finishes on `POST /auth/signup` with a unique username and name parts. A
   signup token is not an access token, and vice versa.

@@ -50,11 +50,35 @@ export const TRUST_PROXY: number | false = (() => {
   return hops;
 })();
 
-// Phone OTP auth. There is no SMS provider yet, so outside production the
-// code is returned in the response for local testing and requestOtp refuses
-// to issue codes at all in production. Once a provider is wired up, remove
-// the test-mode branch and send the code through the provider instead.
-export const OTP_TEST_MODE = !IS_PRODUCTION;
+// Phone OTP auth. `none` keeps the pre-provider behaviour: outside production
+// the code is returned in the response for local testing, and production
+// refuses to issue one at all. `kavenegar` sends the code through the gateway
+// for real. Test mode stays tied to the environment as well as to the provider
+// so a development box that points at a live account never leaks codes back to
+// the client, and a CI-only `NODE_ENV=development` run with `SMS_PROVIDER=none`
+// keeps working without spending SMS credit.
+function optional(name: string, fallback: string): string {
+  return process.env[name]?.trim() || fallback;
+}
+
+export const SMS_PROVIDER = optional('SMS_PROVIDER', 'none').toLowerCase();
+export const KAVENEGAR_API_KEY = process.env.KAVENEGAR_API_KEY?.trim() ?? '';
+export const KAVENEGAR_SENDER = process.env.KAVENEGAR_SENDER?.trim() ?? '';
+export const KAVENEGAR_OTP_TEMPLATE = process.env.KAVENEGAR_OTP_TEMPLATE?.trim() ?? '';
+
+if (!['none', 'kavenegar'].includes(SMS_PROVIDER)) {
+  throw new Error(`SMS_PROVIDER must be none or kavenegar, got ${SMS_PROVIDER}`);
+}
+// Fail at boot rather than on a user's first sign-in attempt: a keyless
+// gateway, or a free-text send with no sender line, only fails in production.
+if (SMS_PROVIDER === 'kavenegar' && !KAVENEGAR_API_KEY) {
+  throw new Error('SMS_PROVIDER=kavenegar requires KAVENEGAR_API_KEY');
+}
+if (SMS_PROVIDER === 'kavenegar' && !KAVENEGAR_OTP_TEMPLATE && !KAVENEGAR_SENDER) {
+  throw new Error('SMS_PROVIDER=kavenegar requires KAVENEGAR_OTP_TEMPLATE or KAVENEGAR_SENDER');
+}
+
+export const OTP_TEST_MODE = !IS_PRODUCTION && SMS_PROVIDER === 'none';
 export const OTP_TTL_SECONDS = positiveInt('OTP_TTL_SECONDS', 300);
 export const OTP_MAX_ATTEMPTS = positiveInt('OTP_MAX_ATTEMPTS', 5);
 
