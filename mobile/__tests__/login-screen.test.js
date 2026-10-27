@@ -117,3 +117,60 @@ test('walks a new user through username and name', async () => {
     lastName: undefined,
   });
 });
+
+// The emulator's own answer to a failed run: the code field, its test code and
+// everything above them were reachable, while the button under them was not —
+// because the keyboard shrinks the ScrollView and the tail of the card leaves
+// the screen. So the primary action of every step has to live outside that
+// scroller, where an open IME cannot push it out of view.
+function findTestID(node, id) {
+  for (const item of Array.isArray(node) ? node : [node]) {
+    if (!item || typeof item === 'string') continue;
+    if (item.props?.testID === id) return item;
+    const found = findTestID(item.children ?? [], id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function insideScroller(view, id) {
+  const scroll = findTestID(view.toJSON(), 'login-scroll');
+  expect(scroll).toBeTruthy();
+  return findTestID(scroll.children ?? [], id) !== null;
+}
+
+// The action exists on the screen, and the IME cannot hide it because it is not
+// part of the scrollable card.
+function pinnedAction(view, id) {
+  expect(findTestID(view.toJSON(), id)).toBeTruthy();
+  expect(insideScroller(view, id)).toBe(false);
+}
+
+test('the code step keeps its confirm action out of the area the keyboard shrinks', async () => {
+  api.requestOtp.mockResolvedValue({ isNewUser: false, testCode: '123456', expiresInSeconds: 300 });
+  const view = renderLogin();
+  await requestCode(view);
+
+  pinnedAction(view, 'login-submit');
+});
+
+test('no step leaves its primary action inside the scrolling card', async () => {
+  api.requestOtp.mockResolvedValue({ isNewUser: true, testCode: '123456', expiresInSeconds: 300 });
+  api.verifyOtp.mockResolvedValue({ requiresSignup: true, signupToken: 'signup-token' });
+  const view = renderLogin();
+
+  pinnedAction(view, 'login-request-code');
+
+  await requestCode(view);
+  pinnedAction(view, 'login-submit');
+
+  fireEvent.changeText(view.getByTestId('login-code'), '654321');
+  fireEvent.press(view.getByLabelText('ادامه ثبت‌نام'));
+  await waitFor(() => expect(view.getByLabelText('نام کاربری')).toBeTruthy());
+  pinnedAction(view, 'login-username-next');
+
+  fireEvent.changeText(view.getByLabelText('نام کاربری'), 'new_user');
+  fireEvent.press(view.getByLabelText('ادامه به نام شما'));
+  await waitFor(() => expect(view.getByLabelText('نام')).toBeTruthy());
+  pinnedAction(view, 'login-signup');
+});

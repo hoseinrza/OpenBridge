@@ -8,6 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder,
 } from 'expo-audio';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
 import { useCall } from '../context/CallContext';
 import { useChat } from '../hooks/useChat';
@@ -77,7 +79,7 @@ export default function ChatScreen({ route, navigation }) {
   const {
     messages, isTyping, typingName, connected, locked,
     historyState, historyError, retryHistory,
-    sendMessage, sendVoice, notifyTyping, toggleReaction,
+    sendMessage, sendVoice, sendAttachment, notifyTyping, toggleReaction,
     editMessage, deleteMessage,
   } = useChat(peer, currentUser);
   const [text, setText] = useState('');
@@ -98,6 +100,11 @@ export default function ChatScreen({ route, navigation }) {
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceMs, setVoiceMs] = useState(0);
   const voiceMsRef = useRef(0);
+  // The attach tray is open only while the user is choosing, and the busy flag
+  // covers the upload that follows: a second pick while bytes are still moving
+  // would queue a message the phone has no way to describe yet.
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [attachBusy, setAttachBusy] = useState(false);
   // The recorder is stopped by a tap and by the ceiling, and both can be in
   // flight at the same instant; only one of them may hand a file to the server.
   const voiceLockRef = useRef(false);
@@ -183,6 +190,82 @@ export default function ChatScreen({ route, navigation }) {
     setReplyTo(null);
     setEditing(null);
   }, [text, sending, sendMessage, editMessage, locked, replyTo, editing]);
+
+  // ── Attachments ───────────────────────────────────────
+  // The tray is the web composer's: two kinds, a photo or a file, and the bytes
+  // go to the same endpoint a recording already uses.
+  //
+  // The two pickers name the same thing differently — an image asset carries
+  // `fileName`/`mimeType`, a document carries `name`/`type` — and an image on
+  // some Android builds arrives with no mimetype at all. The server matches the
+  // mimetype against the extension, so the extension fills that gap instead of
+  // an empty type. Note that an image asset's own `type` field says `image`,
+  // which is a kind rather than a mimetype, so it is never used as one.
+  const EXT_MIME = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    heic: 'image/heic',
+    mp4: 'video/mp4',
+    mov: 'video/quicktime',
+    webm: 'video/webm',
+  };
+
+  function attachmentFrom(asset, mimeType) {
+    if (!asset?.uri) return null;
+    const name = asset.fileName ?? asset.name ?? 'attachment';
+    const dot = name.lastIndexOf('.');
+    const ext = dot > -1 ? name.slice(dot + 1).toLowerCase() : '';
+    return {
+      uri: asset.uri,
+      name,
+      size: asset.fileSize ?? asset.size ?? 0,
+      mimeType: mimeType ?? (Object.hasOwn(EXT_MIME, ext) ? EXT_MIME[ext] : undefined),
+    };
+  }
+
+  const sendAsset = useCallback(async (file) => {
+    if (!file) {
+      setError('فایلی انتخاب نشد');
+      return;
+    }
+    setAttachBusy(true);
+    setError('');
+    const result = replyTo
+      ? await sendAttachment(file, replyTo.id)
+      : await sendAttachment(file);
+    setAttachBusy(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setReplyTo(null);
+  }, [sendAttachment, replyTo]);
+
+  async function pickImage() {
+    setAttachOpen(false);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setError('برای فرستادن تصویر اجازهٔ دسترسی به گالری لازم است');
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'] });
+    if (picked.canceled) return;
+    const asset = picked.assets?.[0];
+    await sendAsset(attachmentFrom(asset, asset?.mimeType));
+  }
+
+  // A document needs no permission on either platform: the picker is a file
+  // dialog the user drives, so the choice itself is the consent.
+  async function pickFile() {
+    setAttachOpen(false);
+    const picked = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+    if (picked.canceled) return;
+    const asset = picked.assets?.[0];
+    await sendAsset(attachmentFrom(asset, asset?.type ?? asset?.mimeType));
+  }
 
   const startEdit = useCallback((msg) => {
     setReplyTo(null);
@@ -650,6 +733,31 @@ export default function ChatScreen({ route, navigation }) {
         </View>
       )}
 
+      {attachOpen && !isRecording && !voiceBusy && !locked && (
+        <View style={styles.attachTray}>
+          <Pressable
+            testID="attach-image"
+            onPress={pickImage}
+            style={styles.attachOption}
+            accessibilityRole="button"
+            accessibilityLabel="انتخاب تصویر"
+          >
+            <FontAwesome6 name="image" size={15} color={colors.text2} />
+            <Text style={styles.attachOptionLabel}>تصویر</Text>
+          </Pressable>
+          <Pressable
+            testID="attach-file"
+            onPress={pickFile}
+            style={styles.attachOption}
+            accessibilityRole="button"
+            accessibilityLabel="انتخاب فایل"
+          >
+            <FontAwesome6 name="file-arrow-down" size={15} color={colors.text2} />
+            <Text style={styles.attachOptionLabel}>فایل</Text>
+          </Pressable>
+        </View>
+      )}
+
       {isRecording || voiceBusy ? (
         <View style={[styles.voiceRow, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
           <Pressable
@@ -686,6 +794,21 @@ export default function ChatScreen({ route, navigation }) {
         </View>
       ) : (
         <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+          {!locked && (
+            <Pressable
+              testID="composer-attach"
+              onPress={() => setAttachOpen((open) => !open)}
+              disabled={!connected || sending || attachBusy}
+              style={[styles.attachBtn, (!connected || sending || attachBusy) && styles.attachBtnBusy]}
+              accessibilityRole="button"
+              accessibilityLabel="پیوست"
+              accessibilityState={{ disabled: !connected || sending || attachBusy }}
+            >
+              {attachBusy
+                ? <ActivityIndicator color={colors.text2} size="small" />
+                : <FontAwesome6 name={attachOpen ? 'xmark' : 'paperclip'} size={16} color={colors.text2} />}
+            </Pressable>
+          )}
           <TextInput
             style={[styles.input, locked && styles.inputLocked]}
             value={text}
@@ -1008,6 +1131,33 @@ function makeStyles(colors) {
       alignItems: 'center', justifyContent: 'center',
     },
     sendBtnDisabled: { backgroundColor: colors.surface3 },
+
+    // The attach control is a quiet square next to the accent button it shares
+    // the row with; only the tray it opens is a surface of its own.
+    attachBtn: {
+      width: 44, height: 44, borderRadius: radius.md,
+      borderWidth: 1, borderColor: colors.borderStrong,
+      backgroundColor: colors.surface,
+      alignItems: 'center', justifyContent: 'center',
+    },
+    attachBtnBusy: { backgroundColor: colors.surface2, borderColor: colors.border },
+    attachTray: {
+      flexDirection: 'row-reverse', gap: spacing.sm,
+      paddingHorizontal: spacing.md, paddingVertical: spacing.xs,
+      borderTopWidth: 1, borderTopColor: colors.border,
+      backgroundColor: colors.chat,
+    },
+    attachOption: {
+      flexGrow: 1, flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.xs,
+      paddingVertical: 10, paddingHorizontal: spacing.sm,
+      borderRadius: radius.md,
+      borderWidth: 1, borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    attachOptionLabel: {
+      color: colors.text1, fontFamily: fonts.regular, fontSize: type.sm,
+      textAlign: 'right', flex: 1,
+    },
 
     // The recording row keeps the composer's shape so the button the thumb is
     // already resting on still sends; only the field gives way to the clock.

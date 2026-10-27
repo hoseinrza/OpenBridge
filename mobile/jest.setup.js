@@ -159,3 +159,16 @@ jest.mock('expo-audio', () => {
 
 const { configure } = require('@testing-library/react-native');
 configure({ asyncUtilTimeout: 5000 });
+
+// Neither picker exists on a test machine, and a suite that only renders the
+// composer must not end up "picking" something. The default answer is a cancel,
+// which is what a user backing out of the dialog returns; a test that wants a
+// file overrides these in its own jest.mock.
+jest.mock('expo-image-picker', () => ({
+  requestMediaLibraryPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  launchImageLibraryAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
+}));
+
+jest.mock('expo-document-picker', () => ({
+  getDocumentAsync: jest.fn(async () => ({ canceled: true, assets: [] })),
+}));

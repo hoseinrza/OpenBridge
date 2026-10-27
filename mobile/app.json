@@ -2,7 +2,7 @@
   "expo": {
     "name": "OpenBridge",
     "slug": "openbridge-mobile",
-    "version": "1.12.1",
+    "version": "1.13.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -39,6 +39,12 @@
         "expo-contacts",
         {
           "contactsPermission": "OpenBridge شماره‌های مخاطبین را فقط برای دیدن این که کدام‌شان حساب دارند می‌خواند."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "OpenBridge تنها وقتی به گالری دسترسی می‌خواهد که خودتان تصویری برای فرستادن انتخاب کنید."
         }
       ],
       [

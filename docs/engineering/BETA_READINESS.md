@@ -1,9 +1,9 @@
 # OpenBridge — Beta Readiness Baseline
 
 Date: 2026-10-27
-Commit: `7ffd0a4` (`main`, product version 1.11.0) — this batch adds the mobile
-profile editor (1.12.0), fixes the launch crash the `2e` annotations revealed
-(1.12.1), and records the run after Kavenegar
+Commit: `c297ee9` (`main`, product version 1.12.1) — this batch adds mobile
+attachment sending and the measurement that decides what the `2e` run of that
+commit still fails on (1.13.0)
 Author: engineering audit for the Phase 1 roadmap
 
 This document is the Phase 1 Task 1 deliverable. It records what exists,
@@ -99,12 +99,14 @@ per-call key generated and held by the API, delivered only to web clients.
 | nginx security headers | **NOT RUN locally** | Added in `nginx.conf` for Phase 1.5; the compose step now asserts `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and no version banner on `/` and `/api/health`. Needs a CI run. |
 | Maestro Android E2E | **STILL RED** (next run decides) | All three causes are now identified and fixed in source: `NODE_ENV=development` (`d496992`), the line-by-line `script:` problem (`4601b93`), and the launch crash itself — `App.js` rendered no `SafeAreaProvider`, so `CallOverlay` threw on the first frame (`7ffd0a4` run annotations, fixed in 1.12.1). The fix is proven only by a unit test that reproduces the library's throw rule, not by a device: no emulator here. See §5.2. |
 | `npm run test:e2e` (backend), after the SMS provider | **PASS 125/125** (25.4 s) | Was 113/113. The 12 new cases are `backend/test/sms-provider.test.cjs`: receptor normalization, masking, `verify/lookup` vs `sms/send`, gateway-failure handling with no leaked number/key/body, the three `AuthService` delivery rules and the three boot rules. `SMS_PROVIDER` defaults to `none`, so no existing case changed meaning. |
-| `npx jest --ci --runInBand` (mobile), after the profile editor + app root | **PASS 14 suites / 109 tests** (8.1 s) | Was 11 suites / 96 tests at the baseline audit. New since: the settings/profile/attachment-era suites, `edit-profile-screen.test.js` (11 cases) and `app-root.test.js` (1). |
-| `npx expo export --platform android` (mobile), with the profile editor and the root fix | **PASS** | Hermes `index-06755c8001bce131920a7c335baf2bae.hbc` (4.79 MB) plus assets. Proves the new screen and the `SafeAreaProvider` wrapper reach the bundle, not that they render correctly on a device. |
+| `npx jest --ci --runInBand` (mobile), after the profile editor + app root | **PASS 16 suites / 128 tests** | Was 11 suites / 96 tests at the baseline audit. New since: `edit-profile-screen.test.js` (11), `app-root.test.js` (1), `chat-attachment.test.js` (11), `use-chat-attachment.test.js` (6), and two cases in `login-screen.test.js` that pin each step's primary action outside the scrollable card. |
+| Attachment contract against a running API | **PASS** | Two throwaway accounts, a real JPEG and a real PDF uploaded through `POST /uploads` (server answered `IMAGE` 294 B / `FILE` 45 B), then `message:send` with mobile's exact payload for each: both acked `{ok:true,…}` and both rows came back with the name, size and signed URL stored. The accounts, their conversation, their messages and the two files were deleted afterwards. |
+| `npx expo export --platform android` (mobile), with the attachment pickers and the login footer | **PASS** | Hermes `index-2e4c824f0f0fd69c48901514c9781606.hbc` (4.8 MB) plus assets. Proves both pickers, the composer tray and the pinned actions reach the bundle, not that they render correctly on a device. `expo prebuild --platform android --no-install` also runs clean with the new `expo-image-picker` plugin entry. |
 
 ### CI state on `main`
 
-Latest run read here: `40490417370` on `7ffd0a4` (2026-10-27), via the public
+Latest run read here: `40495495928` on `c297ee9` (2026-10-27) — the commit that
+carried the `SafeAreaProvider` fix — through the public
 `commits/<sha>/check-runs` and `check-runs/<id>/annotations` APIs. `gh` is not
 installed on this machine, and the job log plus the artifact zip answer
 `403`/`401` without a token, so check conclusions, step conclusions and
@@ -117,21 +119,38 @@ installed on this machine, and the job log plus the artifact zip answer
   (`.github/workflows/ci.yml:190`), so its `success` conclusion is not evidence
   that `npm audit --omit=dev --audit-level=high` exited 0 — a failing audit would
   still show green here. It closes nothing by itself.
-- **Red (2, one cause):** `2e · Mobile E2E (Android emulator)` fails at
-  `Run Maestro on the emulator`; `CI gate` fails because it needs that job. The
-  deploy job is `skipped`, as it must be while the gate is red.
+- **Red (2, one cause):** `2e · Mobile E2E (Android emulator)` (check-run
+  `122160079214`) fails at `Run Maestro on the emulator`; `CI gate` fails because
+  it needs that job. The deploy job is `skipped`, as it must be while the gate is
+  red.
 - Inside job `2e`, the backend builds, boots, answers `health/ready`, the seeder
   creates the E2E users and the APK installs. The failure is the app on the
   emulator, not the pipeline around it (§5.2).
-- The annotations for that run carry the crash this batch fixes, verbatim:
-  `app process not running five seconds after launch` with
-  `E ReactNativeJS: { [Error: No safe area value available. Make sure you are
-  rendering `<SafeAreaProvider>` at the top of your app.` and a `componentStack`
-  that names `CallOverlay` inside `CallProvider` → `SocketProvider` →
-  `AuthProvider` → `AppShell` → `SettingsProvider` → `App`, then
-  `Attempt 1: [Failed] auth-and-chat (24s) (Assertion is false: <the login
-  screen title> is visible)`. The instrumentation added last batch did exactly
-  what it was designed to do: the reason reached this machine without a token.
+- **The launch crash is gone, and the annotations say so.** The same warning is
+  absent this time, `flow output after the failure:` came back empty — no
+  `AndroidRuntime` or `ReactNativeJS` line was produced — and the journey reached
+  its eighth step instead of its second: `Attempt 1: [Failed] auth-and-chat (57s)
+  (Element not found: Id matching regex: login-submit)`.
+- Reaching that step is itself evidence, for the first time in this job's
+  history: to be sitting on the code screen the app had to paint the login
+  screen, accept the phone number, call `POST /auth/otp/request` across
+  `10.0.2.2`, and read the returned `testCode` out of `login-test-code` — the
+  `copyTextFrom` before the failing step succeeded. So the emulator↔API path and
+  the first two wizard steps are now proven on a device by CI.
+- What is left failing is one element: the code step's primary action, while the
+  nodes around it were all found — including `login-request-code`, the same
+  widget type one step earlier, so this is not testID plumbing. `login-submit` is
+  an unconditional sibling of `login-code` and `login-test-code`, both of which
+  the run did find, so it was mounted and the device had simply clipped it: with
+  the numeric keyboard open, the CTA sits below the fold of the shrunk
+  `ScrollView`. That is a reachability flaw for a real finger too, not only for
+  Maestro, so the batch changes the product rather than the journey — every
+  step's primary action moves to a footer pinned outside the scroller (§5.2),
+  demanded by two tests that were red before it — and adds the measurement that
+  lets the next run confirm the reasoning from the outside: on failure the runner
+  dumps the uiautomator hierarchy and annotates every testID the device actually
+  had, with its bounds, how many nodes the device itself marked not visible, the
+  screen size and `mInputShown` (`.github/scripts/mobile-e2e-hierarchy.mjs`).
 
 ---
 
@@ -154,16 +173,20 @@ installed on this machine, and the job log plus the artifact zip answer
 - Web client: login wizard, chat list, chat, groups, profile, settings, theme,
   contacts paste flow, attachments, voice messages, calling.
 - Mobile client: login wizard, chat list, chat, groups, contacts import,
-  settings/theme, profile editing (name, handle, bio), locked state for
-  legacy-encrypted chats, calling UI (mobile cannot join encrypted calls).
+  settings/theme, profile editing (name, handle, bio), text/voice/photo/file
+  messages in both directions, locked state for legacy-encrypted chats, calling
+  UI (mobile cannot join encrypted calls).
 
 ### Implemented, but not verified in this audit
 
-- Android bundle and on-device behavior: the bundle is green in CI; Maestro is
-  still red on `main`, but no longer unexplained — the launch crash it reported
-  is a missing `SafeAreaProvider` at the app root, fixed in this batch and
-  covered by `mobile/__tests__/app-root.test.js`. Whether that was the *last*
-  cause is only knowable from the next run (§5.2).
+- Android bundle and on-device behavior: the bundle is green in CI, and since
+  `c297ee9` part of the app is proven *on* the emulator — the login screen
+  paints, the phone step reaches the API and the code step reads its `testCode`
+  back. Not proven on a device: the chat journey past that code screen, the
+  profile editor, and every surface this batch touches (attachment tray, photo
+  and file send) — nor the login wizard's new pinned action row, which is the fix
+  for what Maestro still reports red (§5.2). The journey itself has never got
+  past the code step on a device.
 - LiveKit calls end to end: no live call was placed in this session; the
   calling architecture document records prior structural verification.
 - Push notifications: not implemented / not in scope of the current tests.
@@ -254,11 +277,14 @@ Re-check both when Nest 11 is adopted. The registry audit endpoint answered
 15:23Z), so the "after" numbers above are from the verified run earlier the same
 day; the installed versions in the lockfile back them up.
 
-### 5.2 Android Maestro E2E (three causes, all three now fixed in source)
+### 5.2 Android Maestro E2E (four causes: three proven gone on the device, the fourth fixed in source)
 
-The job has failed for three independent reasons, found one at a time because
+The job has failed for four independent reasons, found one at a time because
 each one hid the next. Run `40490417370` on `7ffd0a4` is the evidence for the
-third.
+third; run `40495495928` on `c297ee9` is the evidence that all three are gone —
+that journey no longer dies on the first frame and now runs for 57 seconds,
+through the phone step and into the code step. Its annotation is the evidence for
+the fourth.
 
 1. **`NODE_ENV` disabled test mode** (fixed in `d496992`). With `test`/`production`
    the seeder got no `testCode`, created no users, and Maestro had nothing to
@@ -268,7 +294,7 @@ third.
    (expecting "}")` before Maestro started; the flow now lives in
    `.github/scripts/mobile-e2e-run.sh` and is invoked as one command.
 3. **The app crashed on its first frame** (found in the `7ffd0a4` annotations,
-   fixed in this batch). `mobile/App.js` rendered `SettingsProvider` at the root
+   fixed in 1.12.1 and proven gone on `c297ee9`). `mobile/App.js` rendered `SettingsProvider` at the root
    and no `SafeAreaProvider` anywhere above it, while `CallOverlay` — mounted
    permanently by `AppShell`, next to the navigator, not behind any screen —
    calls `useSafeAreaInsets()` unconditionally. In
@@ -279,6 +305,15 @@ third.
    assertion false. The same crash also made the unauthenticated screen
    unreachable for a real user, so this was an app bug that CI happened to be
    the only witness to.
+4. **The code step's confirm button could not be tapped** (found in the
+   `c297ee9` annotations, fixed in 1.13.0). `Element not found: Id matching
+   regex: login-submit`, while `login-phone`, `login-request-code`, `login-code`
+   and `login-test-code` had all been found minutes earlier. Since
+   `login-submit` is an unconditional sibling of two nodes the run *did* find, it
+   was mounted — the device had simply clipped it: the code step is the tallest
+   step, the IME shrinks the `ScrollView`, and the button sat at the tail of the
+   card, below the fold. A user with a small screen and the keyboard up hits the
+   same wall, so the action moved out of the scroller into a pinned footer.
 
 Why no test caught it: `mobile/jest.setup.js` mocks
 `react-native-safe-area-context` with a `useSafeAreaInsets` that returns zeros
@@ -293,8 +328,8 @@ The test was checked in both directions, not just green-once: with the wrapper
 removed from `App.js` it fails with the emulator's own message —
 `No safe area value available. Make sure you are rendering `<SafeAreaProvider>`
 at the top of your app.` — and with the fix in place the whole suite passes
-(14 suites, 109 tests). That is as close to a device as this machine gets; it is
-still not a device.
+(14 suites, 109 tests at that commit; 16 suites / 126 tests as of 1.13.0). That
+is as close to a device as this machine gets; it is still not a device.
 
 Claimed earlier in this document, and wrong: that cause 1 was *the* root cause
 and that the job was "expected to pass" after `d496992`; and that the emulator
@@ -317,12 +352,26 @@ lines as **annotations**, which - unlike the job log and the artifact zip, both
 of which answer `401`/`403` without a token - are readable through the public
 `check-runs/<id>/annotations` API. That is how cause 3 was found.
 
-Status: **the fix is unproven on a device until the next run.** This machine has
-no Java, Android SDK or emulator, so the app-under-test cannot be started here
-(see §8); what is evidenced is the annotation, the source-level cause, and the
-unit test that reproduces the throw. Other causes may still sit behind this one
-— the same way causes 1 and 2 hid each other — so the next `2e` result is read
-before any claim that the journey passes.
+Status: **causes 1–3 are proven gone on the device, and cause 4 is fixed in
+source.** That fix is a deduction rather than a guess: inside the code step,
+`login-code` and `login-test-code` are siblings of `login-submit` with nothing
+conditional between them, and the run found both of those — so the button was
+mounted, and a mounted node Maestro cannot tap is a node the device reported as
+not visible. Why it was out of sight is the layout: the code step is the tallest
+of the four, the IME shrinks the `ScrollView`, and the primary action sat at the
+tail of the card, below the fold — a reachability problem for a real finger, not
+only for a robot. So the product changed rather than the journey: every step's
+primary action, with its secondary link, now renders in a footer outside the
+scroller, where the same resize lifts it above the keyboard instead of burying
+it, the way Telegram's continue button behaves.
+`mobile/__tests__/login-screen.test.js` gained the two cases that demanded it —
+written first and watched to fail while the action was still inside
+`login-scroll` — and the markers they read (`login-scroll`, plus
+`login-username-next` and `login-signup` on the two signup buttons) are new.
+Mobile Jest 128/128; the Android bundle re-exports clean with the change. The
+hierarchy annotation ships alongside it, so the next run reports the button's
+actual bounds instead of leaving this reasoning to be re-derived: if the journey
+still stops there, the annotation says why in one line.
 
 ### 5.3 Documentation/claims drift — corrected
 
@@ -421,7 +470,7 @@ an on-device observation.
 | Direct chat: send, receive, history | yes | yes | History is chronological and paged 50 rows at a time on both. |
 | Group chat: create, list, send, read | yes | yes | Neither client offers member add/remove UI, although the API has it. |
 | Receive and open attachments | yes | yes | Signed URLs; images render inline, files open through the OS. |
-| Send attachments | yes | **no** | Mobile uploads only voice recordings; no image/document picker is installed. |
+| Send attachments | yes | yes (added here) | Both upload through `POST /uploads` and then send `message:send` with the type the server reported. Mobile picks with `expo-image-picker` (photos) and `expo-document-picker` (files). Proven by unit tests and by replaying the exact payload against a running API (§8), not on a device. |
 | Voice messages | yes | yes | Both record and play; mobile sends `VOICE` with the measured length. |
 | Reactions, read receipts, typing | yes | yes | Same socket events. |
 | Reply | yes | yes (added here) | New two-row action tray and quote rendering; the send carries `replyToId`. |
@@ -429,7 +478,7 @@ an on-device observation.
 | Delete for me / for everyone | yes | yes (added here) | Confirmation sheet offers everyone only on an own message; scopes match the server. |
 | Forward | yes | **no** | Needs a target picker that does not exist on mobile. |
 | Search | conversation search | chat-list search only | No in-chat search field on mobile. |
-| Profile | view and edit | view and edit | Mobile now has the editor for name, handle and bio (`mobile/src/screens/EditProfileScreen.js`); avatar picking still needs the attachment picker mobile lacks. |
+| Profile | view and edit | view and edit | Mobile now has the editor for name, handle and bio (`mobile/src/screens/EditProfileScreen.js`). Avatar picking is still missing: the picker dependency this needed is installed as of 1.13.0, but no avatar UI calls it yet. |
 | Device/session management, security alerts | yes | **no** | No mobile screen calls `/auth/sessions` or `/auth/security-events`. |
 | Theme | light, dark | system, light, dark | Mobile adds "follow the system". |
 | Calls | audio and video, encrypted media for new calls | audio and video, refuses encrypted calls | The refusal is explicit and documented; the key is server-held. |
@@ -448,12 +497,35 @@ applies, and the server's reply is stored through `AuthContext.saveProfile`.
 Covered by `mobile/__tests__/edit-profile-screen.test.js` (mobile Jest 108/108),
 with the request and reply shape checked against a running API.
 
-Remaining gaps that touch the Beta acceptance list are **sending attachments on
-Android** — image, file and avatar alike, since all three need the picker that
-is not installed — and that **no mobile screen has been looked at on a device**;
-the rest are conveniences or web-only administration. A picker is a native
-module and no emulator exists in this environment, so both stay recorded rather
-than implemented blind.
+Sending attachments closed since, on Android as on web: the composer gained a
+paperclip that opens a two-item tray (`mobile/src/screens/ChatScreen.js`), the
+pickers are `expo-image-picker` for photos and `expo-document-picker` for files,
+and `sendAttachment` in `mobile/src/hooks/useChat.js` uploads through the
+endpoint a recording already used and then emits `message:send` with the
+**server's** type rather than a mimetype guessed on the phone. The gallery
+permission ask is kept because it is not decoration on older devices — reading
+the module source (`getMediaLibraryPermissions`, `expo-image-picker@57.0.20`)
+shows it requests nothing at all from Android 13 up, where the system photo
+picker needs no storage permission, and the legacy read/write storage pair
+below that. Covered by
+`mobile/__tests__/chat-attachment.test.js` (11 cases: the tray opening and
+closing, the locked composer, the permission ask and its refusal, a document
+picked without one, the extension filling a missing mimetype, a cancelled pick,
+the server's own words on a refusal, the quoted send, the resting button)
+and `mobile/__tests__/use-chat-attachment.test.js` (6 cases: the payload shape,
+a group target, a quote, a refused upload, a locked chat) — mobile Jest
+126/126. The same payload was replayed against a running API with a real JPEG and
+a real PDF: both uploads came back `IMAGE`/`FILE`, both sends were acked, and the
+stored rows carried the file name and size they were sent with. The probe users
+and their rows were deleted afterwards.
+
+Remaining gaps that touch the Beta acceptance list: **the profile avatar still
+cannot be chosen on mobile** — the picker dependency now exists, but no avatar UI
+was added, so a picture stays a web-side action — **forwarding** needs a target
+picker, and **no mobile screen has been looked at on a device**; the rest are
+conveniences or web-only administration. Maestro drives only the text journey,
+so an attachment send is proven by unit tests plus the API contract, not by the
+emulator flow.
 
 `docs/engineering/UI_UX_REDESIGN.md` is stale about group administration (it
 says "absent at the API level"); the API now has participant add/remove, but
@@ -719,12 +791,19 @@ Ordered by the roadmap, with the baseline's findings attached:
 | 2026-10-27 | Mobile profile editor | `mobile/src/screens/EditProfileScreen.js` — name, handle and bio, with the phone number shown as identity rather than an input; reached from Settings → ویرایش پروفایل. `AuthContext.saveProfile` stores the server's reply instead of merging locally. Mobile Jest 108/108; `PATCH /users/me` exercised against a running API (200 with a recomputed `displayName`, empty `lastName` clears it, 400 for a name holding a digit). Never rendered on a device. §5.7 |
 | 2026-10-27 | Launch crash found in the annotations | `commits/7ffd0a4/check-runs` → 11 green, `2e` + `CI gate` red (run `40490417370`, job `122142965122`). `check-runs/122142965122/annotations` → `app process not running five seconds after launch` carrying `E ReactNativeJS: { [Error: No safe area value available...` with a `componentStack` naming `CallOverlay` inside `CallProvider` → `SocketProvider` → `AuthProvider` → `AppShell` → `SettingsProvider` → `App`, plus `Attempt 1: [Failed] auth-and-chat (24s)`. Log and artifact still `403`/`401`. §5.2 |
 | 2026-10-27 | SafeAreaProvider added at the app root | `mobile/App.js` wraps `SettingsProvider` in `SafeAreaProvider`; `mobile/__tests__/app-root.test.js` overrides the `jest.setup.js` mock with the library's real throw rule and renders the actual `App`. Checked in both directions: removing the wrapper makes that test fail with the emulator's own message, restoring it gives 14 suites / 109 tests green and a `expo export --platform android` PASS. The device run is still pending. §5.2 |
-Next update: read the `2e` annotations of the run after this batch lands — the
-crash cause is fixed in source but the next run decides whether a fourth cause
-was hiding behind it. Then mobile attachment sending: `uploadFile` already posts
-to `POST /uploads` and voice messages already use it, so the missing piece is a
-picker (`expo-image-picker` is not in `mobile/package.json`), which also unblocks
-the avatar.
+| 2026-10-27 | Mobile attachment sending (1.13.0) | `mobile/src/hooks/useChat.js` gains `sendAttachment`: upload through the endpoint a voice message already used, then `message:send` with the type **the server** reported. `mobile/src/screens/ChatScreen.js` gains the paperclip (`composer-attach`), a two-item tray (`attach-image`, `attach-file`) and the two pickers; `expo-image-picker@~57.0.20` and `expo-document-picker@~57.0.3` added to `mobile/package.json`, with a `photosPermission` string in `mobile/app.json`. New tests: `chat-attachment.test.js` (11) and `use-chat-attachment.test.js` (6) → mobile Jest **126/126, 16 suites**; `expo export --platform android` → `index-0f640d1c3c6daa4dda912ea144dc184f.hbc` (4.8 MB); `expo prebuild --platform android --no-install` exits 0 with the plugin entry; root `npm run lint` clean. §5.7 |
+| 2026-10-27 | Attachment contract replayed on a running API | Throwaway accounts, a real JPEG and a real PDF: `POST /uploads` returned `IMAGE` and `FILE`, and the exact payloads `sendAttachment` emits were acked (`{"ok":true,"id":…}`) with the stored rows carrying the sent file name and size. Test accounts, their messages, conversations and uploaded bytes were deleted afterwards, and the probe script removed from the tree. This is the API half of the claim; no device has held the app. §5.7 |
+| 2026-10-27 | `2e` read on `c297ee9`: the crash cause is gone | Run `40495495928`, check-run `122160079214` → `completed failure`; annotations carry `Attempt 1: [Failed] auth-and-chat (57s) (Element not found: Id matching regex: login-submit)`, no `app process not running` warning, and an empty `flow output after the failure:` — so nothing crashed and the journey now reaches the code step, which additionally proves the emulator↔API path and the `testCode` read on a device. 11 other checks green, `CI gate` red, deploy skipped. Logs/artifacts still `403`/`401`. §3, §5.2 |
+| 2026-10-27 | Hierarchy annotation added | `.github/scripts/mobile-e2e-hierarchy.mjs` + its call in `mobile-e2e-run.sh`: a failed run dumps `uiautomator`, and one annotation carries every resource-id with bounds, the count of nodes the device marked not visible, `wm size` and `mInputShown`; `hierarchy.xml` joins the artifact list. Checked against a captured dump shape (both `pkg:id/name` and bare ids, real `[x,y][x,y]` bounds) and `bash -n` clean on the runner. It turns the next `2e` failure into a fact instead of a guess. §5.2 |
+| 2026-10-27 | Login wizard's primary actions pinned | `mobile/src/screens/LoginScreen.js`: the four steps' confirm/continue buttons and their secondary links left the `ScrollView` and moved into a footer (`login-actions`) that the IME resize lifts instead of hiding; `login-scroll`, `login-username-next` and `login-signup` added as markers. `mobile/__tests__/login-screen.test.js` grew two cases — first red with the action inside the scroller, green after the move — and the suite is **128/128, 16 suites**; `expo export --platform android` → `index-2e4c824f0f0fd69c48901514c9781606.hbc`. Not yet seen on a device; the Maestro journey still taps `login-submit` by id, unchanged. §5.2 |
+Next update: read the `2e` run of this batch. If it clears the code step, the
+next suspects are the chat surfaces the journey has never reached — the reaction
+tray, the profile tabs, and the composer that now carries a paperclip — and the
+hierarchy annotation will say in one line whether anything else is being clipped
+the way the button was. If it still stops at login, that same annotation is the
+diagnosis. Either way: the avatar picker is the next UI gap worth closing, and
+neither attachments, the profile editor, nor the reply/edit/delete tray has been
+held on a real phone yet.
 
 ---
 
@@ -734,7 +813,8 @@ The commands below were run on commits `cde3087` (initial run, version 1.10.10)
 and `d496992` (merged `beta/phase-1`, version 1.10.11) on this machine, against
 the local PostgreSQL. The mobile, Maestro and CI rows have since been refreshed
 with this batch's runs (version 1.12.x); every other row is still the
-`d496992` observation, and §3 carries the newest number for each check.
+`d496992` observation, and §3 carries the newest number for each check. The
+mobile rows are 1.13.0's; the CI rows are `c297ee9`'s run.
 
 | Check | Command | Result |
 |-------|---------|--------|
@@ -744,8 +824,8 @@ with this batch's runs (version 1.12.x); every other row is still the
 | Backend schema | `npx prisma validate` | valid |
 | Backend types/build | `npm run build` (inside `test:e2e`) | PASS |
 | Backend e2e | `npm run test:e2e` | 125/125 across 13 files, including production-mode OTP, cross-user access, calling, health, maintenance and the SMS provider rules (113/113 before the gateway was wired) |
-| Mobile unit/component | `cd mobile && npm test -- --ci` | 109/109, 14 suites (was 96/96, 12 suites) |
-| Mobile bundle | `npx expo export --platform android` | PASS (Hermes `index-06755c8001bce131920a7c335baf2bae.hbc`, 4.79 MB) |
+| Mobile unit/component | `cd mobile && npm test -- --ci` | 128/128, 16 suites (was 109/109, 14 suites) |
+| Mobile bundle | `npx expo export --platform android` | PASS (Hermes `index-2e4c824f0f0fd69c48901514c9781606.hbc`, 4.8 MB) |
 | Local API | `GET /api/health/ready` direct and through the Vite proxy | 200 `{status:'ok',db:'up'}` |
 | Web dev shell | `GET http://127.0.0.1:5173/` | 200 with `<div id="root">` |
 | Dependency audit | `npm audit --omit=dev --audit-level=high` (root) | **blocked**: `ECONNRESET` from the npm registry; no dependency changed since the clean 1.10.2 audit |
@@ -759,22 +839,28 @@ with this batch's runs (version 1.12.x); every other row is still the
 every locally runnable check is green, but four criteria remain open, and none of
 them can be closed by writing more code in this environment:
 
-1. **Criterion 1 (core journeys on both clients)** — the mobile client still
-   cannot send attachments, and the profile editor that landed has never been
-   seen on a device (§5.7). Both are real journey gaps, not cosmetics. Supported
-   calls have never been exercised end to end: only token minting, lifecycle and
-   webhook paths are proven (§5.8).
+1. **Criterion 1 (core journeys on both clients)** — mobile now sends
+   attachments (photo and file) as well as text and voice, so the parity gap this
+   criterion named is closed in code and covered by tests; what is still missing
+   is the device side of it: neither the attachment tray, nor the profile editor
+   that landed, nor the reply/edit/delete tray has ever been seen on a phone
+   (§5.7). Choosing a profile avatar is still a web-only action. Forwarding has
+   no mobile UI at all. Supported calls have never been exercised end to end:
+   only token minting, lifecycle and webhook paths are proven (§5.8).
 2. **Criterion 2 (all checks in CI)** — no longer about CI existing: pushes to
    `main` run the full workflow and 11 of 13 checks are green there, including
    the Docker/compose smoke that cannot run on this machine. It is open only
    because `2e` is red and `CI gate` therefore fails (§3, §5.2).
 3. **Criterion 3 (Maestro or a reviewed replacement)** — still red on `main`,
-   but no longer blind: all three of its causes are fixed in source, and the
-   launch crash is now named (`No safe area value available` from `CallOverlay`,
-   because `App.js` rendered no `SafeAreaProvider`). The fix is proven by the
-   annotation, by a test that fails without it, and by the bundle - not by a
-   device, which this machine does not have. One green run is what closes this
-   criterion, and it may still uncover a fourth cause (§5.2).
+   and the reason has changed: the launch crash is now **proven fixed on the
+   emulator**, because `c297ee9`'s run paints the login screen, takes the phone
+   number, calls the API and reaches the code step (57 s versus 24 s to failure,
+   no crash line at all). What failed then is one element — `login-submit`, not
+   found while its own siblings were — and that pins it: the button was mounted
+   and the device had clipped it, because the open keyboard left the tail of the
+   card below the fold. A reachability flaw for a real finger as well as for
+   Maestro, so the action is now pinned outside the scroller, by two tests that
+   were red first. One green run still closes the criterion (§5.2).
 4. **Criterion 4 (no unresolved high/critical finding)** — CI's `2c` shows green
    on `main`, but it is a `continue-on-error` job, so that conclusion is not
    evidence (§3). The last locally verified production audit is the clean
@@ -788,11 +874,15 @@ and no Beta or production deployment has been presented as ready.
 
 What would close the gate, in order:
 
-1. Confirm CI runs on `main` with the Maestro fix and read the results; if the
-   job turns green, criterion 3 moves to evidence-in-review.
+1. Read the `2e` run of this batch. The clipped button is fixed, so the journey
+   should get past the login wizard and onto the chat surfaces it has never
+   reached on a device — the reaction tray, the profile tabs, and a composer that
+   now carries a paperclip. Whatever it reports next arrives as an annotation with
+   the device's own bounds, so a fifth cause would be named rather than inferred.
 2. Re-run the dependency audit from a network that reaches the registry.
-3. Implement mobile attachment sending, which also gives the avatar its picker,
-   then look at the profile editor and the attachments on a device or emulator.
+3. Give the profile avatar its picker. `expo-image-picker` arrived with
+   attachments, so this is UI work only; then look at the profile editor, the
+   attachment tray and the reply/edit/delete tray on a device or emulator.
 4. Perform one real two-party call on a staging stack with LiveKit ports open,
    and record the result.
 5. Then, and only then, run the Beta acceptance journeys on the deployed Beta

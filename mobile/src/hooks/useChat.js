@@ -357,6 +357,48 @@ export function useChat(peer, currentUser, onIncoming) {
     }
   }, [socket, connected, peer?.id, peer?.kind, locked]);
 
+  // ── Attachments ───────────────────────────────────────
+  // The bytes take the route a recording already uses, and the row then names
+  // the file the server stored. The type is the server's answer rather than a
+  // guess from the picked mimetype: the scanner decides what a file really is,
+  // and the bubble the other side draws follows that field.
+  const sendAttachment = useCallback(async (asset, replyToId) => {
+    if (locked) {
+      return { ok: false, error: 'این گفتگو پیام‌های قدیمیِ رمزنگاری‌شده دارد؛ نوشتن در آن از این نسخه فعلاً ممکن نیست' };
+    }
+    if (!socket || !connected || !peer) {
+      return { ok: false, error: 'اتصال به سرور برقرار نیست؛ دوباره تلاش کن' };
+    }
+    if (!asset?.uri) return { ok: false, error: 'فایل پیدا نشد' };
+
+    const target = peer.kind === 'group'
+      ? { conversationId: peer.id }
+      : { toId: peer.id };
+
+    try {
+      const file = await uploadFile({
+        uri: asset.uri,
+        name: asset.name ?? 'attachment',
+        type: asset.mimeType ?? 'application/octet-stream',
+      });
+      const payload = {
+        ...target,
+        type: file.type,
+        fileUrl: file.url,
+        fileName: file.name,
+        fileSize: file.size,
+      };
+      // Sent only when quoting, exactly as a text message does.
+      if (replyToId) payload.replyToId = replyToId;
+      // A photo over a phone line is slower than a text message, so it keeps the
+      // ack ceiling the recording already needed.
+      await emitWithAck(socket, 'message:send', payload, 30000);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message ?? 'ارسال فایل ناموفق بود' };
+    }
+  }, [socket, connected, peer?.id, peer?.kind, locked]);
+
   // ── Edit and delete ───────────────────────────────────
   // Both go through the same kind of acknowledgement as sending: the answer is
   // the server's verdict, and the visible change arrives later as the broadcast
@@ -411,7 +453,7 @@ export function useChat(peer, currentUser, onIncoming) {
   return {
     messages, isTyping, typingName, connected, locked,
     historyState, historyError, retryHistory,
-    sendMessage, sendVoice, notifyTyping, toggleReaction,
+    sendMessage, sendVoice, sendAttachment, notifyTyping, toggleReaction,
     editMessage, deleteMessage,
   };
 }

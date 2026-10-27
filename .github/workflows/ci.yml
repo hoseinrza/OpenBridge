@@ -388,6 +388,7 @@ jobs:
             ${{ runner.temp }}/maestro-*.log
             ${{ runner.temp }}/maestro-debug
             ${{ runner.temp }}/emulator-failure.png
+            ${{ runner.temp }}/hierarchy.xml
             ${{ runner.temp }}/launch.png
             ${{ runner.temp }}/launch.log
             ${{ runner.temp }}/adb-install.log

@@ -73,6 +73,13 @@ fi
 adb logcat -d > "$RUNNER_TEMP/logcat.txt"
 if [ $status -ne 0 ]; then
   adb exec-out screencap -p > "$RUNNER_TEMP/emulator-failure.png" || true
+  # Maestro stops with the failing screen still up, so this dump is the device's
+  # own answer to "was that element missing, or only out of sight?".
+  adb shell uiautomator dump /sdcard/hierarchy.xml > /dev/null 2>&1
+  adb shell cat /sdcard/hierarchy.xml > "$RUNNER_TEMP/hierarchy.xml" 2>/dev/null
+  screen=$(adb shell wm size | tr -d '\r' | awk '{print $NF}')
+  ime=$(adb shell dumpsys input_method | tr -d '\r' | grep -oE 'mInputShown=(true|false)' | head -n 1)
+  annotate error Maestro "what the device showed: $(node .github/scripts/mobile-e2e-hierarchy.mjs "$RUNNER_TEMP/hierarchy.xml" "${screen:-unknown}" "${ime:-unknown}")"
   {
     echo '## Maestro failure'
     echo '### Attempt 1 (last 80 lines)'

@@ -172,15 +172,152 @@ export default function LoginScreen() {
   const previewName = [firstName.trim(), lastName.trim()].filter(Boolean).join(' ');
   const trackerIndex = steps.indexOf(step) + 1;
 
+  // Each step's primary action lives outside the ScrollView. On Android the
+  // keyboard shrinks that scrollable area, and a button at the tail of a tall
+  // card then falls below the fold — the emulator run found the code field and
+  // the test code above this button, but not the button itself. Pinned here, the
+  // resize that used to bury it lifts it instead.
+  function renderActions() {
+    if (step === 'phone') {
+      return (
+        <Pressable
+          style={[styles.submit, busy && styles.submitBusy]}
+          onPress={() => issueCode(false)}
+          disabled={busy}
+          testID="login-request-code"
+          accessibilityRole="button"
+          accessibilityLabel="دریافت کد تأیید"
+          accessibilityState={{ disabled: busy, busy }}
+        >
+          {busyAction === 'request' ? (
+            <ActivityIndicator color={colors.onAccent} />
+          ) : (
+            <>
+              <FontAwesome6 name="paper-plane" size={14} color={colors.onAccent} />
+              <Text style={styles.submitText}>دریافت کد تأیید</Text>
+            </>
+          )}
+        </Pressable>
+      );
+    }
+
+    if (step === 'code') {
+      return (
+        <>
+          <Pressable
+            style={[styles.submit, busy && styles.submitBusy]}
+            onPress={submitCode}
+            disabled={busy}
+            testID="login-submit"
+            accessibilityRole="button"
+            accessibilityLabel={isNewUser ? 'ادامه ثبت‌نام' : 'تأیید و ورود'}
+            accessibilityState={{ disabled: busy, busy }}
+          >
+            {busyAction === 'verify' ? (
+              <ActivityIndicator color={colors.onAccent} />
+            ) : (
+              <>
+                <FontAwesome6 name="arrow-left" size={14} color={colors.onAccent} />
+                <Text style={styles.submitText}>{isNewUser ? 'ادامه ثبت‌نام' : 'تأیید و ورود'}</Text>
+              </>
+            )}
+          </Pressable>
+
+          <Pressable
+            onPress={() => issueCode(true)}
+            disabled={busy || resendIn > 0}
+            accessibilityRole="button"
+            accessibilityLabel="ارسال دوباره کد تأیید"
+            accessibilityState={{ disabled: busy || resendIn > 0, busy: busyAction === 'resend' }}
+            style={styles.resendRow}
+          >
+            <Text style={[styles.linkText, (busy || resendIn > 0) && styles.linkTextDisabled]}>
+              {busyAction === 'resend'
+                ? 'در حال ارسال…'
+                : resendIn > 0
+                  ? `ارسال دوباره تا ${persianNumber(resendIn)} ثانیه`
+                  : 'ارسال دوباره کد'}
+            </Text>
+          </Pressable>
+        </>
+      );
+    }
+
+    if (step === 'username') {
+      return (
+        <>
+          <Pressable
+            style={[styles.submit, busy && styles.submitBusy]}
+            onPress={submitUsername}
+            disabled={busy}
+            testID="login-username-next"
+            accessibilityRole="button"
+            accessibilityLabel="ادامه به نام شما"
+            accessibilityState={{ disabled: busy }}
+          >
+            <FontAwesome6 name="arrow-left" size={14} color={colors.onAccent} />
+            <Text style={styles.submitText}>ادامه</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.switchBtn}
+            onPress={startOver}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel="انصراف و تغییر شماره موبایل"
+            accessibilityState={{ disabled: busy }}
+          >
+            <Text style={styles.linkText}>انصراف و تغییر شماره</Text>
+          </Pressable>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <Pressable
+          style={[styles.submit, busy && styles.submitBusy]}
+          onPress={submitName}
+          disabled={busy}
+          testID="login-signup"
+          accessibilityRole="button"
+          accessibilityLabel="ساخت حساب و ورود"
+          accessibilityState={{ disabled: busy, busy }}
+        >
+          {busyAction === 'signup' ? (
+            <ActivityIndicator color={colors.onAccent} />
+          ) : (
+            <>
+              <FontAwesome6 name="user-plus" size={14} color={colors.onAccent} />
+              <Text style={styles.submitText}>ساخت حساب و ورود</Text>
+            </>
+          )}
+        </Pressable>
+
+        <Pressable
+          style={styles.switchBtn}
+          onPress={() => setStep('username')}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel="بازگشت به نام کاربری"
+          accessibilityState={{ disabled: busy }}
+        >
+          <Text style={styles.linkText}>بازگشت به نام کاربری</Text>
+        </Pressable>
+      </>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={styles.page}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView
+        testID="login-scroll"
         contentContainerStyle={[
           styles.scroll,
-          { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom + spacing.xl },
+          { paddingTop: insets.top + spacing.xl, paddingBottom: spacing.xl },
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
@@ -247,25 +384,6 @@ export default function LoginScreen() {
                   <Text style={styles.error}>{error}</Text>
                 </View>
               )}
-
-              <Pressable
-                style={[styles.submit, busy && styles.submitBusy]}
-                onPress={() => issueCode(false)}
-                disabled={busy}
-                testID="login-request-code"
-                accessibilityRole="button"
-                accessibilityLabel="دریافت کد تأیید"
-                accessibilityState={{ disabled: busy, busy }}
-              >
-                {busyAction === 'request' ? (
-                  <ActivityIndicator color={colors.onAccent} />
-                ) : (
-                  <>
-                    <FontAwesome6 name="paper-plane" size={14} color={colors.onAccent} />
-                    <Text style={styles.submitText}>دریافت کد تأیید</Text>
-                  </>
-                )}
-              </Pressable>
             </>
           )}
 
@@ -329,42 +447,6 @@ export default function LoginScreen() {
                   <Text style={styles.error}>{error}</Text>
                 </View>
               )}
-
-              <Pressable
-                style={[styles.submit, busy && styles.submitBusy]}
-                onPress={submitCode}
-                disabled={busy}
-                testID="login-submit"
-                accessibilityRole="button"
-                accessibilityLabel={isNewUser ? 'ادامه ثبت‌نام' : 'تأیید و ورود'}
-                accessibilityState={{ disabled: busy, busy }}
-              >
-                {busyAction === 'verify' ? (
-                  <ActivityIndicator color={colors.onAccent} />
-                ) : (
-                  <>
-                    <FontAwesome6 name="arrow-left" size={14} color={colors.onAccent} />
-                    <Text style={styles.submitText}>{isNewUser ? 'ادامه ثبت‌نام' : 'تأیید و ورود'}</Text>
-                  </>
-                )}
-              </Pressable>
-
-              <Pressable
-                onPress={() => issueCode(true)}
-                disabled={busy || resendIn > 0}
-                accessibilityRole="button"
-                accessibilityLabel="ارسال دوباره کد تأیید"
-                accessibilityState={{ disabled: busy || resendIn > 0, busy: busyAction === 'resend' }}
-                style={styles.resendRow}
-              >
-                <Text style={[styles.linkText, (busy || resendIn > 0) && styles.linkTextDisabled]}>
-                  {busyAction === 'resend'
-                    ? 'در حال ارسال…'
-                    : resendIn > 0
-                      ? `ارسال دوباره تا ${persianNumber(resendIn)} ثانیه`
-                      : 'ارسال دوباره کد'}
-                </Text>
-              </Pressable>
             </>
           )}
 
@@ -397,29 +479,6 @@ export default function LoginScreen() {
                   <Text style={styles.error}>{error}</Text>
                 </View>
               )}
-
-              <Pressable
-                style={[styles.submit, busy && styles.submitBusy]}
-                onPress={submitUsername}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="ادامه به نام شما"
-                accessibilityState={{ disabled: busy }}
-              >
-                <FontAwesome6 name="arrow-left" size={14} color={colors.onAccent} />
-                <Text style={styles.submitText}>ادامه</Text>
-              </Pressable>
-
-              <Pressable
-                style={styles.switchBtn}
-                onPress={startOver}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="انصراف و تغییر شماره موبایل"
-                accessibilityState={{ disabled: busy }}
-              >
-                <Text style={styles.linkText}>انصراف و تغییر شماره</Text>
-              </Pressable>
             </>
           )}
 
@@ -481,35 +540,6 @@ export default function LoginScreen() {
                   <Text style={styles.error}>{error}</Text>
                 </View>
               )}
-
-              <Pressable
-                style={[styles.submit, busy && styles.submitBusy]}
-                onPress={submitName}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="ساخت حساب و ورود"
-                accessibilityState={{ disabled: busy, busy }}
-              >
-                {busyAction === 'signup' ? (
-                  <ActivityIndicator color={colors.onAccent} />
-                ) : (
-                  <>
-                    <FontAwesome6 name="user-plus" size={14} color={colors.onAccent} />
-                    <Text style={styles.submitText}>ساخت حساب و ورود</Text>
-                  </>
-                )}
-              </Pressable>
-
-              <Pressable
-                style={styles.switchBtn}
-                onPress={() => setStep('username')}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="بازگشت به نام کاربری"
-                accessibilityState={{ disabled: busy }}
-              >
-                <Text style={styles.linkText}>بازگشت به نام کاربری</Text>
-              </Pressable>
             </>
           )}
         </View>
@@ -520,6 +550,13 @@ export default function LoginScreen() {
             : 'اگر شماره را اشتباه وارد کردی، از «تغییر شماره» یا «انصراف» استفاده کن.'}
         </Text>
       </ScrollView>
+
+      <View
+        testID="login-actions"
+        style={[styles.actions, { paddingBottom: insets.bottom + spacing.md }]}
+      >
+        {renderActions()}
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -527,6 +564,14 @@ export default function LoginScreen() {
 function makeStyles(colors) {
   return StyleSheet.create({
     page: { flex: 1, backgroundColor: colors.bg },
+    actions: {
+      paddingHorizontal: spacing.xl,
+      paddingTop: spacing.md,
+      gap: spacing.xs,
+      // The card scrolls behind this row, so it needs the page colour to stay
+      // readable instead of letting rows show through under the buttons.
+      backgroundColor: colors.bg,
+    },
     scroll: {
       flexGrow: 1,
       justifyContent: 'center',

@@ -20,7 +20,8 @@
   Shift+F10 menu on the web, with a «ویرایش‌شده» marker on a rewritten bubble.
   A deleted message leaves the timeline entirely: its bubble collapses where it stood
   and nothing at all is drawn in its place, on the web and on the phone. «Delete for me»
-  hides a row for one account only. The phone has no such menu yet.
+  hides a row for one account only. On the phone the same actions sit on a long-press
+  tray — react, reply, edit, delete — with no copy entry.
 - 📎 Private file & image uploads behind signed, expiring URLs (optional ClamAV scan)
 - 🎙️ **Voice messages** on web and mobile — record, send with the length the
   device measured, and play from a rail. The recording travels as an attachment,
@@ -46,8 +47,11 @@
 - 🌗 Light and dark themes, RTL Persian UI, layouts checked down to 320 px
 - 🔄 Revocable login sessions with rotating refresh tokens
 - 📱 Expo React Native app: login, chat list, chat, contacts, new group, voice
-  messages, calls and profile editing — it does not send image or file
-  attachments yet, so a profile avatar stays web-set
+  messages, calls, profile editing and **photo/file attachments** — the composer
+  has a paperclip that opens either a gallery pick or a document pick, the bytes
+  go to the same signed upload endpoint the web uses, and the message row carries
+  the type the *server* reported. Picking a profile avatar is still a web-side
+  action, and forwarding a message has no mobile screen yet.
 
 ### What is deliberately not here
 
@@ -265,11 +269,20 @@ out the previous commit, rebuilds, and records the bad SHA in
 `.deploy-failed-sha` so the cron cannot crash-loop on it. Tune the wait with
 `HEALTH_DEADLINE` on very slow boxes.
 
-> Observed state (2026-10-25): every job is green except the Android Maestro
-> job (`2e · Mobile E2E`), which has failed on every recent `main` run; the
-> `CI gate` job therefore fails with it. Instrumentation for that step landed in
-> `beta/phase-1` and waits for a run to diagnose it — see
-> [docs/engineering/BETA_READINESS.md](docs/engineering/BETA_READINESS.md) §5.2.
+> Observed state (2026-10-27): every job is green except the Android Maestro
+> job (`2e · Mobile E2E`) and the `CI gate` job that needs it. That job has
+> changed shape twice: the app no longer dies on its first frame (a missing
+> `SafeAreaProvider` at the root), and since `c297ee9` the journey reaches the
+> code step on the emulator — which is also the first on-device proof that the
+> app reaches the API at all — and then fails to find one element, `login-submit`.
+> Its siblings were found, so the button was mounted and merely clipped: with the
+> keyboard open it sat below the fold of the shrunk scroll view. Every step's
+> primary action is now pinned outside that scroller, and a failing run annotates
+> the device's own hierarchy (testIDs, bounds, `mInputShown`) so the next cause,
+> if any, is named rather than inferred. Read `2c · Dependency audit`
+> with care: it is declared `continue-on-error`, so its green conclusion is not
+> evidence. See [docs/engineering/BETA_READINESS.md](docs/engineering/BETA_READINESS.md)
+> §3 and §5.2.
 > The Docker compose smoke stage passes. `Deploy` is `skipped` because
 > `vars.DEPLOY_ENABLED` is not `true`; it stays inert until the SSH secrets
 > exist. No production deployment has been performed, and the redeploy/rollback
